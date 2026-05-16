@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TS PML WASM Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #00ff00; }
+        .success { color: #00ff00; }
+        .error { color: #ff0000; }
+        .info { color: #00ffff; }
+    </style>
+</head>
+<body>
+    <h1>TS PML WASM Exposure Test</h1>
+    <div id="log"></div>
+
+    <script>
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = msg;
+            document.getElementById('log').appendChild(div);
+            console.log(msg);
+        }
+
+        log('🔧 Loading modified main.bundle.js with TS PML injection...');
+
+        // Listen for WASM ready event
+        window.addEventListener('__TS_PML_WASM_READY__', (event) => {
+            log('🎉 Received __TS_PML_WASM_READY__ event!', 'success');
+            log('   Detail keys: ' + Object.keys(event.detail).join(', '), 'info');
+
+            if (event.detail.memory) {
+                log('   ✓ Memory exposed: ' + (event.detail.memory.buffer.byteLength / 1024 / 1024).toFixed(2) + ' MB', 'success');
+            }
+        });
+
+        // Load the modified bundle
+        const script = document.createElement('script');
+        script.src = 'deobfuscated-main.bundle.js';
+        script.onload = () => {
+            log('✓ Bundle loaded successfully', 'success');
+
+            // Check if WASM was exposed
+            setTimeout(() => {
+                if (window.__TS_PML_WASM__) {
+                    log('✅ SUCCESS! window.__TS_PML_WASM__ is available!', 'success');
+                    log('   Instance: ' + (window.__TS_PML_WASM__.instance ? '✓' : '✗'), 'info');
+                    log('   Exports: ' + (window.__TS_PML_WASM__.exports ? '✓' : '✗'), 'info');
+                    log('   Memory: ' + (window.__TS_PML_WASM__.memory ? '✓' : '✗'), 'info');
+
+                    if (window.__TS_PML_WASM__.memory) {
+                        log('   Memory size: ' + (window.__TS_PML_WASM__.memory.buffer.byteLength / 1024 / 1024).toFixed(2) + ' MB', 'info');
+                    }
+                } else {
+                    log('❌ FAILED! window.__TS_PML_WASM__ not found', 'error');
+                }
+            }, 2000);
+        };
+        script.onerror = (e) => {
+            log('❌ Failed to load bundle: ' + e, 'error');
+        };
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>

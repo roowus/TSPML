@@ -1,0 +1,42 @@
+{
+  "name": "ts-pml",
+  "version": "0.0.1",
+  "description": "The Second Poly Mod Loader - A modern mod loader for PolyTrack with clean API and mixin support",
+  "main": "dist/tspml.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rollup -c",
+    "build:watch": "rollup -c -w",
+    "dev": "rollup -c -w",
+    "type-check": "tsc --noEmit",
+    "test:server": "node tests/server.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "polytrack",
+    "mod-loader",
+    "gaming",
+    "modding"
+  ],
+  "author": "TS PML Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^26.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.19.39",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "rollup": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "tslib": "^2.8.1"
+  }
+}
