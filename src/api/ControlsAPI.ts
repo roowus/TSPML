@@ -3,7 +3,7 @@
  * Allows mods to simulate key presses (UP, DOWN, LEFT, RIGHT, RESET)
  */
 
-import { TSPML } from '../core/TSPML';
+import { ICoreContext } from '../types';
 
 export interface ControlState {
   up: boolean;
@@ -20,7 +20,7 @@ export type ControlKey = keyof ControlState;
  * Works by intercepting worker.postMessage calls and modifying Message Type 6
  */
 export class ControlsAPI {
-  private pml: TSPML;
+  private context: ICoreContext;
   private currentControls: ControlState = {
     up: false,
     down: false,
@@ -31,8 +31,8 @@ export class ControlsAPI {
   private overrideEnabled: boolean = false;
   private eventListeners: Map<string, Set<Function>> = new Map();
 
-  constructor(pml: TSPML) {
-    this.pml = pml;
+  constructor(context: ICoreContext) {
+    this.context = context;
     this.initializeControlInjection();
   }
 
@@ -45,7 +45,7 @@ export class ControlsAPI {
       return;
     }
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log('[ControlsAPI] Initializing control injection...');
     }
 
@@ -99,7 +99,7 @@ export class ControlsAPI {
     this.overrideEnabled = true;
     Object.assign(this.currentControls, controls);
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log('[ControlsAPI] Controls set:', this.currentControls);
     }
 
@@ -139,7 +139,7 @@ export class ControlsAPI {
       reset: false
     };
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log('[ControlsAPI] Controls cleared');
     }
 
@@ -215,7 +215,7 @@ export class ControlsAPI {
     // This communicates with the worker.postMessage hook in wasm-preload.js
     // The hook checks __TS_PML_CONTROLS__ for overrides before sending messages
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log('[ControlsAPI] Sending control update:', this.currentControls);
     }
 

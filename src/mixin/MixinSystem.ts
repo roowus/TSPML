@@ -3,78 +3,18 @@
  * Provides "escape hatch" for advanced modding when API isn't enough
  */
 
-import { TSPML } from '../core/TSPML';
+import { ICoreContext, MixinType, MixinConfig, MixinResult } from '../types';
 
-export enum MixinType {
-  /** Insert code at the beginning of a function */
-  HEAD = 0,
-
-  /** Insert code at the end of a function */
-  TAIL = 1,
-
-  /** Replace entire function */
-  OVERRIDE = 2,
-
-  /** Insert code after a specific token */
-  INSERT = 3,
-
-  /** Remove code between two tokens (exclusive) */
-  REMOVEBETWEEN = 6,
-
-  /** Replace code between two tokens (exclusive) */
-  REPLACEBETWEEN = 5,
-
-  /** Remove a class */
-  CLASSREMOVE = 4,
-
-  /** Insert into a class */
-  CLASSINSERT = 8,
-
-  /** Replace a class */
-  CLASSREPLACE = 7
-}
-
-export interface MixinConfig {
-  /** Type of mixin to apply */
-  type: MixinType;
-
-  /** Target class (for class mixins) */
-  target?: string;
-
-  /** Target function (for function mixins) */
-  func?: string;
-
-  /** Token/identifier to search for */
-  token?: string;
-
-  /** Start token for range operations */
-  tokenStart?: string;
-
-  /** End token for range operations */
-  tokenEnd?: string;
-
-  /** Code to insert/replace */
-  func?: string;
-
-  /** Description for debugging */
-  description?: string;
-}
-
-export interface MixinResult {
-  success: boolean;
-  mixinId: string;
-  errors: string[];
-  warnings: string[];
-}
+export { MixinType } from '../types';
 
 export class MixinSystem {
-  private pml: TSPML;
+  private context: ICoreContext;
   private registeredMixins: Map<string, MixinConfig[]> = new Map();
   private appliedMixins: Set<string> = new Set();
   private mixinCounter: number = 0;
 
-  constructor(pml: TSPML) {
-    this.pml = pml;
+  constructor(context: ICoreContext) {
+    this.context = context;
   }
 
   /**
@@ -156,7 +96,7 @@ export class MixinSystem {
   public applyAllMixins(): MixinResult[] {
     const results: MixinResult[] = [];
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log(`[MixinSystem] Applying ${this.registeredMixins.size} mixin groups...`);
     }
 
@@ -171,13 +111,13 @@ export class MixinSystem {
 
         results.push(result);
 
-        if (this.pml.debugMode && !result.success) {
+        if (this.context.debugMode && !result.success) {
           console.error(`[MixinSystem] Failed to apply mixin ${mixin.mixinId}:`, result.errors);
         }
       }
     }
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       const successCount = results.filter(r => r.success).length;
       console.log(`[MixinSystem] Applied ${successCount}/${results.length} mixins successfully`);
     }
@@ -214,7 +154,7 @@ export class MixinSystem {
       // 2. Code transformation
       // 3. Injection/replacement logic
 
-      if (this.pml.debugMode) {
+      if (this.context.debugMode) {
         console.log(`[MixinSystem] Applying mixin: ${mixin.description}`);
       }
 
@@ -251,7 +191,7 @@ export class MixinSystem {
         if (!config.token) {
           errors.push('INSERT mixins require a token');
         }
-        if (!config.func) {
+        if (!config.code) {
           errors.push('INSERT mixins require code to insert');
         }
         break;
@@ -261,7 +201,7 @@ export class MixinSystem {
         if (!config.tokenStart || !config.tokenEnd) {
           errors.push('REPLACEBETWEEN and REMOVEBETWEEN mixins require tokenStart and tokenEnd');
         }
-        if (config.type === MixinType.REPLACEBETWEEN && !config.func) {
+        if (config.type === MixinType.REPLACEBETWEEN && !config.code) {
           errors.push('REPLACEBETWEEN mixins require replacement code');
         }
         break;
@@ -271,10 +211,10 @@ export class MixinSystem {
     }
 
     // Validate code syntax (basic check)
-    if (config.func) {
+    if (config.code) {
       try {
         // Try to parse as function (syntax check)
-        new Function(config.func);
+        new Function(config.code);
       } catch (error) {
         errors.push(`Invalid code syntax: ${error}`);
       }
@@ -310,7 +250,7 @@ export class MixinSystem {
         mixins.splice(index, 1);
         this.appliedMixins.delete(mixinId);
 
-        if (this.pml.debugMode) {
+        if (this.context.debugMode) {
           console.log(`[MixinSystem] Removed mixin: ${mixinId}`);
         }
 
@@ -327,7 +267,7 @@ export class MixinSystem {
     this.registeredMixins.clear();
     this.appliedMixins.clear();
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log('[MixinSystem] Cleared all mixins');
     }
   }
@@ -362,7 +302,7 @@ export class MixinSystem {
    * Log mixin registration
    */
   private logRegistration(mixinId: string, config: MixinConfig): void {
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log(`[MixinSystem] Registered mixin: ${mixinId}`);
       console.log(`  Type: ${MixinType[config.type]}`);
       console.log(`  Description: ${config.description || 'None'}`);
@@ -384,7 +324,7 @@ export class MixinSystem {
         target: m.target,
         description: m.description,
         // Don't export full code (too large)
-        hasCode: !!m.func,
+        hasCode: !!m.code,
         hasToken: !!m.token,
         hasTokenStart: !!m.tokenStart,
         hasTokenEnd: !!m.tokenEnd

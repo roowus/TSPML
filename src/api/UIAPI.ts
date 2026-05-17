@@ -3,13 +3,13 @@
  * Will be implemented in Task #10
  */
 
-import { TSPML } from '../core/TSPML';
+import { ICoreContext } from '../types';
 
 export class UIAPI {
-  private pml: TSPML;
+  private context: ICoreContext;
 
-  constructor(pml: TSPML) {
-    this.pml = pml;
+  constructor(context: ICoreContext) {
+    this.context = context;
   }
 
   public showNotification(message: string): void {

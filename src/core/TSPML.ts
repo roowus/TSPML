@@ -1,8 +1,10 @@
 /**
  * TSPML - Main loader class
  * Coordinates all subsystems
+ * Implements ICoreContext to break circular dependencies
  */
 
+import { ICoreContext, TSPMLConfig } from '../types';
 import { DeobfuscationLayer } from '../deobfuscation/DeobfuscationLayer';
 import { MixinSystem } from '../mixin/MixinSystem';
 import { PlayerAPI } from '../api/PlayerAPI';
@@ -10,25 +12,17 @@ import { ControlsAPI } from '../api/ControlsAPI';
 import { UIAPI } from '../api/UIAPI';
 import { PhysicsAPI } from '../api/PhysicsAPI';
 
-export interface TSPMLConfig {
-  polytrackVersion: string;
-  debugMode?: boolean;
-  enableMixins?: boolean;
-  enableAPI?: boolean;
-}
-
-export class TSPML {
+export class TSPML implements ICoreContext {
   private static instance: TSPML;
 
   public readonly version: string = '0.0.1';
   public readonly polytrackVersion: string;
-  public readonly debugMode: boolean;
 
-  // Core subsystems
+  // Core subsystems (these don't depend on TSPML directly anymore)
   public deobfuscation: DeobfuscationLayer;
   public mixins: MixinSystem;
 
-  // API layers
+  // API layers (these don't depend on TSPML directly anymore)
   public player: PlayerAPI;
   public controls: ControlsAPI;
   public ui: UIAPI;
@@ -37,17 +31,23 @@ export class TSPML {
   // Mod management
   private mods: Map<string, any> = new Map();
 
+  // ICoreContext implementation
+  public readonly debugMode: boolean;
+
   private constructor(config: TSPMLConfig) {
     this.polytrackVersion = config.polytrackVersion;
     this.debugMode = config.debugMode ?? false;
 
-    // Initialize subsystems
+    // Initialize subsystems with 'this' as ICoreContext
+    // This breaks circular dependencies - subsystems only know about ICoreContext interface
     this.deobfuscation = new DeobfuscationLayer(this);
     this.mixins = new MixinSystem(this);
 
-    // Initialize APIs
-    this.player = new PlayerAPI(this);
+    // Initialize controls first (PlayerAPI depends on it)
     this.controls = new ControlsAPI(this);
+
+    // Initialize player with controls dependency
+    this.player = new PlayerAPI(this, this.controls);
     this.ui = new UIAPI(this);
     this.physics = new PhysicsAPI(this);
 
@@ -69,6 +69,22 @@ export class TSPML {
     }
     return TSPML.instance;
   }
+
+  // ==========================================================================
+  // ICORECONTEXT IMPLEMENTATION
+  // ==========================================================================
+
+  /**
+   * Get an obfuscated value by its mapped name
+   * Part of ICoreContext interface
+   */
+  public getFromPolyTrack(path: string): any {
+    return this.deobfuscation.getValue(path);
+  }
+
+  // ==========================================================================
+  // MOD MANAGEMENT
+  // ==========================================================================
 
   /**
    * Register a mod
@@ -93,13 +109,6 @@ export class TSPML {
    */
   public getAllMods(): any[] {
     return Array.from(this.mods.values());
-  }
-
-  /**
-   * Get an obfuscated value by its mapped name
-   */
-  public getFromPolyTrack(path: string): any {
-    return this.deobfuscation.getValue(path);
   }
 
   /**
