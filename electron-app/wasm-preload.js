@@ -14,7 +14,16 @@ if (fs.existsSync(physicsWasmPath)) {
   cachedWasmBuffer = fs.readFileSync(physicsWasmPath);
   console.log('=== PRELOAD: Cached WASM found ===', cachedWasmBuffer.length, 'bytes');
 
-  if (cachedWasmBuffer.length > 1000000) { // > 1MB likely the real one
+  // Validate WASM magic number
+  const hasValidMagic = cachedWasmBuffer.length >= 4 &&
+    cachedWasmBuffer[0] === 0x00 && cachedWasmBuffer[1] === 0x61 &&
+    cachedWasmBuffer[2] === 0x73 && cachedWasmBuffer[3] === 0x6d;
+
+  if (!hasValidMagic) {
+    console.warn('=== PRELOAD: Cached WASM has invalid magic number, deleting ===');
+    fs.unlinkSync(physicsWasmPath);
+    cachedWasmBuffer = null;
+  } else if (cachedWasmBuffer.length > 1000000) { // > 1MB likely the real one
     const wasmBase64 = cachedWasmBuffer.toString('base64');
     physicsWasmDataUrl = 'data:application/wasm;base64,' + wasmBase64;
     console.log('=== PRELOAD: Using cached WASM data URL ===', physicsWasmDataUrl.length);
@@ -23,6 +32,29 @@ if (fs.existsSync(physicsWasmPath)) {
   }
 } else {
   console.log('=== PRELOAD: No cached WASM, will capture from server ===');
+}
+
+// Clean up any invalid WASM files in lib directory (from previous runs)
+try {
+  const libDir = path.join(__dirname, 'lib');
+  if (fs.existsSync(libDir)) {
+    const files = fs.readdirSync(libDir);
+    for (const file of files) {
+      if (file.endsWith('.wasm')) {
+        const filePath = path.join(libDir, file);
+        const buffer = fs.readFileSync(filePath);
+        const hasValidMagic = buffer.length >= 4 &&
+          buffer[0] === 0x00 && buffer[1] === 0x61 &&
+          buffer[2] === 0x73 && buffer[3] === 0x6d;
+        if (!hasValidMagic || buffer.length < 1000000) {
+          console.log('=== PRELOAD: Cleaning up invalid WASM file:', file, '(' + buffer.length + ' bytes) ===');
+          fs.unlinkSync(filePath);
+        }
+      }
+    }
+  }
+} catch (err) {
+  // Ignore cleanup errors
 }
 
 // Hook Worker constructor
@@ -581,9 +613,32 @@ window.Worker = function(scriptURL, options) {
                   // Clone the response so we can read it without affecting the original
                   var clonedResponse = response.clone();
 
-                  // Read and save the WASM
+                  // Read and save the WASM, but only if it's valid
                   clonedResponse.arrayBuffer().then(function(buffer) {
                     console.log('Worker: Captured WASM from server:', buffer.byteLength, 'bytes');
+
+                    // Validate WASM: Check magic number (00 61 73 6d = \0asm)
+                    var bytes = new Uint8Array(buffer);
+                    var isValidWasm = buffer.byteLength >= 4 &&
+                      bytes[0] === 0x00 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d;
+
+                    if (!isValidWasm) {
+                      console.error('Worker: Response is NOT valid WASM! Magic bytes:', bytes[0].toString(16), bytes[1].toString(16), bytes[2].toString(16), bytes[3].toString(16));
+                      // Show first 100 chars to help debug
+                      var textPreview = '';
+                      for (var i = 0; i < Math.min(100, buffer.byteLength); i++) {
+                        textPreview += String.fromCharCode(bytes[i]);
+                      }
+                      console.error('Worker: Response text preview:', textPreview);
+                      return;  // Don't save invalid WASM
+                    }
+
+                    if (buffer.byteLength < 1000000) {
+                      console.warn('Worker: WASM is too small to be the physics engine (' + buffer.byteLength + ' bytes), not saving');
+                      return;
+                    }
+
+                    console.log('Worker: Valid WASM confirmed! Saving to disk...');
                     self.postMessage({
                       type: '__TS_PML_SAVE_WASM__',
                       wasmBuffer: new Uint8Array(buffer)
@@ -635,6 +690,16 @@ window.Worker = function(scriptURL, options) {
                 if (wasmUrl && xhr.status === 200) {
                   var buffer = xhr.response;
                   if (buffer && buffer.byteLength > 1000000) {
+                    // Validate WASM magic number before saving
+                    var bytes = new Uint8Array(buffer);
+                    var isValidWasm = buffer.byteLength >= 4 &&
+                      bytes[0] === 0x00 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d;
+
+                    if (!isValidWasm) {
+                      console.error('Worker: XHR response is NOT valid WASM! Magic bytes:', bytes[0].toString(16), bytes[1].toString(16), bytes[2].toString(16), bytes[3].toString(16));
+                      return;
+                    }
+
                     console.log('Worker: XHR captured physics WASM:', buffer.byteLength, 'bytes');
                     self.postMessage({
                       type: '__TS_PML_SAVE_WASM__',
