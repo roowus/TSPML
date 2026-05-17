@@ -3,26 +3,10 @@
  * This is the core of TS PML's API system
  */
 
-import { TSPML } from '../core/TSPML';
-
-interface NameMapping {
-  readableName: string;
-  obfuscatedPath: string;
-  category: 'player' | 'ui' | 'physics' | 'world' | 'audio' | 'unknown';
-  description: string;
-  valueType: 'class' | 'function' | 'variable' | 'enum';
-  webpackModule?: number;  // If this comes from a specific webpack module
-}
-
-interface ClassMapping {
-  className: string;
-  obfuscatedName: string;
-  methods: Map<string, string>;  // methodName → obfuscatedName
-  properties: Map<string, string>;  // propertyName → obfuscatedName
-}
+import { ICoreContext, NameMapping, ClassMapping } from '../types';
 
 export class DeobfuscationLayer {
-  private pml: TSPML;
+  private context: ICoreContext;
 
   // Name mappings (readable → obfuscated)
   private mappings: Map<string, NameMapping> = new Map();
@@ -33,8 +17,8 @@ export class DeobfuscationLayer {
   // Reverse mappings (obfuscated → readable) for quick lookup
   private reverseMappings: Map<string, string> = new Map();
 
-  constructor(pml: TSPML) {
-    this.pml = pml;
+  constructor(context: ICoreContext) {
+    this.context = context;
     this.initializeDefaultMappings();
   }
 
@@ -86,7 +70,7 @@ export class DeobfuscationLayer {
     this.mappings.set(mapping.readableName, mapping);
     this.reverseMappings.set(mapping.obfuscatedPath, mapping.readableName);
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log(`[DeobfuscationLayer] Added mapping: ${mapping.readableName} → ${mapping.obfuscatedPath}`);
     }
   }
@@ -98,7 +82,7 @@ export class DeobfuscationLayer {
   public getValue(readableName: string): any {
     const mapping = this.mappings.get(readableName);
     if (!mapping) {
-      if (this.pml.debugMode) {
+      if (this.context.debugMode) {
         console.warn(`[DeobfuscationLayer] No mapping found for: ${readableName}`);
       }
       return undefined;
@@ -139,13 +123,17 @@ export class DeobfuscationLayer {
       }
     }
 
-    // Fallback to eval (not ideal, but matches current PML approach)
-    // TODO: Make this safer
+    // Use context's getFromPolyTrack method if available
     try {
-      return eval(path);
-    } catch (error) {
-      console.error(`[DeobfuscationLayer] eval failed for path: ${path}`, error);
-      return undefined;
+      return this.context.getFromPolyTrack(path);
+    } catch {
+      // Fallback to eval (not ideal, but matches current PML approach)
+      try {
+        return eval(path);
+      } catch (error) {
+        console.error(`[DeobfuscationLayer] eval failed for path: ${path}`, error);
+        return undefined;
+      }
     }
   }
 
@@ -155,7 +143,7 @@ export class DeobfuscationLayer {
   public addClassMapping(mapping: ClassMapping): void {
     this.classMappings.set(mapping.className, mapping);
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log(`[DeobfuscationLayer] Added class mapping: ${mapping.className} → ${mapping.obfuscatedName}`);
     }
   }
@@ -194,7 +182,7 @@ export class DeobfuscationLayer {
       }
     }
 
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log(`[DeobfuscationLayer] Imported ${data.mappings?.length || 0} mappings`);
     }
   }

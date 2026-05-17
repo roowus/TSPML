@@ -3,54 +3,29 @@
  * Provides easy access to player state without dealing with obfuscated code
  */
 
-import { TSPML } from '../core/TSPML';
+import { ICoreContext, MixinType, CarState, PlayerControls } from '../types';
 import { Vector3 } from './Vector3';
-import { MixinType } from '../mixin/MixinSystem';
-
-export interface CarState {
-  frames: number;
-  speedKmh: number;
-  hasStarted: boolean;
-  finishFrames: number | null;
-  nextCheckpointIndex: number;
-  hasCheckpointToRespawnAt: boolean;
-  position: { x: number; y: number; z: number };
-  quaternion: { x: number; y: number; z: number; w: number };
-  collisionImpulses: any[];
-  wheelContact: [boolean, boolean, boolean, boolean];
-  wheelSuspensionLength: [number, number, number, number];
-  wheelSuspensionVelocity: [number, number, number, number];
-  wheelDeltaRotation: [number, number, number, number];
-  wheelSkidInfo: [number, number, number, number];
-  steering: number;
-  brakeLightEnabled: boolean;
-  controls: {
-    up: boolean;
-    right: boolean;
-    down: boolean;
-    left: boolean;
-    reset: boolean;
-  };
-}
-
-export interface PlayerControls {
-  up?: boolean;
-  down?: boolean;
-  left?: boolean;
-  right?: boolean;
-  reset?: boolean;
-}
+import type { ControlsAPI } from './ControlsAPI';
 
 export class PlayerAPI {
-  private pml: TSPML;
+  private context: ICoreContext;
+  private controlsApi?: ControlsAPI;
   private playerStateAccessPattern: string = '';
   private eventListeners: Map<string, Set<Function>> = new Map();
   private currentState: CarState | null = null;
   private updateInterval: number | null = null;
 
-  constructor(pml: TSPML) {
-    this.pml = pml;
+  constructor(context: ICoreContext, controlsApi?: ControlsAPI) {
+    this.context = context;
+    this.controlsApi = controlsApi;
     this.initializePlayerAccess();
+  }
+
+  /**
+   * Set the controls API reference (for dependency injection)
+   */
+  public setControlsAPI(controlsApi: ControlsAPI): void {
+    this.controlsApi = controlsApi;
   }
 
   /**
@@ -58,16 +33,16 @@ export class PlayerAPI {
    * This intercepts player state updates to track current state
    */
   private initializePlayerAccess(): void {
-    if (this.pml.debugMode) {
+    if (this.context.debugMode) {
       console.log('[PlayerAPI] Initializing player state access...');
     }
 
     // Register mixin to intercept player state updates
     // This captures carState when it's being updated/serialized
-    this.pml.mixins.registerGlobalMixin({
+    this.context.mixins.registerGlobalMixin({
       type: MixinType.INSERT,
       token: 'speedKmh:',
-      func: `
+      code: `
         // Capture player state when we see this pattern
         if (typeof window !== 'undefined' && !window.__tsPMLPlayerState__) {
           window.__tsPMLPlayerState__ = (function() {
@@ -133,13 +108,13 @@ export class PlayerAPI {
     // Fallback: Try to access via mixin/eval
     try {
       // This is a temporary approach using PML-style access
-      const result = this.pml.getFromPolyTrack(
+      const result = this.context.getFromPolyTrack(
         // TODO: Find the exact path to player's speedKmh
         'speedKmh'
       );
       return result || 0;
     } catch (error) {
-      if (this.pml.debugMode) {
+      if (this.context.debugMode) {
         console.warn('[PlayerAPI] Could not get speed:', error);
       }
       return 0;
@@ -163,7 +138,7 @@ export class PlayerAPI {
         writes.speed = value;
         writes.oneShot = true;  // Apply once, then clear
 
-        if (this.pml.debugMode) {
+        if (this.context.debugMode) {
           console.log('[PlayerAPI] Display speed write queued:', value);
         }
       }
@@ -191,7 +166,7 @@ export class PlayerAPI {
 
     // Fallback
     try {
-      const pos = this.pml.getFromPolyTrack('position');
+      const pos = this.context.getFromPolyTrack('position');
       if (pos && typeof pos === 'object') {
         return new Vector3(pos.x || 0, pos.y || 0, pos.z || 0);
       }
@@ -221,7 +196,7 @@ export class PlayerAPI {
         writes.position = { x: position.x, y: position.y, z: position.z };
         writes.oneShot = true;  // Apply once, then clear
 
-        if (this.pml.debugMode) {
+        if (this.context.debugMode) {
           console.log('[PlayerAPI] Display position write queued:', position);
         }
       }
@@ -264,7 +239,7 @@ export class PlayerAPI {
         writes.rotation = { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w };
         writes.oneShot = true;  // Apply once, then clear
 
-        if (this.pml.debugMode) {
+        if (this.context.debugMode) {
           console.log('[PlayerAPI] Display rotation write queued:', rotation);
         }
       }
@@ -309,7 +284,7 @@ export class PlayerAPI {
       this.currentState.speedKmh = value;
     }
     this.queuePhysicsWrite({ speed: value });
-    if (this.pml.debugMode) console.log('[PlayerAPI] Speed physics write queued:', value);
+    if (this.context.debugMode) console.log('[PlayerAPI] Speed physics write queued:', value);
   }
 
   /**
@@ -324,7 +299,7 @@ export class PlayerAPI {
       this.currentState.position.z = position.z;
     }
     this.queuePhysicsWrite({ position: { x: position.x, y: position.y, z: position.z } });
-    if (this.pml.debugMode) console.log('[PlayerAPI] Position physics write queued:', position);
+    if (this.context.debugMode) console.log('[PlayerAPI] Position physics write queued:', position);
   }
 
   /**
@@ -336,7 +311,7 @@ export class PlayerAPI {
       this.currentState.quaternion = { ...rotation };
     }
     this.queuePhysicsWrite({ rotation });
-    if (this.pml.debugMode) console.log('[PlayerAPI] Rotation physics write queued:', rotation);
+    if (this.context.debugMode) console.log('[PlayerAPI] Rotation physics write queued:', rotation);
   }
 
   /**
@@ -386,11 +361,11 @@ export class PlayerAPI {
       this.currentState.steering = Math.max(-1, Math.min(1, value));
     }
 
-    this.pml.mixins.registerGlobalMixin({
+    this.context.mixins.registerGlobalMixin({
       type: MixinType.REPLACEBETWEEN,
       tokenStart: 'steering: ',
       tokenEnd: ',',
-      func: `steering: ${value},`,
+      code: `steering: ${value},`,
       description: `Set steering to ${value}`
     });
   }
@@ -420,8 +395,10 @@ export class PlayerAPI {
       Object.assign(this.currentState.controls, controls);
     }
 
-    // Use ControlsAPI for actual control injection
-    this.pml.controls.set(controls);
+    // Use ControlsAPI for actual control injection (dependency injection)
+    if (this.controlsApi) {
+      this.controlsApi.set(controls);
+    }
 
     this.emit('controlsChanged', controls);
   }

@@ -4,6 +4,7 @@
  */
 
 import { Vector3 } from './Vector3';
+import type { UIButton, UIMenu, UIInput } from '../types/api-types';
 
 // ============================================================================
 // PLAYER API
