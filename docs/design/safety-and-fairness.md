@@ -1,0 +1,42 @@
+# Safety & fairness
+
+> **Locked decision: warn-only.** TSPML labels physics/multiplayer mods and discloses the risks; it does **not** hard-block uploads. Two things this doc is deliberately honest about: (1) the JS shared realm cannot truly *enforce* a sandbox, and (2) client-side fairness gates are best-effort against honest users, not against adversaries.
+
+## Capability model — consented-advisory (honest)
+
+Mods declare `capabilities` in `mod.json` (e.g. `["dom","storage","network","physics","multiplayer"]`). The loader surfaces these as a **load-time consent prompt** and hands the mod an `api` object scoped to declared capabilities. Raw `window`/`eval` access requires an explicit **`unsafe`** capability + user consent.
+
+**Honest scope (review correction):** in a same-realm ES-module page, a mod can always reach `globalThis.window.fetch(...)` or `globalThis.eval(...)` regardless of the `api` object handed to it — JS has no ambient-authority isolation without **SES lockdown + a membrane** (or a separate realm). So TSPML's capability declarations are **consented-advisory**, not "enforced." If true isolation becomes a requirement, the path is SES lockdown + a membrane proxy, with the mixin escape-hatch gated behind explicit `unsafe` consent. We will not ship an "enforced" claim the platform cannot back.
+
+## Fairness — warn-only classification
+
+Every mod is classified:
+- **Cosmetic/local** (skins, UI, audio, local-only visuals) — always fine.
+- **Physics-affecting** (touches the sim worker / car state) — flagged.
+- **Multiplayer-affecting** — flagged + capability-gated.
+
+Per the locked **warn-only** decision, TSPML **labels** these and **discloses risk**; it does **not** disable leaderboard uploads. Users may upload at their own risk.
+
+**Ban-risk disclosure (must be prominent):** PolyTrack's leaderboards validate deterministic input replays, and a server-side anti-cheat is "in development." A physics/speed mod can trivially break replay validity, and once anti-cheat ships, uploading such runs risks **account bans from leaderboards.** Docs, the mod panel, and the publish flow state this plainly. (If the project later tightens to strict quarantine, the classification machinery already exists — only the gating policy changes.)
+
+## Determinism lint (warnings)
+
+Physics-context mods (worker environment, or subscribing to `physics.preStep/postStep`) are **statically linted** for non-deterministic APIs (`Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `fetch`). Under warn-only these are **warnings** (not blocks), surfaced to the modder at authoring time and flagged on the mod's profile. A **seeded deterministic RNG** primitive is provided for mods that need randomness without breaking replays.
+
+## Why warn-only is honest about its limits
+
+Client-side quarantine on an untrusted client cannot stop a determined cheater from hiding physics tampering and uploading anyway. Warn-only is a ** UX + disclosure** stance, not an anti-cheat. The real defense (server-side replay validation) is outside TSPML's control. Roadmap option: offer the registry/signing infrastructure as a **signal the server can use** (mod content-hash allowlisting) rather than a client gate — a partnership posture, not an arms race.
+
+## Legal / ToS posture
+
+- **Ship only** loader + mappings + mod code; **never** the game bundle.
+- The portal fetches the user's **live** game copy via the proxy; the **proxy forwards Origin/Referer** to the official desktop origin for leaderboard/multiplayer endpoints (the same trick PML's Electron uses). This is an acknowledged **ToS gray area** — origin-forwarding + running a modified copy can violate "no derivative works / no client modification" clauses even with zero redistribution.
+- **Do not rely** on the Mojang-tolerates-Yarn analogy as legal cover; Kodub has stated no position. The mappings file is reverse-engineered information about copyrighted code (arguably a derivative work), and the seed (`cwcinc`) is a no-license third-party dump — so the canonical map must be **regenerated from the live bundle**, not copied from the seed.
+- **Takedown-compliance plan:** on any Kodub request, pull the registry entry, withdraw the affected map, and cooperate. Position TSPML as a fan tool that **protects** leaderboards (warn-only labels, no Origin spoof *in the loader* — origin handling is confined to the proxy path and documented).
+- **First map provenance:** produce it from an auto-pipeline run against the live bundle (M1+), not from the no-license `cwcinc` dump.
+
+## Open posture items (to resolve before a public launch)
+
+- Seek/confirm Kodub's position on mapping redistribution + client modification (even implicitly, via the modding Discord).
+- Decide whether to offer the registry as a server-side allowlist signal.
+- Keep the warn-only policy under review as anti-cheat matures.

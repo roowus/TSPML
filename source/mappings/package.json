@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/mappings",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Symbol-map resolver and the current versioned mappings file mapping stable names to concrete minified locators.",
+  "license": "MIT"
+}

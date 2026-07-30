@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/portal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vercel-hosted Next.js web app (flagship delivery surface) plus /api/proxy route and service worker that load and transform the real game.",
+  "license": "MIT"
+}

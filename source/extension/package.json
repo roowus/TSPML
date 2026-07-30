@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MV3 browser extension (secondary delivery path) using declarativeNetRequest to rewrite game scripts at the network layer, immune to page CSP.",
+  "license": "MIT"
+}

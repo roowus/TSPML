@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/mappings-pipeline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "webcrack/wakaru plus structural-diff pipeline that regenerates a candidate symbol map per PolyTrack release, and the 0.6.0-vs-0.6.2 drift experiment (M1 go/no-go spike).",
+  "license": "MIT"
+}

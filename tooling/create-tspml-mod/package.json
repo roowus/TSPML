@@ -1,0 +1,8 @@
+{
+  "name": "create-tspml-mod",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scaffold CLI (npx create-tspml-mod) generating a new mod project with manifests, tsconfig, and recipe templates.",
+  "license": "MIT"
+}
