@@ -1,59 +1,57 @@
-# TS PML - The Second Poly Mod Loader
+# TSPML — The Second Poly Mod Loader
 
-A modern, powerful mod loader for PolyTrack 0.6.0+ with both clean API and mixin support.
+A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game — inspired by [Fabric](https://fabricmc.net/) for Minecraft. An incumbent loader ([PolyModLoader](https://polymodloader.com/)) already exists; TSPML aims to be what Fabric is to Minecraft modding.
 
-## Vision
+> **Status: M0 (docs-first foundation).** This repository currently contains the project structure and full documentation. Runnable code begins at **M1**. See [`docs/project/roadmap.md`](./docs/project/roadmap.md).
 
-TS PML aims to make PolyTrack modding accessible and maintainable by providing:
+## Why TSPML?
 
-- **Clean, Fabric-style API** - Easy to use named functions like `player.setSpeed(2.0)`
-- **Mixin Escape Hatch** - Advanced users can still use mixins for edge cases
-- **Deobfuscated Code** - No more hunting for obfuscated tokens
-- **Update Resilient** - APIs survive game updates
-- **Full TypeScript Support** - Autocomplete and type safety
-- **Auto-Updating Mod Manager** - Built-in mod library and updates
+PolyModLoader (PML) is brittle: it redistributes the whole copyrighted game, hooks via `Function.toString()` + literal-substring token matching + `eval()`, hardcodes webpack-mangled identifiers, has no sandboxing, no tests, and breaks on every PolyTrack release. TSPML copies **Fabric's layering** instead — concentrating all version-coupling in two maintained artifacts (a **mappings file** + an **API bridge**) so ordinary mods target stable names and survive game updates. Full breakdown: [`docs/research/pml-shortcomings-and-tspml-improvements.md`](./docs/research/pml-shortcomings-and-tspml-improvements.md).
 
-## Project Status
-
-🚧 **In Development** - This is the initial project setup phase.
-
-## Architecture
+## How it works (in one diagram)
 
 ```
-Mod Developer Code
-       │
-   ┌───┴───┐
-   │       │
-API Layer  Mixin System (escape hatch)
-   │       │
-   └───┬───┘
-       │
-Deobfuscation Layer (maps names → obfuscated)
-       │
-PolyTrack Game Code (Webpack + WASM)
+MODS ──▶ stable API (events + registries) / mixin escape hatch
+            │  target STABLE names only
+       Loader core (clean TS) + dependency resolution
+            │  resolves stable → concrete via:
+       API bridge (version-coupled) + MAPPINGS FILE (per build)
+            │  AST transform + runtime patch
+       PolyTrack (fetched live, never redistributed)
 ```
 
-## Key Features
+See [`docs/design/architecture.md`](./docs/design/architecture.md).
 
-- ✅ Both API and mixin support
-- ✅ PolyTrack 0.6.0 support
-- ✅ Easy version migration
-- ✅ TypeScript definitions
-- ✅ Mod manager UI
-- ✅ Auto-update system
+## Key decisions
 
-## Roadmap
+- **Delivery:** a Vercel-hosted portal website (like `web.polymodloader.com`) that plays the modded game via a CORS proxy; browser extension + userscript as resilient fallbacks.
+- **Fairness:** warn-only (label physics/multiplayer mods; disclose ban risk).
+- **Language:** TypeScript + a published `@tspml/api` types package.
+- **PML compat:** narrow importer (skins/audio/blocks) — no mixin emulator.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed progress.
+See [`docs/project/decision-log.md`](./docs/project/decision-log.md).
 
-## Contributing
+## Repository layout
 
-This project is just starting. Stay tuned for contribution guidelines!
+```
+docs/        research, design, API specs, project, contributing (docs-first)
+source/      loader, api-bridge, transform, mappings, portal, extension, shared
+tooling/     mappings-pipeline, create-tspml-mod, cli
+environments/  dev-harness, demo-mods
+packages/    @tspml/api types
+scripts/  tests/
+```
+
+## Documentation
+
+➡️ **Start at [`docs/README.md`](./docs/README.md).**
+
+## ⚠️ Disclaimers
+
+- **Not affiliated with, endorsed by, or associated with Kodub or PolyTrack.** PolyTrack is © its developer.
+- TSPML is a fan-made modding tool. It fetches the user's own live game copy and ships **only** loader + mappings metadata — it never redistributes the game. Running a modified client and forwarding origin headers are **Terms-of-Service gray areas**; TSPML keeps a takedown-compliance posture. See [`docs/design/safety-and-fairness.md`](./docs/design/safety-and-fairness.md).
+- **Anti-cheat is server-side and still maturing.** Physics/speed mods can break deterministic-replay leaderboards; using them risks leaderboard bans. TSPML labels these mods but (by design) does not hard-block uploads.
 
 ## License
 
-MIT
-
----
-
-**Note**: This is a complete rewrite of PolyModLoader, built from the ground up with better architectural decisions.
+MIT (our code). The PolyTrack game and its assets are **not** ours and are not covered by this license.

@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/api-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Loader-owned bridge wiring the stable event and registry API surface to real PolyTrack internals. The only layer besides mappings that is version-coupled to a game build.",
+  "license": "MIT"
+}

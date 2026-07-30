@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The tspml CLI: publish to the registry, and mappings regen/diff.",
+  "license": "MIT"
+}

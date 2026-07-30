@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Published TypeScript type definitions for the entire stable game surface, giving modders autocomplete against stable names.",
+  "license": "MIT"
+}

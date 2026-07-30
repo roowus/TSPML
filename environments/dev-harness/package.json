@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/dev-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vite dev server loading the real game plus your mod with scoped hot reload.",
+  "license": "MIT"
+}

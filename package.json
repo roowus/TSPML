@@ -1,42 +1,24 @@
 {
-  "name": "ts-pml",
-  "version": "0.0.1",
-  "description": "The Second Poly Mod Loader - A modern mod loader for PolyTrack with clean API and mixin support",
-  "main": "dist/tspml.js",
-  "types": "dist/index.d.ts",
-  "scripts": {
-    "build": "rollup -c",
-    "build:watch": "rollup -c -w",
-    "dev": "rollup -c -w",
-    "type-check": "tsc --noEmit",
-    "test:server": "node tests/server.js",
-    "prepublishOnly": "npm run build"
-  },
-  "keywords": [
-    "polytrack",
-    "mod-loader",
-    "gaming",
-    "modding"
-  ],
-  "author": "TS PML Team",
+  "name": "tspml",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TSPML — The Second Poly Mod Loader: a Fabric-inspired mod loader for PolyTrack.",
   "license": "MIT",
-  "devDependencies": {
-    "@rollup/plugin-commonjs": "^26.0.0",
-    "@rollup/plugin-node-resolve": "^15.0.0",
-    "@rollup/plugin-typescript": "^11.0.0",
-    "@types/jest": "^29.5.0",
-    "@types/node": "^20.19.39",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
-    "eslint": "^8.0.0",
-    "prettier": "^3.0.0",
-    "rollup": "^4.0.0",
-    "typescript": "^5.0.0"
-  },
+  "type": "module",
+  "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   },
-  "dependencies": {
-    "tslib": "^2.8.1"
-  }
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "docs:check": "echo \"docs site lands in a later milestone\""
+  },
+  "workspaces": [
+    "source/*",
+    "tooling/*",
+    "environments/*",
+    "packages/*"
+  ]
 }

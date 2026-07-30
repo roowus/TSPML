@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/transform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Babel AST transform pipeline applying mappings-resolved patches to game bundles before they execute, plus runtime fallback patching.",
+  "license": "MIT"
+}

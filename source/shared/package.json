@@ -1,0 +1,8 @@
+{
+  "name": "@tspml/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript types: the mod.json manifest schema, ResolutionFailure, capability and lifecycle types.",
+  "license": "MIT"
+}
