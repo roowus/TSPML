@@ -1,0 +1,15 @@
+/**
+ * @tspml/api — published TypeScript type definitions for the stable TSPML
+ * surface. Zero runtime: mods import only types from here (autocomplete +
+ * safety against stable names), and the loader supplies the runtime via
+ * `@tspml/api-bridge`.
+ */
+
+export type {
+  CarControlState,
+  TspmlEventEmitter,
+  TspmlEventMap,
+  TspmlListener,
+} from './events.js';
+
+export type { TspmlApi } from './api.js';

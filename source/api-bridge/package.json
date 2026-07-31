@@ -4,5 +4,26 @@
   "private": true,
   "type": "module",
   "description": "Loader-owned bridge wiring the stable event and registry API surface to real PolyTrack internals. The only layer besides mappings that is version-coupled to a game build.",
-  "license": "MIT"
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tspml/api": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
 }
