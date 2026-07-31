@@ -170,6 +170,26 @@ async function proxyGet(
     return new NextResponse(code, { status: upstreamRes.status, headers: h });
   }
 
+  // Rewrite the proxied game's HTML so its RELATIVE asset URLs resolve under
+  // /api/proxy/. The document URL is /api/proxy (no trailing slash), so the
+  // browser treats "proxy" as a filename and resolves <script src="main.bundle.js">
+  // to /api/main.bundle.js (404) — caught by the headless smoke test. A <base>
+  // tag fixes every relative ref (scripts, fonts, images) at once.
+  {
+    const ct = upstreamRes.headers.get('content-type') ?? '';
+    if (ct.includes('text/html')) {
+      const html = await upstreamRes.text();
+      const patched = /<head[^>]*>/i.test(html)
+        ? html.replace(/<head[^>]*>/i, (m) => `${m}\n<base href="/api/proxy/">`)
+        : `<base href="/api/proxy/">\n${html}`;
+      const h = new Headers();
+      h.set('content-type', 'text/html; charset=utf-8');
+      h.set('cache-control', 'no-cache');
+      corsHeaders(request, h);
+      return new NextResponse(patched, { status: upstreamRes.status, headers: h });
+    }
+  }
+
   // Build a clean response header set. Forward content-type only (see file
   // header comment for why encoding/length/csp must be dropped).
   const resHeaders = new Headers();
