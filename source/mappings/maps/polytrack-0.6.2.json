@@ -1,0 +1,1202 @@
+{
+  "formatVersion": 1,
+  "gameVersion": "0.6.2",
+  "bundleHash": "sha256:8495e6a31cfb66b55861188bd8041b38479ee5b50bd412cc1f6c2b17229f6488",
+  "generated": {
+    "from": "M1 drift spike (tooling/mappings-pipeline)",
+    "matcher": "report-sn-relaxed configuration (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5)",
+    "granularity": "module",
+    "note": "v1 module-level map. Symbol-level locators (exportRef/prototypeFn/callExpression) land in M3."
+  },
+  "modules": {
+    "keep": {
+      "concept": "Keep",
+      "stableNames": [
+        "Keep",
+        "scaleX",
+        "announcer",
+        "running",
+        "even",
+        "personal"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Records"
+      ],
+      "moduleId": "1196",
+      "matchWeight": 63,
+      "sharedAnchors": 15,
+      "sourceModuleId": "1196"
+    },
+    "carcollisionshapevertices": {
+      "concept": "Car Collision Shape Vertices",
+      "stableNames": [
+        "carCollisionShapeVertices",
+        "DeterminismResult",
+        "TestDeterminism",
+        "VerifyResult",
+        "carStateBuffers",
+        "ControlCar"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "Records",
+        "Network"
+      ],
+      "moduleId": "5220",
+      "matchWeight": 112,
+      "sharedAnchors": 20,
+      "sourceModuleId": "1223"
+    },
+    "renderer": {
+      "concept": "Renderer",
+      "stableNames": [
+        "renderer",
+        "chromeBugWorkAround",
+        "lastByteIndex",
+        "sharedMemory",
+        "Cyuan",
+        "Chen"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "1312",
+      "matchWeight": 705,
+      "sharedAnchors": 121,
+      "sourceModuleId": "1312"
+    },
+    "suppressederror": {
+      "concept": "Suppressed Error",
+      "stableNames": [
+        "SuppressedError",
+        "Private",
+        "declare",
+        "getter",
+        "member",
+        "setter"
+      ],
+      "subsystem": "Network",
+      "subsystems": [
+        "Network"
+      ],
+      "moduleId": "1635",
+      "matchWeight": 30,
+      "sharedAnchors": 5,
+      "sourceModuleId": "1635"
+    },
+    "decodearraytomesh": {
+      "concept": "Decode Array To Mesh",
+      "stableNames": [
+        "DecodeArrayToMesh",
+        "TRIANGULAR_MESH",
+        "GetAttributeDataArrayForAllPoints",
+        "DecodeArrayToPointCloud",
+        "GetTrianglesUInt32Array",
+        "GetAttributeByUniqueId"
+      ],
+      "subsystem": "Render",
+      "subsystems": [
+        "Render",
+        "Network"
+      ],
+      "moduleId": "1728",
+      "matchWeight": 128,
+      "sharedAnchors": 23,
+      "sourceModuleId": "1728"
+    },
+    "walltrack": {
+      "concept": "Wall Track",
+      "stableNames": [
+        "WallTrack",
+        "RoadTurns",
+        "RoadWide",
+        "Special",
+        "Pillar",
+        "Road"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Network"
+      ],
+      "moduleId": "8043",
+      "matchWeight": 50,
+      "sharedAnchors": 9,
+      "sourceModuleId": "1882"
+    },
+    "carstate": {
+      "concept": "Car State",
+      "stableNames": [
+        "CarState",
+        "hasCheckpointToRespawnAt",
+        "wheelSuspensionVelocity",
+        "wheelSuspensionLength",
+        "nextCheckpointIndex",
+        "wheelDeltaRotation"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Checkpoint/Race",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "3899",
+      "matchWeight": 15,
+      "sharedAnchors": 3,
+      "sourceModuleId": "2108"
+    },
+    "walltrackbottominnercorner": {
+      "concept": "Wall Track Bottom Inner Corner",
+      "stableNames": [
+        "WallTrackBottomInnerCorner",
+        "WallTrackSlopeToVertical",
+        "WallTrackTopInnerCorner",
+        "WallTrackCeilingCorner",
+        "WallTrackBottomCorner",
+        "WallTrackMiddleCorner"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "494",
+      "matchWeight": 1534,
+      "sharedAnchors": 276,
+      "sourceModuleId": "2203"
+    },
+    "overlapping-enabled": {
+      "concept": "Overlapping_enabled",
+      "stableNames": [
+        "overlapping_enabled"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race"
+      ],
+      "moduleId": "2493",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "2493"
+    },
+    "multiplayer": {
+      "concept": "Multiplayer",
+      "stableNames": [
+        "multiplayer"
+      ],
+      "subsystem": "Network",
+      "subsystems": [
+        "Network"
+      ],
+      "moduleId": "2646",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "2646"
+    },
+    "custom-tracks": {
+      "concept": "Custom_tracks",
+      "stableNames": [
+        "custom_tracks"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track"
+      ],
+      "moduleId": "2709",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "2709"
+    },
+    "isusingsoftwarerenderer": {
+      "concept": "Is Using Software Renderer",
+      "stableNames": [
+        "isUsingSoftwareRenderer",
+        "cameraNear",
+        "shaders",
+        "isTrackShadowsEnabled",
+        "WebGLRenderer",
+        "checkShaderErrors"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "1507",
+      "matchWeight": 308,
+      "sharedAnchors": 59,
+      "sourceModuleId": "2825"
+    },
+    "prevents": {
+      "concept": "Prevents",
+      "stableNames": [
+        "Prevents",
+        "scaled",
+        "stretch",
+        "toolbar"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Records",
+        "UI"
+      ],
+      "moduleId": "2931",
+      "matchWeight": 23,
+      "sharedAnchors": 7,
+      "sourceModuleId": "2931"
+    },
+    "deleteallrecordsforprofile": {
+      "concept": "Delete All Records For Profile",
+      "stableNames": [
+        "deleteAllRecordsForProfile",
+        "carStyle",
+        "setCarStyle",
+        "firstOccupiedProfileSlot",
+        "getCurrentUserProfile",
+        "firstFreeProfileSlot"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Records",
+        "Network"
+      ],
+      "moduleId": "2522",
+      "matchWeight": 35,
+      "sharedAnchors": 7,
+      "sourceModuleId": "2951"
+    },
+    "madagascar": {
+      "concept": "Madagascar",
+      "stableNames": [
+        "Madagascar",
+        "Nicaragua",
+        "Liechtenstein",
+        "Turkmenistan",
+        "Afghanistan",
+        "Herzegovina"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Network"
+      ],
+      "moduleId": "5569",
+      "matchWeight": 1148,
+      "sharedAnchors": 193,
+      "sourceModuleId": "2970"
+    },
+    "z-finish": {
+      "concept": "Z_FINISH",
+      "stableNames": [
+        "Z_FINISH",
+        "deflateSetDictionary",
+        "inflateSetDictionary",
+        "deflateResetKeep",
+        "deflateSetHeader",
+        "inflateGetHeader"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "3075",
+      "matchWeight": 788,
+      "sharedAnchors": 137,
+      "sourceModuleId": "3075"
+    },
+    "ghostcarsoundsenabled": {
+      "concept": "Ghost Car Sounds Enabled",
+      "stableNames": [
+        "GhostCarSoundsEnabled",
+        "CockpitCameraToggle",
+        "DefaultCameraMode",
+        "SoundEffectVolume",
+        "TouchSteeringSide",
+        "GhostCarEnabled"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "Records",
+        "Audio"
+      ],
+      "moduleId": "5287",
+      "matchWeight": 143,
+      "sharedAnchors": 24,
+      "sourceModuleId": "3476"
+    },
+    "checkpoint": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "checkpoint",
+        "steering",
+        "available",
+        "padding"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "UI"
+      ],
+      "moduleId": "3571",
+      "matchWeight": 53,
+      "sharedAnchors": 13,
+      "sourceModuleId": "3571"
+    },
+    "walltracksides": {
+      "concept": "Wall Track Sides",
+      "stableNames": [
+        "WallTrackSides",
+        "WallTrackBottomInnerCorner",
+        "WallTrackSlopeToVertical",
+        "WallTrackTopInnerCorner",
+        "WallTrackCeilingCorner",
+        "WallTrackBottomCorner"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "2600",
+      "matchWeight": 2317,
+      "sharedAnchors": 402,
+      "sourceModuleId": "405"
+    },
+    "notificationaudioenabled": {
+      "concept": "Notification Audio Enabled",
+      "stableNames": [
+        "notificationAudioEnabled",
+        "getNextCheckpointIndex",
+        "addCheckpointCallback",
+        "addFinishCallback",
+        "carColorSecondary",
+        "getChassisMatrix"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "Records",
+        "Network",
+        "Audio"
+      ],
+      "moduleId": "641",
+      "matchWeight": 614,
+      "sharedAnchors": 113,
+      "sourceModuleId": "4078"
+    },
+    "ghost": {
+      "concept": "Ghost",
+      "stableNames": [
+        "ghost",
+        "percentage",
+        "initial"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Records"
+      ],
+      "moduleId": "4239",
+      "matchWeight": 17,
+      "sharedAnchors": 5,
+      "sourceModuleId": "4239"
+    },
+    "addcustomtrackschangedlistener": {
+      "concept": "Add Custom Tracks Changed Listener",
+      "stableNames": [
+        "addCustomTracksChangedListener",
+        "removeCustomTracksChangedListener",
+        "removeRecordChangedCallback",
+        "addRecordChangedCallback",
+        "isCommunityTracksEmpty",
+        "forEachCommunityTrack"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Records",
+        "Network",
+        "UI"
+      ],
+      "moduleId": "8185",
+      "matchWeight": 515,
+      "sharedAnchors": 93,
+      "sourceModuleId": "4839"
+    },
+    "stringkeyframetrack": {
+      "concept": "String Keyframe Track",
+      "stableNames": [
+        "StringKeyframeTrack",
+        "ColorKeyframeTrack",
+        "setFromCartesianCoords",
+        "KeyframeTrack",
+        "isMultiViewCamera",
+        "RenderTarget"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Render",
+        "Records",
+        "Network",
+        "UI"
+      ],
+      "moduleId": "4922",
+      "matchWeight": 3466,
+      "sharedAnchors": 597,
+      "sourceModuleId": "4922"
+    },
+    "checkpoint-5148": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "checkpoint"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race"
+      ],
+      "moduleId": "5148",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "5148"
+    },
+    "polytrack1": {
+      "concept": "Poly Track1",
+      "stableNames": [
+        "PolyTrack1",
+        "checkpointOrder",
+        "TrackPartRotationAxis",
+        "TrackEnvironment",
+        "TrackPartColorId",
+        "TrackPartManager"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "11",
+      "matchWeight": 27,
+      "sharedAnchors": 6,
+      "sourceModuleId": "5440"
+    },
+    "invite": {
+      "concept": "Invite",
+      "stableNames": [
+        "invite"
+      ],
+      "subsystem": "Network",
+      "subsystems": [
+        "Network"
+      ],
+      "moduleId": "5577",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "5577"
+    },
+    "trackpartrotationaxis": {
+      "concept": "Track Part Rotation Axis",
+      "stableNames": [
+        "TrackPartRotationAxis",
+        "combineTwoPartOrientations",
+        "rotatePartOffset",
+        "finalRotation",
+        "finalAxis",
+        "rotation1"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Network"
+      ],
+      "moduleId": "5494",
+      "matchWeight": 51,
+      "sharedAnchors": 10,
+      "sourceModuleId": "5735"
+    },
+    "checkcustomtracknameexists": {
+      "concept": "Check Custom Track Name Exists",
+      "stableNames": [
+        "checkCustomTrackNameExists",
+        "saveCustomTrack",
+        "trackThumbnail",
+        "trackId",
+        "TrackDataModule",
+        "trackMetadata"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "UI"
+      ],
+      "moduleId": "7100",
+      "matchWeight": 216,
+      "sharedAnchors": 41,
+      "sourceModuleId": "579"
+    },
+    "checkpoint-5811": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "checkpoint"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race"
+      ],
+      "moduleId": "5811",
+      "matchWeight": 24,
+      "sharedAnchors": 7,
+      "sourceModuleId": "5811"
+    },
+    "vehiclecheckpointreset": {
+      "concept": "Vehicle Checkpoint Reset",
+      "stableNames": [
+        "VehicleCheckpointReset",
+        "ToggleSpectatorCamera",
+        "VehicleCockpitCamera",
+        "VehicleAccelerate",
+        "VehicleStartReset",
+        "VehicleTurnRight"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "3277",
+      "matchWeight": 196,
+      "sharedAnchors": 33,
+      "sourceModuleId": "5818"
+    },
+    "hidecheckpointtime": {
+      "concept": "Hide Checkpoint Time",
+      "stableNames": [
+        "hideCheckpointTime",
+        "showCheckpointTime",
+        "Record",
+        "getFinishTime",
+        "setOverridePosition",
+        "Difference"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race",
+        "Records",
+        "Network"
+      ],
+      "moduleId": "6789",
+      "matchWeight": 262,
+      "sharedAnchors": 48,
+      "sourceModuleId": "5839"
+    },
+    "trackloaderror": {
+      "concept": "Track Load Error",
+      "stableNames": [
+        "TrackLoadError",
+        "Failed"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track"
+      ],
+      "moduleId": "7480",
+      "matchWeight": 12,
+      "sharedAnchors": 2,
+      "sourceModuleId": "6223"
+    },
+    "leaderboard": {
+      "concept": "Leaderboard",
+      "stableNames": [
+        "leaderboard",
+        "Flag",
+        "pages",
+        "page",
+        "Nepal",
+        "country"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Records",
+        "UI"
+      ],
+      "moduleId": "6252",
+      "matchWeight": 43,
+      "sharedAnchors": 12,
+      "sourceModuleId": "6252"
+    },
+    "checkpoint-6738": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "checkpoint",
+        "ffff00",
+        "unloaded",
+        "twill",
+        "long",
+        "dash"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race",
+        "UI"
+      ],
+      "moduleId": "6738",
+      "matchWeight": 41,
+      "sharedAnchors": 11,
+      "sourceModuleId": "6738"
+    },
+    "checkpoint-6850": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "checkpoint",
+        "speedometer",
+        "speed"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race"
+      ],
+      "moduleId": "6850",
+      "matchWeight": 27,
+      "sharedAnchors": 8,
+      "sourceModuleId": "6850"
+    },
+    "-istrackingpointer": {
+      "concept": "_is Tracking Pointer",
+      "stableNames": [
+        "_isTrackingPointer",
+        "_customWheelEvent",
+        "_handleMouseWheel",
+        "_onMouseWheel",
+        "_trackPointer",
+        "isOrthographicCamera"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Render",
+        "Network",
+        "UI"
+      ],
+      "moduleId": "7024",
+      "matchWeight": 155,
+      "sharedAnchors": 29,
+      "sourceModuleId": "7024"
+    },
+    "invite-732": {
+      "concept": "Invite",
+      "stableNames": [
+        "invite",
+        "expired",
+        "reason",
+        "ff9696",
+        "timeout"
+      ],
+      "subsystem": "Network",
+      "subsystems": [
+        "Network",
+        "UI"
+      ],
+      "moduleId": "732",
+      "matchWeight": 20,
+      "sharedAnchors": 6,
+      "sourceModuleId": "732"
+    },
+    "car-thumbnail-placeholder": {
+      "concept": "Car_thumbnail_placeholder",
+      "stableNames": [
+        "car_thumbnail_placeholder"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics"
+      ],
+      "moduleId": "7404",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "7404"
+    },
+    "wheel10": {
+      "concept": "Wheel10",
+      "stableNames": [
+        "Wheel10",
+        "Wheel11",
+        "Wheel0",
+        "Wheel1",
+        "Wheel2",
+        "Wheel3"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Network"
+      ],
+      "moduleId": "8724",
+      "matchWeight": 321,
+      "sharedAnchors": 59,
+      "sourceModuleId": "765"
+    },
+    "tresize": {
+      "concept": "Tresize",
+      "stableNames": [
+        "tresize",
+        "tword"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "UI"
+      ],
+      "moduleId": "7687",
+      "matchWeight": 23,
+      "sharedAnchors": 7,
+      "sourceModuleId": "7687"
+    },
+    "car-thumbnail-placeholder-7780": {
+      "concept": "Car_thumbnail_placeholder",
+      "stableNames": [
+        "car_thumbnail_placeholder",
+        "overlapping_disabled",
+        "overlapping_enabled",
+        "community_tracks",
+        "official_tracks",
+        "custom_tracks"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "7780",
+      "matchWeight": 1237,
+      "sharedAnchors": 209,
+      "sourceModuleId": "7780"
+    },
+    "-createcubicsplinetrackinterpolant": {
+      "concept": "_create Cubic Spline Track Interpolant",
+      "stableNames": [
+        "_createCubicSplineTrackInterpolant",
+        "KHR_draco_mesh_compression",
+        "EXT_mesh_gpu_instancing",
+        "EXT_meshopt_compression",
+        "_createAnimationTracks",
+        "KHR_mesh_quantization"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Network",
+        "Audio"
+      ],
+      "moduleId": "7888",
+      "matchWeight": 948,
+      "sharedAnchors": 165,
+      "sourceModuleId": "7888"
+    },
+    "trackpartrotationaxis-7980": {
+      "concept": "Track Part Rotation Axis",
+      "stableNames": [
+        "TrackPartRotationAxis",
+        "TrackEnvironment",
+        "TrackPartColorId",
+        "TrackPartManager",
+        "TrackDataModule",
+        "checkpointPartIds"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "7775",
+      "matchWeight": 23,
+      "sharedAnchors": 4,
+      "sourceModuleId": "7980"
+    },
+    "community-tracks": {
+      "concept": "Community_tracks",
+      "stableNames": [
+        "community_tracks"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track"
+      ],
+      "moduleId": "8115",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "8115"
+    },
+    "setcamera": {
+      "concept": "Set Camera",
+      "stableNames": [
+        "setCamera",
+        "VisualCar",
+        "setCarStyle",
+        "OrthographicCamera",
+        "RenderManager",
+        "addCancelCallback"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "3787",
+      "matchWeight": 49,
+      "sharedAnchors": 11,
+      "sourceModuleId": "832"
+    },
+    "rendering": {
+      "concept": "Rendering",
+      "stableNames": [
+        "rendering",
+        "Without",
+        "bed8f7",
+        "ede2af",
+        "gradient",
+        "description"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Records",
+        "UI"
+      ],
+      "moduleId": "8353",
+      "matchWeight": 95,
+      "sharedAnchors": 21,
+      "sourceModuleId": "8353"
+    },
+    "overlapping-disabled": {
+      "concept": "Overlapping_disabled",
+      "stableNames": [
+        "overlapping_disabled"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race"
+      ],
+      "moduleId": "8358",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "8358"
+    },
+    "fixes": {
+      "concept": "Fixes",
+      "stableNames": [
+        "Fixes",
+        "ForcedSquare",
+        "tinterpolate",
+        "tappearance",
+        "toverscroll",
+        "appearance"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "UI"
+      ],
+      "moduleId": "8419",
+      "matchWeight": 102,
+      "sharedAnchors": 22,
+      "sourceModuleId": "8419"
+    },
+    "trackdataimporterlegacy": {
+      "concept": "Track Data Importer Legacy",
+      "stableNames": [
+        "TrackDataImporterLegacy",
+        "TrackDataImporterV1",
+        "TrackDataImporterV2",
+        "TrackDataImporterV3",
+        "TrackDataImporterV4",
+        "TrackDataImporterV5"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "9117",
+      "matchWeight": 145,
+      "sharedAnchors": 29,
+      "sourceModuleId": "8438"
+    },
+    "gettotalnumberofcheckpointindices": {
+      "concept": "Get Total Number Of Checkpoint Indices",
+      "stableNames": [
+        "getTotalNumberOfCheckpointIndices",
+        "getCheckpointOrders",
+        "generateMeshes",
+        "getCheckpoints",
+        "loadTrackData",
+        "getTrackData"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "6762",
+      "matchWeight": 108,
+      "sharedAnchors": 20,
+      "sourceModuleId": "8971"
+    },
+    "checkpoint-9178": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "checkpoint"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race"
+      ],
+      "moduleId": "9178",
+      "matchWeight": 24,
+      "sharedAnchors": 7,
+      "sourceModuleId": "9178"
+    },
+    "recorded": {
+      "concept": "Recorded",
+      "stableNames": [
+        "recorded",
+        "recordFrame",
+        "Frame",
+        "maxFrames",
+        "deserialize",
+        "getFrame"
+      ],
+      "subsystem": "Records",
+      "subsystems": [
+        "Records",
+        "Network"
+      ],
+      "moduleId": "1754",
+      "matchWeight": 37,
+      "sharedAnchors": 8,
+      "sourceModuleId": "927"
+    },
+    "official-tracks": {
+      "concept": "Official_tracks",
+      "stableNames": [
+        "official_tracks"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track"
+      ],
+      "moduleId": "9391",
+      "matchWeight": 6,
+      "sharedAnchors": 1,
+      "sourceModuleId": "9391"
+    },
+    "compileequirectangularshader": {
+      "concept": "Compile Equirectangular Shader",
+      "stableNames": [
+        "compileEquirectangularShader",
+        "renderbufferStorageMultisample",
+        "renderbufferStorageMultisampleEXT",
+        "rendererExtensionParallelShaderCompile",
+        "updateMultisampleRenderTarget",
+        "WEBGL_multisampled_render_to_texture"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Track",
+        "Checkpoint/Race",
+        "Render",
+        "Network",
+        "Audio"
+      ],
+      "moduleId": "9437",
+      "matchWeight": 13959,
+      "sharedAnchors": 2362,
+      "sourceModuleId": "9437"
+    },
+    "meshlambertmaterial": {
+      "concept": "Mesh Lambert Material",
+      "stableNames": [
+        "MeshLambertMaterial",
+        "TrackEnvironment",
+        "RenderManager",
+        "renderOrder",
+        "Track",
+        "generateMountains"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Network"
+      ],
+      "moduleId": "6421",
+      "matchWeight": 830,
+      "sharedAnchors": 143,
+      "sourceModuleId": "9507"
+    },
+    "polytrack2": {
+      "concept": "Poly Track2",
+      "stableNames": [
+        "PolyTrack2",
+        "TrackPartRotationAxis",
+        "TrackEnvironment",
+        "TrackPartColorId",
+        "TrackPartManager",
+        "TrackDataModule"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "6582",
+      "matchWeight": 28,
+      "sharedAnchors": 6,
+      "sourceModuleId": "9681"
+    }
+  },
+  "unresolved": [
+    {
+      "sourceModuleId": "1066",
+      "subsystem": "Render",
+      "subsystems": [
+        "Render",
+        "Network"
+      ],
+      "reason": "no confident match (best shared anchors: 9/9)"
+    },
+    {
+      "sourceModuleId": "2247",
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race"
+      ],
+      "reason": "no confident match (best shared anchors: 2/2)"
+    },
+    {
+      "sourceModuleId": "2387",
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Network"
+      ],
+      "reason": "no confident match (best shared anchors: 2/6)"
+    },
+    {
+      "sourceModuleId": "3025",
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Records",
+        "UI"
+      ],
+      "reason": "no confident match (best shared anchors: 9/10)"
+    },
+    {
+      "sourceModuleId": "5343",
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "reason": "no confident match (best shared anchors: 4/20)"
+    },
+    {
+      "sourceModuleId": "666",
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "reason": "no confident match (best shared anchors: 2/18)"
+    },
+    {
+      "sourceModuleId": "6979",
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Render",
+        "Network",
+        "UI"
+      ],
+      "reason": "no confident match (best shared anchors: 8/9)"
+    },
+    {
+      "sourceModuleId": "7129",
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Network"
+      ],
+      "reason": "no confident match (best shared anchors: 2/4)"
+    },
+    {
+      "sourceModuleId": "8739",
+      "subsystem": "Render",
+      "subsystems": [
+        "Render"
+      ],
+      "reason": "no confident match (best shared anchors: 2/2)"
+    },
+    {
+      "sourceModuleId": "8928",
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "reason": "no confident match (best shared anchors: 51/67)"
+    }
+  ]
+}

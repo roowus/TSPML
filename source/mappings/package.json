@@ -3,6 +3,29 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Symbol-map resolver and the current versioned mappings file mapping stable names to concrete minified locators.",
-  "license": "MIT"
+  "description": "Versioned symbol map for PolyTrack + a fail-closed resolver that binds stable names to concrete minified locators (the Yarn analog). v1 maps at module granularity, bootstrapped from the M1 drift spike.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./maps/*": "./maps/*"
+  },
+  "files": [
+    "dist",
+    "maps"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "gen": "node scripts/gen-map.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
 }
