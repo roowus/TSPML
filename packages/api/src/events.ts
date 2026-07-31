@@ -4,10 +4,18 @@
 // the @tspml/api-bridge wires each event to a real PolyTrack function (M4+).
 // See docs/api/events-and-registries.md.
 
-/** Per-frame car-control state, emitted from the game's `controlCar` hook. */
+/**
+ * Per-frame car control INPUT, emitted from the game's `controlCar` hook (which
+ * posts the player's input to the physics worker each frame). Booleans reflect
+ * the input state at that frame.
+ */
 export interface CarControlState {
-  /** Milliseconds simulated for this frame (clamped by the game). */
-  readonly dt: number;
+  readonly carId: number;
+  readonly up: boolean;
+  readonly right: boolean;
+  readonly down: boolean;
+  readonly left: boolean;
+  readonly reset: boolean;
 }
 
 /**
