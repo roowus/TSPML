@@ -14,6 +14,7 @@ Background facts, all sourced.
 - [Fabric architecture & its JS translation](./research/fabric-architecture.md)
 - [**PML shortcomings → TSPML improvements**](./research/pml-shortcomings-and-tspml-improvements.md) *(the "why TSPML" doc)*
 - [M1 mappings drift spike — go/no-go](./research/mappings-drift-spike.md) *(result: GO, semi-automated)*
+- [M3 transform spike — go/no-go](./research/transform-spike.md) *(result: VIABLE — JS-Mixin works on the real bundle)*
 
 ## Design
 

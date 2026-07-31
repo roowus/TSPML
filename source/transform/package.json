@@ -4,5 +4,25 @@
   "private": true,
   "type": "module",
   "description": "Babel AST transform pipeline applying mappings-resolved patches to game bundles before they execute, plus runtime fallback patching.",
-  "license": "MIT"
+  "license": "MIT",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./spike": "./src/spike.mjs"
+  },
+  "scripts": {
+    "spike": "node src/spike.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.28.0",
+    "@babel/parser": "^7.28.0",
+    "@babel/traverse": "^7.28.0",
+    "@babel/types": "^7.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
 }
