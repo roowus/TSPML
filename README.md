@@ -2,7 +2,7 @@
 
 A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game — inspired by [Fabric](https://fabricmc.net/) for Minecraft. An incumbent loader ([PolyModLoader](https://polymodloader.com/)) already exists; TSPML aims to be what Fabric is to Minecraft modding.
 
-> **Status: M0 (docs-first foundation).** This repository currently contains the project structure and full documentation. Runnable code begins at **M1**. See [`docs/project/roadmap.md`](./docs/project/roadmap.md).
+> **Status: M3 complete — transform run-validated in a browser.** The loader, mappings, AST-transform pipeline, and portal (proxy + service worker) are all built and unit-tested (**115 tests**, CI green); a transformed PolyTrack bundle is proven to actually boot in headless Chromium. The portal does **not yet reach playable gameplay** — PolyTrack's own "unofficial version" origin gate and a track-load network path still block it (issues #7–#9). Next: **M4** (neutralize the origin gate + event bus + API bridge). See [`docs/project/progress.md`](./docs/project/progress.md) and [`docs/research/portal-browser-test-findings.md`](./docs/research/portal-browser-test-findings.md).
 
 ## Why TSPML?
 

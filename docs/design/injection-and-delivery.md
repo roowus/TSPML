@@ -54,8 +54,24 @@ A cold-start Babel AST parse+transform of ~5 MB of JS on the main thread is mult
 
 The loader must run with **zero network access** for already-installed mods (all code + map cached in IndexedDB by hash). Network is only required for discovery, publish, and map updates. Mirror the current map inside the extension/userscript bundle as a last-resort fallback.
 
-## Known risks
+## Current implementation status (verified by browser tests)
 
-- **Kodub blocks the proxy IP** or objects to origin-forwarding → extension/userscript paths survive.
-- **CSP tightens** (`script-src`) → userscript dies; extension survives; portal unaffected (proxy is server-side).
-- **Legal/ToS** → fetch live (never redistribute), honest docs, takedown-compliance plan, position TSPML as a fan tool.
+The portal + SW + proxy + transform pipeline is implemented and **run-validated**. What a browser load actually shows today (full detail: [portal-browser-test-findings.md](../research/portal-browser-test-findings.md)):
+
+```
+portal loads → /api/proxy serves the real live bundle (byte-exact) ✅
+  → TSPML_TRANSFORM=1: main.bundle.js is AST-rewritten → transformed bundle RUNS ✅
+     (green "TSPML ✔ LIVE" badge in DOM+console, WebGL canvas 804×452, 0 JS errors)
+  → PolyTrack "unofficial version" warning (origin allowlist) 🚧 issue #8, M4
+  → (past it) "Unhandled Rejection: Failed to load track" 🚧 issue #9, M7/M8
+  → online/leaderboard requests 400/502 🚧 issue #7, M8
+```
+
+**Proven:** proxying, `<base href>` HTML rewrite, AST transform run-validity. **Not yet playable end-to-end** — and crucially, the blockers are the game's own origin/online self-protection, *not* the transform. Concretely:
+
+- **`<base href="/api/proxy/">` HTML rewrite is required.** The proxied document lives at `/api/proxy` (no trailing slash), so the browser treats `proxy` as a filename and resolves the game's relative `<script src="main.bundle.js">` to `/api/main.bundle.js` (404). Injecting `<base>` fixes every relative ref at once. *This was only caught by a real browser load — `curl` always used the full path.*
+- **PolyTrack's "unofficial version" gate** (issue #8) blocks gameplay from non-allowlisted origins (`localhost` is not on `kodub`/`crazygames`/`webgamer`/`kongregate`). The check lives in the **webpack bootstrap** (runs before the module graph), so it needs AST/browser tracing and a transform to force the official-host check to pass — the same problem PML solves with Origin-spoofing. **First M4 task.**
+- **"Failed to load track"** (issue #9): the game reaches the track-load step and throws — the track-data fetch either 400s via the proxy (Origin not trusted) or bypassed the service worker on first load (SW was still "registering", not `active` → the fetch went direct to `kodub.com` → CORS-failed). Fix: SW-active-before-fetch (reload-on-claim) + correct track-endpoint forwarding. **M7/M8.**
+- **Online 400/502** (issue #7): leaderboard/multiplayer calls fail through the proxy. Online/origin handling. **M8.**
+
+The service worker is registered on `/` and calls `skipWaiting()`/`clients.claim()`, so it controls the page after the first reload (the smoke test reloads once for exactly this reason — runtime kodub fetches only route through the proxy on the second load).

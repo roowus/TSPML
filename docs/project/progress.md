@@ -66,3 +66,22 @@ Known, **not** transform-related: the game's online XHR (leaderboard/multiplayer
 ### Follow-up: the smoke probe found PolyTrack's "unofficial version" gate
 
 Extended the smoke with a gameplay probe (try to click past the menu). It revealed that the screen we'd been calling the menu is actually PolyTrack's **"unofficial version detected" warning**: the game checks its origin and, served from `localhost` (not an allowed host — kodub / crazygames / webgamer / kongregate), it refuses to load gameplay (no Play button; only the warning + footer controls). So: the transform is proven working (bundle executes, badge fires, WebGL canvas inits to 804×452), **but the game's own anti-unofficial gate blocks actual play** through the portal. The check lives in the webpack bootstrap (runs before the module graph), so locating it needs AST/browser tracing. This is solvable — PML does it via Origin-spoofing; for TSPML it's a transform job (find + neutralize the check) and becomes the **first M4 task**. Issue #8.
+
+## 2026-07-31 — docs: detailed portal browser-test findings ✅
+
+Updated the docs in depth to capture the current end-to-end state (the user asked for a detailed doc pass). Wrote a consolidated [portal-browser-test-findings.md](../research/portal-browser-test-findings.md) (current status, what's proven vs blocked, reproduce steps) and propagated the findings into the design + research + decision docs:
+
+- [injection-and-delivery.md](../design/injection-and-delivery.md): a new "Current implementation status (verified by browser tests)" section — the `<base href>` HTML rewrite, the unofficial gate, the track-load error, online 400s, and the SW-active-before-fetch detail.
+- [polytrack-internals.md](../research/polytrack-internals.md): documented the runtime **"unofficial version" gate** as a discovered PolyTrack behavior distinct from the CSP allowlist.
+- [decision-log.md](./decision-log.md): **ADR-012** — transform run-validated in a browser; remaining blockers are the game's own origin/online gates, not the transform.
+
+## 2026-07-31 — browser test found "Failed to load track" 🚧 (issue #9)
+
+Manual browser run (past the unofficial gate): the game throws an error screen — *"PolyTrack encountered an unexpected error! Unhandled Rejection: Failed to load track"* (with stack trace + Reload/Close/Reset Settings). The TSPML badge is still present, so the transformed bundle is running fine — this is a **network/path** issue, not a transform issue. Track data is fetched from a kodub backend endpoint that either 400s through the proxy (Origin not trusted — related to #7) or bypassed the service worker on first load (SW still "registering", not `active` → the fetch went direct to `kodub.com` → CORS-failed). Filed **issue #9**; scoped to M7/M8 (delivery/network/origin: SW-active-before-fetch + correct track-endpoint forwarding).
+
+## Where we stand (2026-07-31)
+
+- **Engines, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) — **115 tests green**, CI green.
+- **Transform run-validated in a real browser** (the project's biggest risk, retired) — ADR-012.
+- **Not yet playable end-to-end** — blocked by PolyTrack's own origin gate (#8, M4) and track-load/online network paths (#9/#7, M7/M8), *not* by the transform.
+- **Next:** M4 — first task is neutralizing the unofficial-version gate via a transform.
