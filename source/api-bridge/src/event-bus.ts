@@ -29,6 +29,12 @@ export interface EventBusOptions {
  * are snapshotted at the start of an `emit`, so subscribing/unsubscribing
  * mid-emit is safe and predictable (new listeners don't fire this round;
  * removed ones still do).
+ *
+ * CROSS-REALM NOTE: payloads built inside the game iframe (e.g. the
+ * `car.control` state object) arrive as foreign-realm objects to listeners in
+ * the parent realm. Property access and `typeof` work, but `instanceof` and
+ * `.constructor` checks against parent-realm constructors return false — prefer
+ * structural/property checks in listeners.
  */
 export class EventBus implements TspmlEventEmitter {
   private readonly listeners = new Map<keyof TspmlEventMap, Set<AnyListener>>();

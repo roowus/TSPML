@@ -98,9 +98,21 @@ Started the API bridge. Built the **Tier-1 event bus foundation** (`source/api-b
 
 Next slice (M4-B): wire the real `controlCar` (Car module 5220, already our badge anchor) → emit `car.control` each frame via a fail-closed transform patch + mapping locator, then headless-verify it fires during a race.
 
+## 2026-07-31 — M4-B/C: first real mod event (`car.control`) firing in the running game ✅
+
+Wired `controlCar` → `car.control` end-to-end and **verified headlessly** — the first event a mod can hook inside the live PolyTrack.
+
+- **Transform** (`source/portal/lib/demo-transform.ts`): a 2nd patch, `op:"before"` on `controlCar` (Car module, anchored by `[CreateCar,ControlCar,TestDeterminism]`), injects `window.__tspml.emit("car.control", {carId,up,right,down,left,reset})` at the method HEAD. **Now genuinely HASH-GATED** — `applyDemoTransform` computes the live bundle's sha256 and passes `bundleHash` + the pinned 0.6.2 `expectedBundleHash`; on mismatch the engine fail-closes and the demo serves vanilla (so the minified-param inject can never run against a drifted bundle).
+- **Bridge** (`app/page.tsx`): the portal creates the Tier-1 `EventBus` (`@tspml/api-bridge`) and exposes it to the same-origin game iframe as `window.__tspml`; subscribes + shows a throttled live counter in the sidebar.
+- **Discovery**: `controlCar` is **input-change-driven** — the bundle calls it via the input-state change callback (keydown/keyup), *not* every frame. So a passive observer gets zero events; the smoke now simulates driving (focus canvas + key presses).
+- **Verified** (`scripts/smoke.mjs`): subscribing + pressing 2 keys → **4 `car.control` events** (2 keys × down/up), 0 errors. The smoke **hard-requires** `bridgeWired && carControlEvents > 0` (no vacuous pass).
+
+**Adversarially reviewed** (4-lens workflow: behavior / safety / realm / test; 0 blockers, 6 major, 6 minor, 2 nit). Fixes applied: engaged the hash gate (the "hash-gated" claim was previously false), made the smoke assertion non-vacuous, corrected the call-rate comment, doc'd the cross-realm payload caveat. Declined one minor (`applyBefore` directive-prologue) after **verifying** babel stores function directives in a separate `directives` field, so `unshift` into `body` already preserves them. `@tspml/api` `CarControlState` corrected to the control-input shape; api-bridge test moved to `tests/` (matches repo convention, keeps `dist` clean). **124 unit tests green.**
+
 ## Where we stand (2026-07-31)
 
-- **Engines, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) — **115 tests green**, CI green.
-- **Transform run-validated in a real browser** (ADR-012) and **the portal plays the game end-to-end** (ADR-013) — a transformed, modded PolyTrack reaches an actual race.
-- **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8. Non-blocking for local gameplay.
-- **Next:** M4 continues — event bus + API bridge (wire physics/render/track/input events + registries to the game via transform+mappings) so *real mods* can hook the now-playable game.
+- **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (9) — **124 tests green**, CI green.
+- **The portal plays PolyTrack end-to-end** (ADR-012/013) — a transformed, modded game reaches an actual race.
+- **The mod-loader loop is proven** (M4-B/C): the first real mod event (`car.control`) fires inside the running game, flowing through the Tier-1 `EventBus` to a subscriber, hash-gated + headlessly verified.
+- **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8 (bot-protected `vps.kodub.com`; the extension is the resilient path). Non-blocking for local gameplay.
+- **Next:** finish M4 — more Tier-1 events (render/track/checkpoint) + registries (cars/blocks/audio) via the same transform+mappings path, then wire real mod loading into the portal.

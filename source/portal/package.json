@@ -12,6 +12,7 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
+    "@tspml/api-bridge": "workspace:*",
     "@tspml/transform": "workspace:*",
     "next": "^15.0.0",
     "react": "^19.0.0",

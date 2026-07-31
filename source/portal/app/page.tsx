@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
+import { EventBus } from '@tspml/api-bridge';
 
 /**
  * Play page (milestone M2 proof of concept).
@@ -14,8 +15,10 @@ import type { CSSProperties, ReactElement } from 'react';
  * while every byte flows through /api/proxy.
  *
  * With TSPML_TRANSFORM=1, the proxy AST-rewrites main.bundle.js — the demo
- * injects a visible "TSPML ✔ LIVE" badge, proving a transformed bundle boots.
- * Real mods bind through the API bridge in M4; the mod list below is placeholder.
+ * injects a visible "TSPML ✔ LIVE" badge AND emits a `car.control` event each
+ * frame (M4-B). This page creates the Tier-1 EventBus (@tspml/api-bridge),
+ * exposes it to the iframe as `window.__tspml`, and subscribes — the "bridge"
+ * counter in the sidebar ticks up while you race. Real mods bind the same way.
  */
 
 type SwState = 'idle' | 'registering' | 'active' | 'error';
@@ -39,6 +42,41 @@ const PLACEHOLDER_MODS: ModDescriptor[] = [
 export default function PlayPage(): ReactElement {
   const [swState, setSwState] = useState<SwState>('idle');
   const [swError, setSwError] = useState<string | null>(null);
+  const [controlCount, setControlCount] = useState(0);
+  // The Tier-1 event bus shared with the game iframe: the transform emits
+  // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
+  // The handle is always exposed — harmless when the bundle is unmodified (the
+  // vanilla game never reads it; only the transformed bundle emits).
+  const [bus] = useState<EventBus>(() => new EventBus());
+  const frameRef = useRef<HTMLIFrameElement>(null);
+
+  // Surface a throttled count of car.control events. controlCar fires on INPUT
+  // CHANGES (keydown/keyup), not every frame — so the count jumps in bursts
+  // around keypresses; the 500ms throttle keeps React re-renders bounded.
+  useEffect(() => {
+    let n = 0;
+    let last = 0;
+    const off = bus.on('car.control', () => {
+      n++;
+    });
+    const id = window.setInterval(() => {
+      if (n !== last) {
+        last = n;
+        setControlCount(n);
+      }
+    }, 500);
+    return () => {
+      off();
+      window.clearInterval(id);
+    };
+  }, [bus]);
+
+  // Expose the bus to the same-origin game iframe so the transformed
+  // `controlCar` hook (`window.__tspml.emit`) talks to THIS bus instance.
+  const handleFrameLoad = (): void => {
+    const w = frameRef.current?.contentWindow as (Window & { __tspml?: EventBus }) | null;
+    if (w) w.__tspml = bus;
+  };
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) {
@@ -94,6 +132,8 @@ export default function PlayPage(): ReactElement {
         <section style={gameSectionStyle} aria-label="Game">
           {swState === 'active' ? (
             <iframe
+              ref={frameRef}
+              onLoad={handleFrameLoad}
               title="PolyTrack (proxied)"
               src={GAME_FRAME_SRC}
               style={frameStyle}
@@ -126,9 +166,20 @@ export default function PlayPage(): ReactElement {
               </li>
             ))}
           </ul>
+          <div style={bridgeRowStyle}>
+            <span
+              style={{ ...bridgeDotStyle, background: controlCount > 0 ? '#3fb950' : '#9aa4b2' }}
+              aria-hidden="true"
+            />
+            bridge:{' '}
+            {controlCount > 0
+              ? `car.control × ${controlCount.toLocaleString()}`
+              : 'idle (start a race)'}
+          </div>
           <p style={noteStyle}>
-            The transform pipeline is built (M3); wiring real mods through the
-            API bridge is M4. The list above is placeholder.
+            The transform pipeline is built (M3); the <code>car.control</code>{' '}
+            event is wired end-to-end (M4-B) — its count ticks up while you race.
+            The mod list above is placeholder.
           </p>
         </aside>
       </div>
@@ -227,4 +278,20 @@ const noteStyle: CSSProperties = {
   fontSize: 12,
   color: '#9aa4b2',
   lineHeight: 1.5,
+};
+const bridgeRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  marginTop: 12,
+  fontSize: 13,
+  fontFamily: 'ui-monospace, Menlo, monospace',
+  color: '#c9d1d9',
+};
+const bridgeDotStyle: CSSProperties = {
+  display: 'inline-block',
+  width: 8,
+  height: 8,
+  borderRadius: '50%',
+  background: '#9aa4b2',
 };

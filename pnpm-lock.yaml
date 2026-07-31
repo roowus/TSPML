@@ -67,6 +67,9 @@ importers:
 
   source/portal:
     dependencies:
+      '@tspml/api-bridge':
+        specifier: workspace:*
+        version: link:../api-bridge
       '@tspml/transform':
         specifier: workspace:*
         version: link:../transform

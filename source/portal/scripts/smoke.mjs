@@ -10,12 +10,11 @@
 //
 // What it asserts (PASS): the transformed bundle EXECUTED (the `[TSPML]` marker
 // logged to the console) AND the game CLEARED its "unofficial version" gate
-// (pastGate: the loading screen is up / the full menu is in the DOM / a race
-// HUD rendered — i.e. it proceeded past the static warning screen). It also
-// reports whether a full race was reached (reachedGameplay), uncaught page
-// errors, failed network requests, canvas size, and saves screenshots. The
-// genuinely-subjective call ("does it look / play well") is still left to a
-// human, but reaching a race is now routinely observed (issue #8 solved).
+// (pastGate). If a race actually ran, it MUST have fired `car.control` events
+// through the bridge (carControlEvents > 0) — zero during a race is an M4-B/C
+// wiring regression. Also reports reachedGameplay, uncaught page errors, failed
+// network requests, canvas size, and saves screenshots. The genuinely-subjective
+// call ("does it look / play well") is still left to a human.
 import { chromium } from "playwright";
 
 const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
@@ -89,6 +88,24 @@ const dom = await gameFrame.evaluate(() => {
 const menuShot = SHOT.replace(/\.png$/, "-menu.png");
 await page.screenshot({ path: menuShot });
 
+// M4-C: subscribe to the bridge's `car.control` event. The portal exposes the
+// Tier-1 EventBus on the iframe as `window.__tspml`; the transformed controlCar
+// hook emits to it each frame. Count emissions while the race runs below.
+const bridgeWired = await gameFrame.evaluate(() => {
+  try {
+    if (window.__tspml && typeof window.__tspml.on === "function") {
+      window.__tspmlControlCount = 0;
+      window.__tspml.on("car.control", () => {
+        window.__tspmlControlCount = (window.__tspmlControlCount || 0) + 1;
+      });
+      return true;
+    }
+  } catch (e) {
+    window.__tspmlErr = String(e);
+  }
+  return false;
+});
+
 // Probe: can we get past the menu into actual gameplay? (non-fatal — gameplay may
 // legitimately need server calls the proxy doesn't handle yet.)
 const errsBefore = pageErrors.length;
@@ -145,11 +162,47 @@ probe.newErrorsAfterClick = pageErrors.length - errsBefore;
 const raceShot = SHOT.replace(/\.png$/, "-race.png");
 await page.screenshot({ path: raceShot });
 
+// `controlCar` is input-CHANGE-driven (fires on keydown/keyup via the input
+// state's change callback, not every frame), so a passive observer gets zero
+// events. Focus the canvas (recording failure rather than swallowing it), then
+// drive + POLL for the first car.control event — decoupling from exact
+// race-start timing instead of a single point read.
+let clickOk = true;
+try {
+  await gameFrame.locator("canvas").first().click({ timeout: 3000 });
+} catch (e) {
+  clickOk = false;
+  probe.driveError = `canvas click failed: ${String(e && e.message ? e.message : e).slice(0, 140)}`;
+}
+probe.clickOk = clickOk;
+
+let bridge = { count: 0, err: null };
+for (let attempt = 0; attempt < 6 && bridge.count === 0; attempt++) {
+  await page.keyboard.down("ArrowUp");
+  await page.waitForTimeout(600);
+  await page.keyboard.up("ArrowUp");
+  if (attempt % 2 === 0) {
+    await page.keyboard.down("ArrowLeft");
+    await page.waitForTimeout(500);
+    await page.keyboard.up("ArrowLeft");
+  }
+  bridge = await gameFrame.evaluate(() => ({
+    count: window.__tspmlControlCount ?? 0,
+    err: window.__tspmlErr ?? null,
+  }));
+}
+
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
-// PASS requires BOTH: the transformed bundle executed (marker logged) AND the
-// game cleared the unofficial-version gate (pastGate). reachedGameplay is a
-// stronger-but-slower informational signal (a full race HUD).
-const pass = dom.pastGate && markerLogs.length > 0;
+const inRace = dom.reachedGameplay || /km\/h/.test(probe.afterText || "");
+// HARD requirement (M4-B/C): the bridge must be wired AND `car.control` must
+// have fired. A vacuous pass (bridge unwired / zero events) is a FAILURE, not a
+// skip — this is the exact wiring the milestone exists to prove. `inRace` is
+// reported for diagnosis only.
+const pass =
+  dom.pastGate &&
+  markerLogs.length > 0 &&
+  bridgeWired &&
+  bridge.count > 0;
 
 console.log(
   JSON.stringify(
@@ -159,6 +212,8 @@ console.log(
         markerConsoleLogged: markerLogs.length > 0,
         pastGate: dom.pastGate,
         reachedGameplay: dom.reachedGameplay,
+        bridgeWired,
+        carControlEvents: bridge.count,
         badgePresent: dom.badgePresent,
         canvasPresent: dom.canvasPresent,
         canvasSize: dom.canvasSize,

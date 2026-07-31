@@ -1,13 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EventBus } from './event-bus.js';
+import { EventBus } from '../src/event-bus.js';
+
+// A valid CarControlState sample (the car.control payload).
+const CONTROL = {
+  carId: 0,
+  up: true,
+  right: false,
+  down: false,
+  left: false,
+  reset: false,
+} as const;
 
 describe('EventBus', () => {
   it('delivers emit args to on() listeners', () => {
     const bus = new EventBus();
     const fn = vi.fn();
-    bus.on('checkpoint.passed', fn);
-    bus.emit('checkpoint.passed', 3);
-    expect(fn).toHaveBeenCalledWith(3);
+    bus.on('car.control', fn);
+    bus.emit('car.control', CONTROL);
+    expect(fn).toHaveBeenCalledWith(CONTROL);
   });
 
   it('on() returns an unsubscribe that removes the listener', () => {
@@ -52,8 +62,8 @@ describe('EventBus', () => {
       throw new Error('boom');
     });
     bus.on('car.control', good);
-    expect(() => bus.emit('car.control', { dt: 16 })).not.toThrow();
-    expect(good).toHaveBeenCalledWith({ dt: 16 });
+    expect(() => bus.emit('car.control', CONTROL)).not.toThrow();
+    expect(good).toHaveBeenCalledWith(CONTROL);
     expect(errors).toHaveLength(1);
     // The throwing listener is still subscribed (it just got skipped this emit).
     expect(bus.listenerCount('car.control')).toBe(2);
