@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
+import { applyDemoTransform } from '@/lib/demo-transform';
 
 /**
  * /api/proxy/<path> — server-side fetch of the real PolyTrack game.
@@ -106,6 +107,15 @@ function corsHeaders(request: NextRequest, headers: Headers): void {
   }
 }
 
+/** True when the proxy should serve a *transformed* main.bundle.js (demo mode). */
+function shouldTransform(host: string, segments: string[]): boolean {
+  return (
+    !!process.env.TSPML_TRANSFORM &&
+    host === DEFAULT_GAME_HOST &&
+    segments.join('/') === 'main.bundle.js'
+  );
+}
+
 async function proxyGet(
   request: NextRequest,
   segments: string[],
@@ -142,6 +152,22 @@ async function proxyGet(
       { error: 'upstream fetch failed', upstream },
       { status: 502, headers },
     );
+  }
+
+  // ── Demo transform mode ───────────────────────────────────────────────────
+  // When TSPML_TRANSFORM is set and this is the game's main bundle on the
+  // default host, rewrite it with a visible marker so a browser load proves a
+  // *transformed* bundle still boots & plays. See lib/demo-transform.ts.
+  if (shouldTransform(host, segments)) {
+    const src = await upstreamRes.text();
+    const { code, transformed, detail } = await applyDemoTransform(src);
+    const h = new Headers();
+    h.set('content-type', 'text/javascript; charset=utf-8');
+    h.set('cache-control', 'no-cache'); // transformed demo output — never cache
+    corsHeaders(request, h);
+    h.set('x-tspml-transformed', transformed ? '1' : '0');
+    if (detail) h.set('x-tspml-detail', detail.slice(0, 200));
+    return new NextResponse(code, { status: upstreamRes.status, headers: h });
   }
 
   // Build a clean response header set. Forward content-type only (see file
