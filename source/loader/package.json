@@ -4,5 +4,18 @@
   "private": true,
   "type": "module",
   "description": "Clean loader core. Discovers mod packages, parses mod.json, semver-resolves dependencies, topologically orders mods, and invokes entrypoints. Has no coupling to minified game internals.",
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "semver": "^7.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/semver": "^7.5.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
 }

@@ -20,7 +20,7 @@ my-mod/
 
 ```jsonc
 {
-  "id": "cool-cars",                       // globally unique, lowercase [a-z0-9-_]
+  "id": "cool-cars",                       // globally unique, lowercase [a-z0-9-]
   "name": "Cool Cars",
   "author": "alice",
   "latest": { "0.6.2": "1.0.0", "0.6.1": "1.0.0" }   // gameVersion -> modVersion
@@ -32,7 +32,7 @@ my-mod/
 ```jsonc
 {
   "schemaVersion": 1,
-  "id": "cool-cars",                       // lowercase [a-z0-9-_], globally unique
+  "id": "cool-cars",                       // lowercase [a-z0-9-], globally unique
   "name": "Cool Cars",
   "version": "1.0.0",                      // semver
   "description": "...",
