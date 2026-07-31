@@ -5,6 +5,15 @@
   "type": "module",
   "description": "Clean loader core. Discovers mod packages, parses mod.json, semver-resolves dependencies, topologically orders mods, and invokes entrypoints. Has no coupling to minified game internals.",
   "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"

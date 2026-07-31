@@ -166,6 +166,20 @@ try {
   keybindFired = -1;
 }
 
+// Verify the LOADED MOD (@tspml/demo-hud): its car.control listener rides the
+// same bus (so it should have fired during the race), and its KeyG keybind
+// should fire on dispatch. Proves a real mod package subscribed via the api.
+let mod = { loaded: false, control: 0, key: 0 };
+try {
+  await gameFrame.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyG" })));
+  mod = await gameFrame.evaluate(() => {
+    const d = (window.__tspml && window.__tspml.__demoHud) || {};
+    return { loaded: !!d.loaded, control: d.control || 0, key: d.key || 0 };
+  });
+} catch (e) {
+  mod = { loaded: false, control: 0, key: 0 };
+}
+
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
 const c = (e) => counts[e] || 0;
 // HARD requirements: gate cleared, bundle ran, bridge wired, the four verifiable
@@ -179,7 +193,10 @@ const pass =
   c("car.created") > 0 &&
   c("race.started") > 0 &&
   c("track.afterLoad") > 0 &&
-  keybindFired === 1;
+  keybindFired === 1 &&
+  mod.loaded &&
+  mod.control > 0 &&
+  mod.key === 1;
 
 console.log(
   JSON.stringify(
@@ -191,6 +208,9 @@ console.log(
         reachedGameplay: dom.reachedGameplay,
         bridgeWired,
         keybindFired,
+        modLoaded: mod.loaded,
+        modControl: mod.control,
+        modKey: mod.key,
         events: {
           "car.control": c("car.control"),
           "car.created": c("car.created"),

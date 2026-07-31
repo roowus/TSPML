@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 import { EventBus, Keybinds } from '@tspml/api-bridge';
+import type { ModApi } from '@tspml/loader';
+import { loadMods } from '@/lib/mod-loader';
 
 /**
  * Play page (milestone M2 proof of concept).
@@ -46,6 +48,7 @@ export default function PlayPage(): ReactElement {
   const [swError, setSwError] = useState<string | null>(null);
   const [controlCount, setControlCount] = useState(0);
   const [keybindCount, setKeybindCount] = useState(0);
+  const [modsStatus, setModsStatus] = useState('…');
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
@@ -54,6 +57,7 @@ export default function PlayPage(): ReactElement {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
+  const modsLoadedRef = useRef(false);
 
   // Surface a throttled count of car.control events. controlCar fires on INPUT
   // CHANGES (keydown/keyup), not every frame — so the count jumps in bursts
@@ -94,7 +98,30 @@ export default function PlayPage(): ReactElement {
       });
       demoKeybindRegistered.current = true;
     }
-    w.__tspml = { events: bus, keybinds: keybindsRef.current, version: TSPML_VERSION };
+    // The Tier-1 `api` object handed to mods (events + keybinds + logger).
+    const api = {
+      events: bus,
+      keybinds: keybindsRef.current,
+      logger: console,
+      version: TSPML_VERSION,
+    };
+    w.__tspml = api;
+    // Load the bundled demo mods via @tspml/loader — a real mod package receives
+    // this api and subscribes. Per-mod failure isolation (never boot-aborts).
+    if (!modsLoadedRef.current) {
+      modsLoadedRef.current = true;
+      void loadMods(api as unknown as ModApi)
+        .then((s) =>
+          setModsStatus(
+            s.loaded.length > 0
+              ? `✓ ${s.loaded.join(', ')}`
+              : s.failed.length > 0
+                ? `✗ ${s.failed[0]!.reason.slice(0, 48)}`
+                : 'none',
+          ),
+        )
+        .catch((e) => setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`));
+    }
   };
 
   useEffect(() => {
@@ -204,6 +231,16 @@ export default function PlayPage(): ReactElement {
             {keybindCount > 0
               ? `keybind F × ${keybindCount}`
               : 'press F (TSPML demo keybind)'}
+          </div>
+          <div style={bridgeRowStyle}>
+            <span
+              style={{
+                ...bridgeDotStyle,
+                background: modsStatus.startsWith('✓') ? '#3fb950' : modsStatus.startsWith('✗') ? '#f85149' : '#9aa4b2',
+              }}
+              aria-hidden="true"
+            />
+            mods: {modsStatus}
           </div>
           <p style={noteStyle}>
             The transform pipeline is built (M3); the <code>car.control</code>{' '}
