@@ -46,11 +46,12 @@ describe('EventBus', () => {
   it('once() fires only on the first emit', () => {
     const bus = new EventBus();
     const fn = vi.fn();
+    const finish = { frames: 12345 } as const;
     bus.once('race.finished', fn);
-    bus.emit('race.finished', 123.45);
-    bus.emit('race.finished', 200);
+    bus.emit('race.finished', finish);
+    bus.emit('race.finished', { frames: 9999 });
     expect(fn).toHaveBeenCalledTimes(1);
-    expect(fn).toHaveBeenCalledWith(123.45);
+    expect(fn).toHaveBeenCalledWith(finish);
     expect(bus.listenerCount('race.finished')).toBe(0);
   });
 

@@ -1,24 +1,32 @@
-// Headless browser smoke test — does the (optionally transformed) PolyTrack
-// game actually BOOT in a real browser via the portal? This closes the gap that
-// `node --check` can't: "parse-valid" != "run-valid". Only a real browser load
-// proves the transformed bundle executes.
+// Headless browser smoke test — does the (transformed) PolyTrack game BOOT and
+// emit Tier-1 events through the bridge in a real browser?
 //
-// Run, in two shells:
 //   TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev   # serve transformed game
 //   pnpm --filter @tspml/portal smoke                    # this script
-// (Drop TSPML_TRANSFORM to smoke the vanilla proxy path instead.)
 //
-// What it asserts (PASS): the transformed bundle EXECUTED (the `[TSPML]` marker
-// logged to the console) AND the game CLEARED its "unofficial version" gate
-// (pastGate). If a race actually ran, it MUST have fired `car.control` events
-// through the bridge (carControlEvents > 0) — zero during a race is an M4-B/C
-// wiring regression. Also reports reachedGameplay, uncaught page errors, failed
-// network requests, canvas size, and saves screenshots. The genuinely-subjective
-// call ("does it look / play well") is still left to a human.
+// PASS requires: the transformed bundle ran ([TSPML] marker logged), the
+// "unofficial version" gate cleared (pastGate), the bridge is wired, AND the
+// verifiable Tier-1 events fired during the auto-started race — car.control,
+// car.created, race.started, track.afterLoad. checkpoint.passed / race.finished
+// need the player to actually pass a checkpoint / finish, so they are reported
+// but not asserted (expect 0 in this harness).
+//
+// KEY: events like car.created / track.afterLoad fire at RACE SETUP (early),
+// so we subscribe to ALL events the moment the portal exposes window.__tspml —
+// before the boot/race window — instead of at a fixed late point.
 import { chromium } from "playwright";
 
 const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-smoke.png";
+
+const COUNTED_EVENTS = [
+  "car.control",
+  "car.created",
+  "race.started",
+  "track.afterLoad",
+  "checkpoint.passed",
+  "race.finished",
+];
 
 const browser = await chromium.launch({
   headless: true,
@@ -40,24 +48,57 @@ page.on("requestfailed", (r) =>
   failed.push(`${r.method()} ${r.url().slice(0, 140)} :: ${r.failure()?.errorText ?? "?"}`),
 );
 
+function findFrame(urlIncludes) {
+  return (
+    page.frames().find((f) => f !== page.mainFrame() && f.url().includes(urlIncludes)) ?? null
+  );
+}
+
 process.stderr.write(`smoke: goto ${URL}\n`);
 await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-// NO reload. The page mounts the game iframe only after the service worker
-// controls the page (controllerchange), so a first-visit load already proxies
-// the game's track/leaderboard fetches — this is exactly the path that used to
-// throw "Failed to load track" on a plain first visit (issue #9). Testing it
-// without a reload is the real regression signal.
-// Boot window: SW activate → iframe mount → webpack init → module graph → Car
-// module load (badge) → assets load → loading screen → menu/race. Through the
-// dev proxy clearing the gate + reaching the menu takes ~20s; a full race ~35s.
-await page.waitForTimeout(34000);
 
-// The game runs inside a same-origin iframe at /api/proxy/...
-const gameFrame =
-  page
-    .frames()
-    .find((f) => f !== page.mainFrame() && f.url().includes("/api/proxy")) ??
-  page.mainFrame();
+// Wait for the game iframe to mount (the page mounts it after the service worker
+// controls the page), then for the portal to expose window.__tspml (iframe
+// onLoad). Subscribe to all Tier-1 events IMMEDIATELY once available.
+let gameFrame = null;
+for (let i = 0; i < 60 && !gameFrame; i++) {
+  gameFrame = findFrame("/api/proxy");
+  if (!gameFrame) await page.waitForTimeout(300);
+}
+gameFrame = gameFrame ?? page.mainFrame();
+
+let bridgeWired = false;
+let bridgeError = null;
+for (let i = 0; i < 50; i++) {
+  const r = await gameFrame
+    .evaluate(() => !!(window.__tspml && typeof window.__tspml.on === "function"))
+    .catch(() => false);
+  if (r) {
+    bridgeWired = true;
+    break;
+  }
+  await page.waitForTimeout(400);
+}
+if (bridgeWired) {
+  try {
+    await gameFrame.evaluate((evs) => {
+      window.__tspmlCounts = {};
+      for (const e of evs) {
+        window.__tspmlCounts[e] = 0;
+        window.__tspml.on(e, () => {
+          window.__tspmlCounts[e] = (window.__tspmlCounts[e] || 0) + 1;
+        });
+      }
+    }, COUNTED_EVENTS);
+  } catch (e) {
+    bridgeError = String(e && e.message ? e.message : e).slice(0, 160);
+  }
+}
+
+// Boot/race window: webpack init → module graph → assets → loading screen →
+// menu → auto-started race. car.created + track.afterLoad fire during race
+// setup in this window (we are already subscribed).
+await page.waitForTimeout(35000);
 
 const dom = await gameFrame.evaluate(() => {
   const badge = document.getElementById("tspml-live-marker");
@@ -67,117 +108,29 @@ const dom = await gameFrame.evaluate(() => {
   const text = document.body ? document.body.innerText : "";
   return {
     href: location.href,
-    title: document.title,
     badgePresent: !!badge,
-    badgeText: badge ? badge.textContent : null,
-    canvasPresent: !!canvas,
     canvasSize: canvas ? `${canvas.width}x${canvas.height}` : null,
-    // Did the game get PAST the "unofficial version" gate? The gate holds the
-    // game on a static warning screen (no menu, no loading). Once cleared it
-    // shows the loading screen + puts the full menu in the DOM (Play, tracks,
-    // etc.), and ultimately the race HUD. See docs/research/portal-browser-test-findings.md.
     pastGate:
       (menu && menu.classList.contains("loading-screen")) ||
       (buttons && buttons.querySelectorAll("button,[role=button],a").length > 0) ||
       /km\/h|00:00\.\d/.test(text),
     reachedGameplay: /km\/h/.test(text),
-    bodyText: text.slice(0, 300),
+    bodyText: text.slice(0, 200),
   };
 });
-
 const menuShot = SHOT.replace(/\.png$/, "-menu.png");
 await page.screenshot({ path: menuShot });
 
-// M4-C: subscribe to the bridge's `car.control` event. The portal exposes the
-// Tier-1 EventBus on the iframe as `window.__tspml`; the transformed controlCar
-// hook emits to it each frame. Count emissions while the race runs below.
-const bridgeWired = await gameFrame.evaluate(() => {
-  try {
-    if (window.__tspml && typeof window.__tspml.on === "function") {
-      window.__tspmlControlCount = 0;
-      window.__tspml.on("car.control", () => {
-        window.__tspmlControlCount = (window.__tspmlControlCount || 0) + 1;
-      });
-      return true;
-    }
-  } catch (e) {
-    window.__tspmlErr = String(e);
-  }
-  return false;
-});
-
-// Probe: can we get past the menu into actual gameplay? (non-fatal — gameplay may
-// legitimately need server calls the proxy doesn't handle yet.)
-const errsBefore = pageErrors.length;
-const probe = {
-  clicked: null,
-  candidates: [],
-  afterCanvas: dom.canvasSize,
-  afterBodyLen: null,
-  afterText: null,
-  newErrorsAfterClick: 0,
-};
-try {
-  const click = await gameFrame.evaluate(() => {
-    const all = [...document.querySelectorAll("button,[role=button],a,div,span,li")];
-    const vis = (e) => {
-      const r = e.getBoundingClientRect();
-      return r.width > 40 && r.height > 14 && r.top >= 0;
-    };
-    const cands = all
-      .filter(vis)
-      .map((e) => (e.textContent || "").trim())
-      .filter((t) => t && t.length < 28)
-      .slice(0, 40);
-    const play = all.find(
-      (e) =>
-        vis(e) &&
-        /\b(play|single|race|start|solo|drive|time attack)\b/i.test((e.textContent || "").trim()) &&
-        (e.textContent || "").trim().length < 28,
-    );
-    if (play) {
-      play.click();
-      return { clicked: (play.textContent || "").trim().slice(0, 28), candidates: cands };
-    }
-    return { clicked: null, candidates: cands };
-  });
-  probe.clicked = click.clicked;
-  probe.candidates = click.candidates;
-  await page.waitForTimeout(7000);
-  const after = await gameFrame.evaluate(() => ({
-    canvas: (() => {
-      const c = document.querySelector("canvas");
-      return c ? `${c.width}x${c.height}` : null;
-    })(),
-    bodyLen: document.body ? document.body.innerText.length : 0,
-    text: (document.body ? document.body.innerText : "").slice(0, 240),
-  }));
-  probe.afterCanvas = after.canvas;
-  probe.afterBodyLen = after.bodyLen;
-  probe.afterText = after.text;
-} catch (e) {
-  probe.error = String(e && e.message ? e.message : e).slice(0, 200);
-}
-probe.newErrorsAfterClick = pageErrors.length - errsBefore;
-const raceShot = SHOT.replace(/\.png$/, "-race.png");
-await page.screenshot({ path: raceShot });
-
-// `controlCar` is input-CHANGE-driven (fires on keydown/keyup via the input
-// state's change callback, not every frame), so a passive observer gets zero
-// events. Focus the canvas (recording failure rather than swallowing it), then
-// drive + POLL for the first car.control event — decoupling from exact
-// race-start timing instead of a single point read.
+// controlCar (car.control) + race.started are input-driven: race.started fires
+// on first throttle. Focus the canvas, then drive + poll for events.
 let clickOk = true;
 try {
   await gameFrame.locator("canvas").first().click({ timeout: 3000 });
 } catch (e) {
   clickOk = false;
-  probe.driveError = `canvas click failed: ${String(e && e.message ? e.message : e).slice(0, 140)}`;
 }
-probe.clickOk = clickOk;
-
-let bridge = { count: 0, err: null };
-for (let attempt = 0; attempt < 6 && bridge.count === 0; attempt++) {
+let counts = {};
+for (let attempt = 0; attempt < 6; attempt++) {
   await page.keyboard.down("ArrowUp");
   await page.waitForTimeout(600);
   await page.keyboard.up("ArrowUp");
@@ -186,23 +139,26 @@ for (let attempt = 0; attempt < 6 && bridge.count === 0; attempt++) {
     await page.waitForTimeout(500);
     await page.keyboard.up("ArrowLeft");
   }
-  bridge = await gameFrame.evaluate(() => ({
-    count: window.__tspmlControlCount ?? 0,
-    err: window.__tspmlErr ?? null,
-  }));
+  counts = await gameFrame.evaluate(() => window.__tspmlCounts || {});
+  if ((counts["car.control"] || 0) > 0 && (counts["race.started"] || 0) > 0) break;
 }
 
+const raceShot = SHOT.replace(/\.png$/, "-race.png");
+await page.screenshot({ path: raceShot });
+
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
-const inRace = dom.reachedGameplay || /km\/h/.test(probe.afterText || "");
-// HARD requirement (M4-B/C): the bridge must be wired AND `car.control` must
-// have fired. A vacuous pass (bridge unwired / zero events) is a FAILURE, not a
-// skip — this is the exact wiring the milestone exists to prove. `inRace` is
-// reported for diagnosis only.
+const c = (e) => counts[e] || 0;
+// HARD requirements: gate cleared, bundle ran, bridge wired, and the four
+// verifiable Tier-1 events all fired. checkpoint.passed / race.finished are
+// reported only (they need the player to pass a checkpoint / finish the race).
 const pass =
   dom.pastGate &&
   markerLogs.length > 0 &&
   bridgeWired &&
-  bridge.count > 0;
+  c("car.control") > 0 &&
+  c("car.created") > 0 &&
+  c("race.started") > 0 &&
+  c("track.afterLoad") > 0;
 
 console.log(
   JSON.stringify(
@@ -213,21 +169,27 @@ console.log(
         pastGate: dom.pastGate,
         reachedGameplay: dom.reachedGameplay,
         bridgeWired,
-        carControlEvents: bridge.count,
-        badgePresent: dom.badgePresent,
-        canvasPresent: dom.canvasPresent,
+        events: {
+          "car.control": c("car.control"),
+          "car.created": c("car.created"),
+          "race.started": c("race.started"),
+          "track.afterLoad": c("track.afterLoad"),
+          "checkpoint.passed": c("checkpoint.passed"),
+          "race.finished": c("race.finished"),
+        },
         canvasSize: dom.canvasSize,
+        badgePresent: dom.badgePresent,
+        clickOk,
         jsPageErrors: pageErrors.length,
         failedRequests: failed.length,
       },
-      dom,
+      bridgeError,
       markerLogs: markerLogs.slice(0, 5),
-      pageErrors: pageErrors.slice(0, 10),
-      failedSample: failed.slice(0, 15),
-      consoleSample: consoleMsgs.slice(0, 25),
+      pageErrors: pageErrors.slice(0, 8),
+      failedSample: failed.slice(0, 10),
+      bodyText: dom.bodyText,
       menuShot,
       raceShot,
-      probe,
     },
     null,
     2,

@@ -83,8 +83,92 @@ const CONTROL_PATCH = {
   inject: CONTROL_EMIT,
 } as const satisfies Patch;
 
-/** The demo patches, applied together (badge + car.control emit). */
-const DEMO_PATCHES: readonly Patch[] = [BADGE_PATCH, CONTROL_PATCH];
+// ── M4-D/E: more Tier-1 events ───────────────────────────────────────────────
+// All hash-gated to 0.6.2 by applyDemoTransform (below), so the minified param
+// names referenced here are safe — a different build fails closed.
+
+// car.created: createCar returns {id, carState}; carId is in the RETURN value,
+// so modifyReturn wraps it: `return X` -> `return (wrap)(X)`. The wrap emits
+// then returns X unchanged. `s` (5th param = carRecording) is in scope at the
+// return; non-null => ghost/replay car.
+const CAR_CREATED_WRAP =
+  "((__v) => { try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit && __v && __v.id != null) window.__tspml.emit('car.created', { carId: __v.id, isReplay: s != null }); } catch (_e) {} return __v; })";
+const CAR_CREATED_PATCH = {
+  op: "modifyReturn",
+  target: {
+    anchor: { literals: ["CreateCar", "ControlCar", "TestDeterminism"], minHits: 3 },
+    selector: { kind: "method", name: "createCar" },
+  },
+  wrap: CAR_CREATED_WRAP,
+} as const satisfies Patch;
+
+// race.started: fires on a Car's start() — for the PLAYER on first throttle
+// (caller guards !hasStarted()), but ALSO for ghost/replay cars at their
+// creation (they call start() unconditionally). So it's PER-CAR, not a singleton
+// "race began" signal; player-only filtering needs an isReplay accessor (TODO).
+// No payload.
+const RACE_STARTED_INJECT =
+  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit) window.__tspml.emit('race.started'); } catch (_e) {}";
+const RACE_STARTED_PATCH = {
+  op: "before",
+  target: {
+    anchor: { literals: ["skidding", "engine", "tires", "BrakeLight"], minHits: 3 },
+    selector: { kind: "method", name: "start" },
+  },
+  inject: RACE_STARTED_INJECT,
+} as const satisfies Patch;
+
+// track.afterLoad: loadTrackData returns true after parsing the track; emit at
+// the tail (before the return). `e` is the parsed track data (in scope there).
+const TRACK_AFTERLOAD_INJECT =
+  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit) { var __tid = ''; try { __tid = (e && typeof e.getId === 'function') ? e.getId() : ''; } catch (_) {} window.__tspml.emit('track.afterLoad', __tid); } } catch (_e) {}";
+const TRACK_AFTERLOAD_PATCH = {
+  op: "after",
+  target: {
+    anchor: {
+      literals: ["Track part color does not exist", "Track part below ground", "Checkpoint has no detector", "Track part index out of bounds"],
+      minHits: 3,
+    },
+    selector: { kind: "method", name: "loadTrackData" },
+  },
+  inject: TRACK_AFTERLOAD_INJECT,
+} as const satisfies Patch;
+
+// checkpoint.passed + race.finished: both are detected by DIFFING carState
+// inside setCarState (a per-frame method), so ONE before-inject guards both
+// transitions (cheap: a couple field reads on the hot path). At the HEAD,
+// this.te is still the OLD state (getNextCheckpointIndex()/hasFinished() read
+// old); `e` is the NEW carState. PER-CAR: fires for the player AND ghosts
+// (setCarState runs for every car); these carry no isReplay discriminator
+// (carId/replay is a private field here), unlike car.created. Player-only
+// filtering needs an isReplay accessor (TODO).
+const CHECKPOINT_FINISH_INJECT =
+  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit && e) {" +
+  " if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) window.__tspml.emit('checkpoint.passed', this.getNextCheckpointIndex());" +
+  " if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) window.__tspml.emit('race.finished', { frames: e.finishFrames });" +
+  " } } catch (_e) {}";
+const CHECKPOINT_FINISH_PATCH = {
+  op: "before",
+  target: {
+    // Module 641 (the car-controller) located by its STRING-DATA literals (audio
+    // buffer / material names) — NOT method names: the locator matches string
+    // literals, and addCheckpointCallback/setCarState are identifiers. This is
+    // the same module race.started's `start` lives in; setCarState is its peer.
+    anchor: { literals: ["skidding", "engine", "tires", "BrakeLight"], minHits: 3 },
+    selector: { kind: "method", name: "setCarState" },
+  },
+  inject: CHECKPOINT_FINISH_INJECT,
+} as const satisfies Patch;
+
+/** The demo patches, applied together (badge + Tier-1 event emits). */
+const DEMO_PATCHES: readonly Patch[] = [
+  BADGE_PATCH,
+  CONTROL_PATCH,
+  CAR_CREATED_PATCH,
+  RACE_STARTED_PATCH,
+  TRACK_AFTERLOAD_PATCH,
+  CHECKPOINT_FINISH_PATCH,
+];
 
 export interface DemoTransformResult {
   /** Bundle source to serve (transformed code, or the original on failure). */

@@ -109,10 +109,23 @@ Wired `controlCar` → `car.control` end-to-end and **verified headlessly** — 
 
 **Adversarially reviewed** (4-lens workflow: behavior / safety / realm / test; 0 blockers, 6 major, 6 minor, 2 nit). Fixes applied: engaged the hash gate (the "hash-gated" claim was previously false), made the smoke assertion non-vacuous, corrected the call-rate comment, doc'd the cross-realm payload caveat. Declined one minor (`applyBefore` directive-prologue) after **verifying** babel stores function directives in a separate `directives` field, so `unshift` into `body` already preserves them. `@tspml/api` `CarControlState` corrected to the control-input shape; api-bridge test moved to `tests/` (matches repo convention, keeps `dist` clean). **124 unit tests green.**
 
+## 2026-07-31 — M4-D/E/F: five more Tier-1 events wired + 4 verified firing ✅
+
+Ran a **discovery workflow** (5 agents, one per event) to find clean hook points in the deobfuscated 0.6.2 bundle, then wired 5 more Tier-1 events as transform patches (all hash-gated via `applyDemoTransform`):
+
+- **`car.created`** — `modifyReturn` on `createCar` (module 5220); carId is in the return value, so the wrap emits `{carId, isReplay}` then returns it unchanged.
+- **`race.started`** — `before` on `start` (module 641, anchor = its audio/material string literals).
+- **`track.afterLoad`** — `after` on `loadTrackData` (module 6762).
+- **`checkpoint.passed` + `race.finished`** — combined `before` on `setCarState` (module 641) with diff guards (`e.nextCheckpointIndex > this.getNextCheckpointIndex()` / `e.finishFrames != null && !this.hasFinished()`), turning the per-frame method into once-per-transition emits.
+
+**Headless-verified** (smoke subscribes to ALL events the moment the bridge is exposed — before race setup — since `car.created`/`track.afterLoad` fire early): `car.created=1`, `race.started=1`, `track.afterLoad=2` (menu bg + race), `car.control=5`; `checkpoint.passed`/`race.finished=0` (need real race progress; wired but not asserted).
+
+**Discovery fix during implementation:** the checkpoint anchor originally used method-name *identifiers* (`addCheckpointCallback`…) which the locator can't match (it keys off **string/numeric literals** only) → reused module 641's string-data anchor instead. **Adversarially reviewed** (3 lenses; 0 blockers, 1 major→fixed, nits→fixed): the major was that `race.started`/`checkpoint.passed`/`race.finished` fire **per-car** (player + ghosts), not player-only as comments claimed (the player flag is a private minified WeakMap field the inject can't read) → corrected the comments + filed **issue #10** (add an `isReplay` accessor for player-only filtering). Also normalized `CAR_CREATED` minHits 2→3 and replaced a dead `trackPartData` identifier-anchor entry with a real string literal. `@tspml/api` gained `CarCreatedInfo`/`RaceFinishInfo` payload types.
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (9) — **124 tests green**, CI green.
 - **The portal plays PolyTrack end-to-end** (ADR-012/013) — a transformed, modded game reaches an actual race.
-- **The mod-loader loop is proven** (M4-B/C): the first real mod event (`car.control`) fires inside the running game, flowing through the Tier-1 `EventBus` to a subscriber, hash-gated + headlessly verified.
+- **The mod-loader loop is proven** (M4-B–F): **6 Tier-1 events** fire inside the running game — `car.control`, `car.created`, `race.started`, `track.afterLoad` (all headlessly verified) + `checkpoint.passed`, `race.finished` (wired, need real race progress) — flowing through the `EventBus` to subscribers, hash-gated.
 - **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8 (bot-protected `vps.kodub.com`; the extension is the resilient path). Non-blocking for local gameplay.
 - **Next:** finish M4 — more Tier-1 events (render/track/checkpoint) + registries (cars/blocks/audio) via the same transform+mappings path, then wire real mod loading into the portal.
