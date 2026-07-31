@@ -48,21 +48,25 @@ export default function PlayPage(): ReactElement {
     }
     let cancelled = false;
     setSwState('registering');
+    // The service worker must be CONTROLLING this page before the game loads:
+    // the game's runtime fetches (track data, leaderboard) go to kodub.com and
+    // are only rewritten to /api/proxy if the SW intercepts them. On a first
+    // visit the SW is registered but not yet the controller, so loading the
+    // game immediately lets its track fetch escape the SW → CORS-fail →
+    // "Failed to load track" (issue #9). We therefore mount the game iframe
+    // only after `controllerchange` (or immediately if already controlled).
+    const control = (): void => {
+      if (!cancelled) setSwState('active');
+    };
+    if (navigator.serviceWorker.controller) {
+      control();
+    } else {
+      navigator.serviceWorker.addEventListener('controllerchange', control, {
+        once: true,
+      });
+    }
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
-      .then((registration) => {
-        if (cancelled) return;
-        const apply = (): void => {
-          if (!cancelled) setSwState('active');
-        };
-        // sw.js calls skipWaiting() on install + clients.claim() on activate, so
-        // the SW controls this page after the first reload.
-        if (registration.active) {
-          apply();
-        } else {
-          registration.addEventListener('activate', apply);
-        }
-      })
       .catch((err: unknown) => {
         if (cancelled) return;
         setSwState('error');
@@ -88,13 +92,25 @@ export default function PlayPage(): ReactElement {
 
       <div style={gridStyle}>
         <section style={gameSectionStyle} aria-label="Game">
-          <iframe
-            title="PolyTrack (proxied)"
-            src={GAME_FRAME_SRC}
-            style={frameStyle}
-            allow="autoplay; fullscreen; gamepad; pointer-lock"
-            allowFullScreen
-          />
+          {swState === 'active' ? (
+            <iframe
+              title="PolyTrack (proxied)"
+              src={GAME_FRAME_SRC}
+              style={frameStyle}
+              allow="autoplay; fullscreen; gamepad; pointer-lock"
+              allowFullScreen
+            />
+          ) : (
+            <div style={startingStyle}>
+              {swState === 'error'
+                ? 'Service worker unavailable — the game needs it to load.'
+                : 'Activating service worker…'}
+              <span style={startingHintStyle}>
+                The game mounts once the service worker controls this page, so its
+                track/leaderboard requests are proxied (issue #9).
+              </span>
+            </div>
+          )}
         </section>
 
         <aside style={asideStyle} aria-label="Mods">
@@ -170,6 +186,23 @@ const gameSectionStyle: CSSProperties = {
   aspectRatio: '16 / 9',
 };
 const frameStyle: CSSProperties = { width: '100%', height: '100%', border: '0' };
+const startingStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  height: '100%',
+  color: '#9aa4b2',
+  fontSize: 14,
+};
+const startingHintStyle: CSSProperties = {
+  fontSize: 12,
+  maxWidth: 320,
+  textAlign: 'center',
+  lineHeight: 1.5,
+  opacity: 0.8,
+};
 const asideStyle: CSSProperties = {
   background: '#14171f',
   border: '1px solid #21262d',

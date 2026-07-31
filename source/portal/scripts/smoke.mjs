@@ -43,16 +43,15 @@ page.on("requestfailed", (r) =>
 
 process.stderr.write(`smoke: goto ${URL}\n`);
 await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-// Let the service worker register + claim, then reload so runtime requests route
-// through the proxy on the second load.
-await page.waitForTimeout(2500);
-await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-// Boot window: webpack init → module graph → Car module load (badge) → assets
-// load → loading screen → menu/race. Through the dev proxy a full boot to the
-// menu takes ~20s; reaching an actual race takes ~35s. We wait long enough to
-// clear the "unofficial version" gate and reach at least the loading screen /
-// menu (the gate-neutralization regression signal), then probe for gameplay.
-await page.waitForTimeout(24000);
+// NO reload. The page mounts the game iframe only after the service worker
+// controls the page (controllerchange), so a first-visit load already proxies
+// the game's track/leaderboard fetches — this is exactly the path that used to
+// throw "Failed to load track" on a plain first visit (issue #9). Testing it
+// without a reload is the real regression signal.
+// Boot window: SW activate → iframe mount → webpack init → module graph → Car
+// module load (badge) → assets load → loading screen → menu/race. Through the
+// dev proxy clearing the gate + reaching the menu takes ~20s; a full race ~35s.
+await page.waitForTimeout(34000);
 
 // The game runs inside a same-origin iframe at /api/proxy/...
 const gameFrame =
