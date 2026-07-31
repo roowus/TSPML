@@ -18,6 +18,19 @@ export interface CarControlState {
   readonly reset: boolean;
 }
 
+/** Emitted when a car is created (`createCar`). Fires once per car — player AND
+ * ghost/replay cars; filter on `isReplay` for the player's car. */
+export interface CarCreatedInfo {
+  readonly carId: number;
+  readonly isReplay: boolean;
+}
+
+/** Emitted when a race is finished (finish line crossed). */
+export interface RaceFinishInfo {
+  /** Finish time in physics-sim frames (the game's internal unit). */
+  readonly frames: number;
+}
+
 /**
  * The TSPML event map. Keys are the event names mods subscribe to; values are
  * the listener argument tuples (readonly so listeners can't mutate payloads).
@@ -46,7 +59,7 @@ export interface TspmlEventMap {
   'track.unload': readonly [trackId: string];
 
   // ── car ─────────────────────────────────────────────────────────────────────
-  'car.created': readonly [];
+  'car.created': readonly [car: CarCreatedInfo];
   /** Emitted every frame the game steps the car controller (M4 slice 1). */
   'car.control': readonly [state: CarControlState];
   'car.styleChanged': readonly [];
@@ -55,7 +68,7 @@ export interface TspmlEventMap {
   'checkpoint.passed': readonly [index: number];
   'checkpoint.respawn': readonly [index: number];
   'race.started': readonly [];
-  'race.finished': readonly [time: number];
+  'race.finished': readonly [result: RaceFinishInfo];
 }
 
 /** Listener for a given event. */

@@ -7,6 +7,8 @@
 
 export type {
   CarControlState,
+  CarCreatedInfo,
+  RaceFinishInfo,
   TspmlEventEmitter,
   TspmlEventMap,
   TspmlListener,
