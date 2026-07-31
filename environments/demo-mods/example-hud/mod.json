@@ -6,6 +6,7 @@
   "description": "Demo mod: subscribes to car.control and registers a KeyG keybind. Proves @tspml/loader loads a real mod package end-to-end.",
   "entrypoint": "entrypoint.js",
   "targets": [">=0.6.0 <0.7.0"],
+  "mixins": [{ "config": "mixins.json", "environment": "web" }],
   "authors": ["TSPML"],
   "license": "MIT"
 }

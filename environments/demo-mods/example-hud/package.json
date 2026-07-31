@@ -12,9 +12,10 @@
       "types": "./dist/entrypoint.d.ts",
       "import": "./dist/entrypoint.js"
     },
-    "./mod.json": "./mod.json"
+    "./mod.json": "./mod.json",
+    "./mixins.json": "./mixins.json"
   },
-  "files": ["dist", "mod.json"],
+  "files": ["dist", "mod.json", "mixins.json"],
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },

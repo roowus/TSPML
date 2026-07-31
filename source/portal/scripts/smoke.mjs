@@ -123,6 +123,10 @@ const dom = await gameFrame.evaluate(() => {
       (buttons && buttons.querySelectorAll("button,[role=button],a").length > 0) ||
       /km\/h|00:00\.\d/.test(text),
     reachedGameplay: /km\/h/.test(text),
+    // M5-A: a mod-DECLARED mixin (demo-hud's mixins.json) injected this marker.
+    modMixinApplied: !!(
+      window.__demoHudMixin || document.getElementById("tspml-demo-hud-mixin")
+    ),
     bodyText: text.slice(0, 200),
   };
 });
@@ -196,7 +200,8 @@ const pass =
   keybindFired === 1 &&
   mod.loaded &&
   mod.control > 0 &&
-  mod.key === 1;
+  mod.key === 1 &&
+  dom.modMixinApplied;
 
 console.log(
   JSON.stringify(
@@ -211,6 +216,7 @@ console.log(
         modLoaded: mod.loaded,
         modControl: mod.control,
         modKey: mod.key,
+        modMixinApplied: dom.modMixinApplied,
         events: {
           "car.control": c("car.control"),
           "car.created": c("car.created"),

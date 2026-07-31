@@ -14,6 +14,7 @@
  */
 import type { Patch } from "@tspml/transform";
 import { createHash } from "node:crypto";
+import { MOD_MIXIN_PATCHES } from "./demo-mods";
 
 const MARKER_ID = "tspml-live-marker";
 
@@ -160,7 +161,7 @@ const CHECKPOINT_FINISH_PATCH = {
   inject: CHECKPOINT_FINISH_INJECT,
 } as const satisfies Patch;
 
-/** The demo patches, applied together (badge + Tier-1 event emits). */
+/** The loader-owned bridge patches (badge + Tier-1 event emits). */
 const DEMO_PATCHES: readonly Patch[] = [
   BADGE_PATCH,
   CONTROL_PATCH,
@@ -169,6 +170,9 @@ const DEMO_PATCHES: readonly Patch[] = [
   TRACK_AFTERLOAD_PATCH,
   CHECKPOINT_FINISH_PATCH,
 ];
+
+/** All applied patches: the bridge patches PLUS mod-declared mixins (M5-A). */
+const ALL_PATCHES: readonly Patch[] = [...DEMO_PATCHES, ...MOD_MIXIN_PATCHES];
 
 export interface DemoTransformResult {
   /** Bundle source to serve (transformed code, or the original on failure). */
@@ -194,7 +198,7 @@ export async function applyDemoTransform(
     // (failedReason 'hash-mismatch'), so the minified-param inject below can
     // never run against a bundle it wasn't authored for.
     const liveHash = `sha256:${createHash("sha256").update(bundleSource).digest("hex")}`;
-    const r = transform(bundleSource, DEMO_PATCHES, {
+    const r = transform(bundleSource, ALL_PATCHES, {
       bundleHash: liveHash,
       expectedBundleHash: EXPECTED_0_6_2_BUNDLE_HASH,
       compact: true,
@@ -208,13 +212,13 @@ export async function applyDemoTransform(
       };
     }
     const detail = r.applied.map((a) => a?.detail).concat(r.failed.map((f) => f.detail)).join(" | ");
-    if (r.outputValid && r.applied.length === DEMO_PATCHES.length) {
+    if (r.outputValid && r.applied.length === ALL_PATCHES.length) {
       return { code: r.code, transformed: true, detail };
     }
     return {
       code: bundleSource,
       transformed: false,
-      detail: `transform did not apply cleanly (${r.applied.length}/${DEMO_PATCHES.length} applied): ${detail}`,
+      detail: `transform did not apply cleanly (${r.applied.length}/${ALL_PATCHES.length} applied): ${detail}`,
     };
   } catch (err) {
     return {
