@@ -79,9 +79,17 @@ Updated the docs in depth to capture the current end-to-end state (the user aske
 
 Manual browser run (past the unofficial gate): the game throws an error screen — *"PolyTrack encountered an unexpected error! Unhandled Rejection: Failed to load track"* (with stack trace + Reload/Close/Reset Settings). The TSPML badge is still present, so the transformed bundle is running fine — this is a **network/path** issue, not a transform issue. Track data is fetched from a kodub backend endpoint that either 400s through the proxy (Origin not trusted — related to #7) or bypassed the service worker on first load (SW still "registering", not `active` → the fetch went direct to `kodub.com` → CORS-failed). Filed **issue #9**; scoped to M7/M8 (delivery/network/origin: SW-active-before-fetch + correct track-endpoint forwarding).
 
+## 2026-07-31 — ★ M4 task 1: unofficial-version gate NEUTRALIZED → portal PLAYS end-to-end ✅
+
+User chose "gate first". I traced the gate in the unpacked 0.6.2 bundle (`Yo()`/`Xo()`/`Qo()` predicates in `deobfuscated.js`) and found that PolyTrack exposes a **first-class mod-loader hook** — `window.polytrackModConfiguration` (the exact mechanism PML uses to identify itself). Supplying `{modName:"TSPML", author:"roowus"}` sets `Qo()=true`, which clears the gameplay gate. **Fix:** the proxy injects `<script>window.polytrackModConfiguration=…</script>` into the proxied HTML `<head>` *before* the deferred bundles run (gated on `TSPML_TRANSFORM=1`, `x-tspml-unblocked` header for observability). This is **delivery-layer HTML injection, not bundle surgery, and no origin-spoof** — and the only viable option, since the check lives outside the webpack module graph (a module-anchor transform can't reach it).
+
+**Headless-verified outcome — the portal now plays PolyTrack END-TO-END:** transformed bundle boots → gate clears → assets + a track load → a **real race on "Summer 1"** with full HUD (speedometer `0 km/h`, timer `00:00.000`, `0/3` checkpoints), green `TSPML ✔ LIVE` badge live over it, 149× 200 / 0 failed requests. The earlier "Failed to load track" (#9) turned out to be a first-load SW-not-active artifact — resolved by the existing reload, no code change. Only one online `502` remains (#7, M8, non-blocking).
+
+Updated the smoke test (`scripts/smoke.mjs`) to **PASS on gate-clearance** (`pastGate`: loading screen up / full menu in DOM / race HUD) rather than the timing-flaky badge check; `reachedGameplay` is the stronger informational signal. ADR-013; findings rewritten in [portal-browser-test-findings.md](../research/portal-browser-test-findings.md). **Issues #8 + #9 closed.**
+
 ## Where we stand (2026-07-31)
 
 - **Engines, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) — **115 tests green**, CI green.
-- **Transform run-validated in a real browser** (the project's biggest risk, retired) — ADR-012.
-- **Not yet playable end-to-end** — blocked by PolyTrack's own origin gate (#8, M4) and track-load/online network paths (#9/#7, M7/M8), *not* by the transform.
-- **Next:** M4 — first task is neutralizing the unofficial-version gate via a transform.
+- **Transform run-validated in a real browser** (ADR-012) and **the portal plays the game end-to-end** (ADR-013) — a transformed, modded PolyTrack reaches an actual race.
+- **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8. Non-blocking for local gameplay.
+- **Next:** M4 continues — event bus + API bridge (wire physics/render/track/input events + registries to the game via transform+mappings) so *real mods* can hook the now-playable game.

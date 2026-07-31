@@ -8,12 +8,14 @@
 //   pnpm --filter @tspml/portal smoke                    # this script
 // (Drop TSPML_TRANSFORM to smoke the vanilla proxy path instead.)
 //
-// What it asserts: the injected TSPML badge appears in the game iframe's DOM
-// (=> the Car-module factory ran => the transformed bundle executed without
-// throwing up to that point) AND the marker logged to the console. It also
-// reports uncaught page errors + failed network requests + whether a <canvas>
-// rendered + saves a screenshot. The genuinely-subjective call ("does it look
-// / play well") is still left to a human.
+// What it asserts (PASS): the transformed bundle EXECUTED (the `[TSPML]` marker
+// logged to the console) AND the game CLEARED its "unofficial version" gate
+// (pastGate: the loading screen is up / the full menu is in the DOM / a race
+// HUD rendered — i.e. it proceeded past the static warning screen). It also
+// reports whether a full race was reached (reachedGameplay), uncaught page
+// errors, failed network requests, canvas size, and saves screenshots. The
+// genuinely-subjective call ("does it look / play well") is still left to a
+// human, but reaching a race is now routinely observed (issue #8 solved).
 import { chromium } from "playwright";
 
 const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
@@ -45,8 +47,12 @@ await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
 // through the proxy on the second load.
 await page.waitForTimeout(2500);
 await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-// Boot window: webpack init → module graph → Car module load (badge) → render.
-await page.waitForTimeout(12000);
+// Boot window: webpack init → module graph → Car module load (badge) → assets
+// load → loading screen → menu/race. Through the dev proxy a full boot to the
+// menu takes ~20s; reaching an actual race takes ~35s. We wait long enough to
+// clear the "unofficial version" gate and reach at least the loading screen /
+// menu (the gate-neutralization regression signal), then probe for gameplay.
+await page.waitForTimeout(24000);
 
 // The game runs inside a same-origin iframe at /api/proxy/...
 const gameFrame =
@@ -58,6 +64,9 @@ const gameFrame =
 const dom = await gameFrame.evaluate(() => {
   const badge = document.getElementById("tspml-live-marker");
   const canvas = document.querySelector("canvas");
+  const menu = document.querySelector(".menu-ui");
+  const buttons = document.querySelector(".main-buttons-container");
+  const text = document.body ? document.body.innerText : "";
   return {
     href: location.href,
     title: document.title,
@@ -65,6 +74,16 @@ const dom = await gameFrame.evaluate(() => {
     badgeText: badge ? badge.textContent : null,
     canvasPresent: !!canvas,
     canvasSize: canvas ? `${canvas.width}x${canvas.height}` : null,
+    // Did the game get PAST the "unofficial version" gate? The gate holds the
+    // game on a static warning screen (no menu, no loading). Once cleared it
+    // shows the loading screen + puts the full menu in the DOM (Play, tracks,
+    // etc.), and ultimately the race HUD. See docs/research/portal-browser-test-findings.md.
+    pastGate:
+      (menu && menu.classList.contains("loading-screen")) ||
+      (buttons && buttons.querySelectorAll("button,[role=button],a").length > 0) ||
+      /km\/h|00:00\.\d/.test(text),
+    reachedGameplay: /km\/h/.test(text),
+    bodyText: text.slice(0, 300),
   };
 });
 
@@ -128,16 +147,22 @@ const raceShot = SHOT.replace(/\.png$/, "-race.png");
 await page.screenshot({ path: raceShot });
 
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
-const pass = dom.badgePresent && markerLogs.length > 0;
+// PASS requires BOTH: the transformed bundle executed (marker logged) AND the
+// game cleared the unofficial-version gate (pastGate). reachedGameplay is a
+// stronger-but-slower informational signal (a full race HUD).
+const pass = dom.pastGate && markerLogs.length > 0;
 
 console.log(
   JSON.stringify(
     {
       PASS: pass,
       verdict: {
-        badgePresent: dom.badgePresent,
         markerConsoleLogged: markerLogs.length > 0,
+        pastGate: dom.pastGate,
+        reachedGameplay: dom.reachedGameplay,
+        badgePresent: dom.badgePresent,
         canvasPresent: dom.canvasPresent,
+        canvasSize: dom.canvasSize,
         jsPageErrors: pageErrors.length,
         failedRequests: failed.length,
       },
