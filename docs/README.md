@@ -15,6 +15,7 @@ Background facts, all sourced.
 - [**PML shortcomings → TSPML improvements**](./research/pml-shortcomings-and-tspml-improvements.md) *(the "why TSPML" doc)*
 - [M1 mappings drift spike — go/no-go](./research/mappings-drift-spike.md) *(result: GO, semi-automated)*
 - [M3 transform spike — go/no-go](./research/transform-spike.md) *(result: VIABLE — JS-Mixin works on the real bundle)*
+- [Portal browser-test findings](./research/portal-browser-test-findings.md) *(transform run-validated in a browser; current blockers = game's own origin/online gates)*
 
 ## Design
 

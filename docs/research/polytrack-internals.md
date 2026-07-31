@@ -40,6 +40,10 @@ Track data lives as internal `.track` files (`tracks/official/`, `tracks/communi
 
 - **Stack:** Cloudflare (CDN) → Varnish → origin PHP 8.3.32. `cache-control: no-store`, HTTP/2, `alt-svc h3`.
 - **CSP:** `frame-ancestors https://kodub.com https://*.kodub.com https://webgamer.io https://www.kongregate.com;` — **the only directive**. There is **no** `script-src`/`object-src`/`worker-src`/`default-src`, so injected scripts, `eval`, Web Workers, and WASM are **all permitted** today. (If Kodub ever adds `script-src`, the userscript path breaks — the browser-extension path survives; see [injection-and-delivery.md](../design/injection-and-delivery.md).)
+
+### Runtime "unofficial version" gate (discovered via the portal browser test)
+
+Beyond the CSP `frame-ancestors` directive, PolyTrack performs a **second, in-code origin check**: when the document origin is not on the allowlist (`kodub.com`, `crazygames.com`, `webgamer.io`, `kongregate.com`), the game refuses to load gameplay and instead shows an **"unofficial version detected"** warning — *"It seems like you are playing an unofficial version of PolyTrack… visit crazygames.com/game/polytrack"* (no Play button; only the warning + footer controls). Served from `localhost` (the portal in dev), it triggers this gate. The check runs in the **webpack bootstrap**, **before** the module graph, so a module-anchor transform can't reach it — locating it needs AST/browser tracing of the bootstrap. This is PolyTrack's own anti-unofficial-host protection, distinct from CSP, and is the **first M4 task** (a transform to force the official-host check to pass — issue #8). Details: [portal-browser-test-findings.md](./portal-browser-test-findings.md).
 - **Versions:** 0.6.0 (multiplayer + car customization + editor copy/paste), 0.6.1 (community tracks + client invites + record dates), 0.6.2 (bug fixes, **latest**).
 
 ## Source availability
