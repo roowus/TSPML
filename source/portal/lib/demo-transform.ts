@@ -69,8 +69,8 @@ const BADGE_PATCH = {
 // (app/page.tsx); until then (and in non-portal deliveries) this is a no-op.
 const CONTROL_EMIT = `
 try {
-  if (typeof window !== "undefined" && window.__tspml && window.__tspml.emit)
-    window.__tspml.emit("car.control", { carId: e, up: !!t, right: !!n, down: !!i, left: !!a, reset: !!s });
+  if (typeof window !== "undefined" && window.__tspml && window.__tspml.events.emit)
+    window.__tspml.events.emit("car.control", { carId: e, up: !!t, right: !!n, down: !!i, left: !!a, reset: !!s });
 } catch (_tspmlErr) {}
 `.trim();
 
@@ -92,7 +92,7 @@ const CONTROL_PATCH = {
 // then returns X unchanged. `s` (5th param = carRecording) is in scope at the
 // return; non-null => ghost/replay car.
 const CAR_CREATED_WRAP =
-  "((__v) => { try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit && __v && __v.id != null) window.__tspml.emit('car.created', { carId: __v.id, isReplay: s != null }); } catch (_e) {} return __v; })";
+  "((__v) => { try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.events.emit && __v && __v.id != null) window.__tspml.events.emit('car.created', { carId: __v.id, isReplay: s != null }); } catch (_e) {} return __v; })";
 const CAR_CREATED_PATCH = {
   op: "modifyReturn",
   target: {
@@ -108,7 +108,7 @@ const CAR_CREATED_PATCH = {
 // "race began" signal; player-only filtering needs an isReplay accessor (TODO).
 // No payload.
 const RACE_STARTED_INJECT =
-  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit) window.__tspml.emit('race.started'); } catch (_e) {}";
+  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.events.emit) window.__tspml.events.emit('race.started'); } catch (_e) {}";
 const RACE_STARTED_PATCH = {
   op: "before",
   target: {
@@ -121,7 +121,7 @@ const RACE_STARTED_PATCH = {
 // track.afterLoad: loadTrackData returns true after parsing the track; emit at
 // the tail (before the return). `e` is the parsed track data (in scope there).
 const TRACK_AFTERLOAD_INJECT =
-  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit) { var __tid = ''; try { __tid = (e && typeof e.getId === 'function') ? e.getId() : ''; } catch (_) {} window.__tspml.emit('track.afterLoad', __tid); } } catch (_e) {}";
+  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.events.emit) { var __tid = ''; try { __tid = (e && typeof e.getId === 'function') ? e.getId() : ''; } catch (_) {} window.__tspml.events.emit('track.afterLoad', __tid); } } catch (_e) {}";
 const TRACK_AFTERLOAD_PATCH = {
   op: "after",
   target: {
@@ -143,9 +143,9 @@ const TRACK_AFTERLOAD_PATCH = {
 // (carId/replay is a private field here), unlike car.created. Player-only
 // filtering needs an isReplay accessor (TODO).
 const CHECKPOINT_FINISH_INJECT =
-  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.emit && e) {" +
-  " if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) window.__tspml.emit('checkpoint.passed', this.getNextCheckpointIndex());" +
-  " if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) window.__tspml.emit('race.finished', { frames: e.finishFrames });" +
+  "try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.events.emit && e) {" +
+  " if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) window.__tspml.events.emit('checkpoint.passed', this.getNextCheckpointIndex());" +
+  " if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) window.__tspml.events.emit('race.finished', { frames: e.finishFrames });" +
   " } } catch (_e) {}";
 const CHECKPOINT_FINISH_PATCH = {
   op: "before",

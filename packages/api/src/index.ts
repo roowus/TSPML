@@ -14,4 +14,6 @@ export type {
   TspmlListener,
 } from './events.js';
 
+export type { KeybindBinding, KeybindsRegistry } from './keybinds.js';
+
 export type { TspmlApi } from './api.js';
