@@ -140,8 +140,7 @@ async function proxyGet(
     corsHeaders(request, headers);
     return NextResponse.json(
       { error: 'upstream fetch failed', upstream },
-      { status: 502 },
-      { headers },
+      { status: 502, headers },
     );
   }
 

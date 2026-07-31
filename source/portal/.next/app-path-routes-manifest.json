@@ -1,0 +1,5 @@
+{
+  "/api/proxy/[[...path]]/route": "/api/proxy/[[...path]]",
+  "/_not-found/page": "/_not-found",
+  "/page": "/"
+}

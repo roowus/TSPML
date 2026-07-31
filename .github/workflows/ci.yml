@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # webcrack's engine range is 22/24; the rest is fine here too
+          cache: pnpm
+
+      # --ignore-scripts skips webcrack's optional `isolated-vm` native build
+      # (not needed for tests/build; see issue #2).
+      - run: pnpm install --ignore-scripts
+
+      - run: pnpm -r test
+      - run: pnpm -r build
