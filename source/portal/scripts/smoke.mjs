@@ -68,7 +68,64 @@ const dom = await gameFrame.evaluate(() => {
   };
 });
 
-await page.screenshot({ path: SHOT });
+const menuShot = SHOT.replace(/\.png$/, "-menu.png");
+await page.screenshot({ path: menuShot });
+
+// Probe: can we get past the menu into actual gameplay? (non-fatal — gameplay may
+// legitimately need server calls the proxy doesn't handle yet.)
+const errsBefore = pageErrors.length;
+const probe = {
+  clicked: null,
+  candidates: [],
+  afterCanvas: dom.canvasSize,
+  afterBodyLen: null,
+  afterText: null,
+  newErrorsAfterClick: 0,
+};
+try {
+  const click = await gameFrame.evaluate(() => {
+    const all = [...document.querySelectorAll("button,[role=button],a,div,span,li")];
+    const vis = (e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 40 && r.height > 14 && r.top >= 0;
+    };
+    const cands = all
+      .filter(vis)
+      .map((e) => (e.textContent || "").trim())
+      .filter((t) => t && t.length < 28)
+      .slice(0, 40);
+    const play = all.find(
+      (e) =>
+        vis(e) &&
+        /\b(play|single|race|start|solo|drive|time attack)\b/i.test((e.textContent || "").trim()) &&
+        (e.textContent || "").trim().length < 28,
+    );
+    if (play) {
+      play.click();
+      return { clicked: (play.textContent || "").trim().slice(0, 28), candidates: cands };
+    }
+    return { clicked: null, candidates: cands };
+  });
+  probe.clicked = click.clicked;
+  probe.candidates = click.candidates;
+  await page.waitForTimeout(7000);
+  const after = await gameFrame.evaluate(() => ({
+    canvas: (() => {
+      const c = document.querySelector("canvas");
+      return c ? `${c.width}x${c.height}` : null;
+    })(),
+    bodyLen: document.body ? document.body.innerText.length : 0,
+    text: (document.body ? document.body.innerText : "").slice(0, 240),
+  }));
+  probe.afterCanvas = after.canvas;
+  probe.afterBodyLen = after.bodyLen;
+  probe.afterText = after.text;
+} catch (e) {
+  probe.error = String(e && e.message ? e.message : e).slice(0, 200);
+}
+probe.newErrorsAfterClick = pageErrors.length - errsBefore;
+const raceShot = SHOT.replace(/\.png$/, "-race.png");
+await page.screenshot({ path: raceShot });
 
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
 const pass = dom.badgePresent && markerLogs.length > 0;
@@ -89,7 +146,9 @@ console.log(
       pageErrors: pageErrors.slice(0, 10),
       failedSample: failed.slice(0, 15),
       consoleSample: consoleMsgs.slice(0, 25),
-      screenshot: SHOT,
+      menuShot,
+      raceShot,
+      probe,
     },
     null,
     2,
