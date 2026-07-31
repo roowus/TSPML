@@ -37,7 +37,7 @@ Open **http://localhost:3000**.
 
 **Diagnosis:**
 - **Stuck on the static "unofficial version" warning (no menu, no Play)** → the `polytrackModConfiguration` injection isn't taking. Check DevTools → Network → the `index.html` response: it must contain `<script>window.polytrackModConfiguration=…</script>` and (header) `x-tspml-unblocked: 1`. If missing, the dev server wasn't started with `TSPML_TRANSFORM=1`.
-- **"Failed to load track" error** → the service worker wasn't active on first load (the game's track fetch bypassed it → CORS-failed). A plain **reload** (SW is now `active` + `clients.claim()`-ed) clears it. The smoke test reloads once for exactly this reason.
+- **"Failed to load track" error** → the service worker wasn't *controlling* the page when the game fetched the track (fetch bypassed the SW → CORS-failed). The page now mounts the game iframe only after the SW is controlling it, so this **shouldn't happen on a fresh first visit**. If it ever does, a plain **reload** forces the SW to control the page.
 - **Badge does NOT show** → DevTools → Network → `main.bundle.js` response headers should include `x-tspml-transformed: 1`. If `0`/missing, re-run with `TSPML_TRANSFORM=1`.
 - See [docs/research/portal-browser-test-findings.md](../../docs/research/portal-browser-test-findings.md).
 

@@ -10,7 +10,7 @@ The portal now plays the real PolyTrack **end-to-end**: a transformed `main.bund
 portal loads → real bundle fetched via /api/proxy → transformed main.bundle.js RUNS ✅
   (badge fires, WebGL canvas inits to 804×452) ✅
   → "unofficial version" gate CLEARED via polytrackModConfiguration (Qo path) ✅ #8 SOLVED
-  → assets + track load (service worker active on reload) ✅ #9 SOLVED
+  → assets + track load (game iframe gated on service-worker controllerchange) ✅ #9 SOLVED
   → RACE on "Summer 1" with full HUD ✅
   → online/leaderboard 502 🚧 issue #7 (M8, non-blocking)
 ```
@@ -34,7 +34,7 @@ The game iframe is at `/api/proxy?version=0.6.2`. Its relative `<script src="mai
 The screen that looked like the menu was PolyTrack's anti-unofficial warning. Traced the gate in the unpacked 0.6.2 bundle: `Yo()` returns true when `location.hostname` isn't `*.kodub.com` (so `localhost` is "unofficial"); `Xo()` is the master "is unofficial" flag; the warning banner + ToS link are gated on `Qo() || Yo() || Xo()`. **The game exposes a first-class mod-loader hook** — `window.polytrackModConfiguration` — exactly what PML uses to identify itself. **Fix:** the proxy injects `<script>window.polytrackModConfiguration = { modName: "TSPML", author: "roowus" }</script>` into `<head>` *before* the deferred bundles run (gated on `TSPML_TRANSFORM=1`). That sets `Qo()=true`: the banner becomes "Unofficial TSPML mod by roowus", the blocking gate clears, and the game proceeds to load. **This used the game's own intended extension point — no bundle surgery, no origin-spoof.** The check does *not* live in a webpack module, so a module-anchor transform wouldn't have reached it; the HTML-injection approach is both cleaner and more correct. (`polytrackModConfiguration.unblocked = true` is an alternative that clears `Xo()` but leaves the generic banner.)
 
 ### 3. "Failed to load track" — SOLVED ✅ (issue #9)
-The earlier "Failed to load track" error was the **service worker not yet active on first load** — the game's track-data fetch bypassed the SW, went direct to `kodub.com`, and CORS-failed. The smoke test already reloads once so the SW is `active` + `clients.claim()`-ed on the second load; with the SW active the track loads fine (the `Summer 1` race proves it). No code change was needed beyond what M2 already had — it was a first-load-only artifact.
+Root cause: on a **plain first visit** the service worker was registered but not yet *controlling* the page when the game fetched the track, so the fetch bypassed the SW, went direct to `kodub.com`, and CORS-failed (`TrackLoadError: Failed to load track`). My headless runs only succeeded because they reloaded once (activating the SW) — masking the first-visit failure, which the user then hit. **Fix (`source/portal/app/page.tsx`):** mount the game iframe only after `navigator.serviceWorker` fires `controllerchange` (or immediately if already controlled on a return visit), so the game never boots before its fetches can be intercepted — **no manual reload needed**. Headless-verified on a true first visit (no reload): `reachedGameplay=true`, track loads, race on "Summer 1", 0 errors. (The smoke test dropped its reload and now tests the real first-visit flow.)
 
 ### 4. Online features 400/502 🚧 (issue #7)
 One `502` on an online (leaderboard/multiplayer) call remains — non-blocking for local gameplay. Online/origin handling is M8.
