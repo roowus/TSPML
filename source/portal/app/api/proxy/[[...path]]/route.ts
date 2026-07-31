@@ -170,21 +170,39 @@ async function proxyGet(
     return new NextResponse(code, { status: upstreamRes.status, headers: h });
   }
 
-  // Rewrite the proxied game's HTML so its RELATIVE asset URLs resolve under
-  // /api/proxy/. The document URL is /api/proxy (no trailing slash), so the
-  // browser treats "proxy" as a filename and resolves <script src="main.bundle.js">
-  // to /api/main.bundle.js (404) — caught by the headless smoke test. A <base>
-  // tag fixes every relative ref (scripts, fonts, images) at once.
+  // Rewrite the proxied game's HTML. Two <head> injections, both run BEFORE the
+  // game's deferred bundles (an inline script in <head> executes during parse,
+  // ahead of `defer` scripts like main.bundle.js):
+  //   1. <base href="/api/proxy/"> — the document URL /api/proxy (no trailing
+  //      slash) makes the browser treat "proxy" as a filename, so the game's
+  //      relative <script src="main.bundle.js"> resolves to /api/main.bundle.js
+  //      (404). <base> fixes every relative ref at once. (Caught by the smoke.)
+  //   2. In TSPML mode: set window.polytrackModConfiguration — PolyTrack's
+  //      first-class mod-loader signal (exactly how PML identifies itself).
+  //      Supplying {modName, author} makes the game treat the session as a known
+  //      mod load, which CLEARS its "unofficial version" gameplay gate via the
+  //      game's OWN intended path — no bundle surgery (issue #8). See
+  //      docs/research/portal-browser-test-findings.md.
   {
     const ct = upstreamRes.headers.get('content-type') ?? '';
     if (ct.includes('text/html')) {
       const html = await upstreamRes.text();
+      const injections = ['<base href="/api/proxy/">'];
+      let unblocked = false;
+      if (process.env.TSPML_TRANSFORM) {
+        unblocked = true;
+        injections.push(
+          '<script>window.polytrackModConfiguration = Object.assign(window.polytrackModConfiguration || {}, { modName: "TSPML", author: "roowus" });</script>',
+        );
+      }
+      const inject = injections.join('\n');
       const patched = /<head[^>]*>/i.test(html)
-        ? html.replace(/<head[^>]*>/i, (m) => `${m}\n<base href="/api/proxy/">`)
-        : `<base href="/api/proxy/">\n${html}`;
+        ? html.replace(/<head[^>]*>/i, (m) => `${m}\n${inject}`)
+        : `${inject}\n${html}`;
       const h = new Headers();
       h.set('content-type', 'text/html; charset=utf-8');
       h.set('cache-control', 'no-cache');
+      h.set('x-tspml-unblocked', unblocked ? '1' : '0');
       corsHeaders(request, h);
       return new NextResponse(patched, { status: upstreamRes.status, headers: h });
     }
