@@ -4,5 +4,22 @@
   "private": true,
   "type": "module",
   "description": "Vercel-hosted Next.js web app (flagship delivery surface) plus /api/proxy route and service worker that load and transform the real game.",
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
 }
