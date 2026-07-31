@@ -122,10 +122,23 @@ Ran a **discovery workflow** (5 agents, one per event) to find clean hook points
 
 **Discovery fix during implementation:** the checkpoint anchor originally used method-name *identifiers* (`addCheckpointCallback`…) which the locator can't match (it keys off **string/numeric literals** only) → reused module 641's string-data anchor instead. **Adversarially reviewed** (3 lenses; 0 blockers, 1 major→fixed, nits→fixed): the major was that `race.started`/`checkpoint.passed`/`race.finished` fire **per-car** (player + ghosts), not player-only as comments claimed (the player flag is a private minified WeakMap field the inject can't read) → corrected the comments + filed **issue #10** (add an `isReplay` accessor for player-only filtering). Also normalized `CAR_CREATED` minHits 2→3 and replaced a dead `trackPartData` identifier-anchor entry with a real string literal. `@tspml/api` gained `CarCreatedInfo`/`RaceFinishInfo` payload types.
 
+## 2026-07-31 — M4-G/H: first registry (keybinds) + `window.__tspml` → api object ✅
+
+Ran a **discovery workflow** (5 agents, 4 returned — custom-tracks hit a rate-limit) to find the most tractable registry. **Honest finding:** most *content* registries aren't viable in 0.6.2 — **car-styles** and **settings** use **frozen/closed catalogs** (no add path; static-mutation throws "model not found"); **audio** is viable (the game's own `load()` on a captured manager) but needs a fiddly bootstrap-instance capture (follow-up). The one clean, fully-verifiable, low-risk registry — well-precedented (Fabric has `KeyBindingRegistry`) — is **keybinds**: a bridge-owned parallel input layer.
+
+Implemented **`api.keybinds`**:
+- `@tspml/api`: `KeybindBinding` + `KeybindsRegistry` interfaces; added `keybinds` to `TspmlApi`.
+- `@tspml/api-bridge`: `Keybinds` class (per-binding error isolation, `register` returns unsubscribe, `dispose`), taking the **target window** as a param so it attaches to the *game iframe* (where keydown fires) and is node-testable with a mock. **5 unit tests**.
+- **Refactored `window.__tspml` from the bare EventBus to the full `api` object** `{events, keybinds, version}` — the correct foundation for all registries. All 6 event patches now emit via `window.__tspml.events.emit`. The portal builds the api on iframe load (with the iframe window for keybinds) + registers a visible demo keybind (**KeyF** → sidebar counter).
+- **Headless-verified**: the smoke registers a keybind (`KeyP`), dispatches it on the game frame, and asserts `onDown` fired exactly once (`keybindFired=1`); all 6 events still fire. **129 unit tests green.**
+
+Caveat (documented for modders + the `Keybinds` doc): bridge keybinds run as a *parallel* listener — they don't appear in the game's Controls settings and don't consult its conflict rules (the game's action set is a closed enum it polls itself). Future: audio registry (needs the instance-capture transform) + re-investigate custom-tracks (the natural "content appears in a list" target).
+
 ## Where we stand (2026-07-31)
 
-- **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (9) — **124 tests green**, CI green.
+- **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
 - **The portal plays PolyTrack end-to-end** (ADR-012/013) — a transformed, modded game reaches an actual race.
 - **The mod-loader loop is proven** (M4-B–F): **6 Tier-1 events** fire inside the running game — `car.control`, `car.created`, `race.started`, `track.afterLoad` (all headlessly verified) + `checkpoint.passed`, `race.finished` (wired, need real race progress) — flowing through the `EventBus` to subscribers, hash-gated.
+- **First registry works** (M4-G/H): `api.keybinds.register(...)` fires via a bridge-owned listener on the game iframe (verified). `window.__tspml` is now the full `api` object (`{events, keybinds, version}`).
 - **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8 (bot-protected `vps.kodub.com`; the extension is the resilient path). Non-blocking for local gameplay.
 - **Next:** finish M4 — more Tier-1 events (render/track/checkpoint) + registries (cars/blocks/audio) via the same transform+mappings path, then wire real mod loading into the portal.

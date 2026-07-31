@@ -71,7 +71,7 @@ let bridgeWired = false;
 let bridgeError = null;
 for (let i = 0; i < 50; i++) {
   const r = await gameFrame
-    .evaluate(() => !!(window.__tspml && typeof window.__tspml.on === "function"))
+    .evaluate(() => !!(window.__tspml && window.__tspml.events && typeof window.__tspml.events.on === "function"))
     .catch(() => false);
   if (r) {
     bridgeWired = true;
@@ -85,10 +85,18 @@ if (bridgeWired) {
       window.__tspmlCounts = {};
       for (const e of evs) {
         window.__tspmlCounts[e] = 0;
-        window.__tspml.on(e, () => {
+        window.__tspml.events.on(e, () => {
           window.__tspmlCounts[e] = (window.__tspmlCounts[e] || 0) + 1;
         });
       }
+      // Register a keybind via the registry (api.keybinds) to verify the
+      // registry path; dispatch below.
+      window.__tspmlKb = 0;
+      window.__tspml.keybinds.register({
+        id: "smoke.kb",
+        key: "KeyP",
+        onDown: () => { window.__tspmlKb = (window.__tspmlKb || 0) + 1; },
+      });
     }, COUNTED_EVENTS);
   } catch (e) {
     bridgeError = String(e && e.message ? e.message : e).slice(0, 160);
@@ -146,11 +154,23 @@ for (let attempt = 0; attempt < 6; attempt++) {
 const raceShot = SHOT.replace(/\.png$/, "-race.png");
 await page.screenshot({ path: raceShot });
 
+// Verify the KEYBIND REGISTRY: dispatch the registered key (KeyP) on the game
+// frame's window and assert the registered onDown fired exactly once.
+let keybindFired = 0;
+try {
+  keybindFired = await gameFrame.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyP" }));
+    return window.__tspmlKb || 0;
+  });
+} catch (e) {
+  keybindFired = -1;
+}
+
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
 const c = (e) => counts[e] || 0;
-// HARD requirements: gate cleared, bundle ran, bridge wired, and the four
-// verifiable Tier-1 events all fired. checkpoint.passed / race.finished are
-// reported only (they need the player to pass a checkpoint / finish the race).
+// HARD requirements: gate cleared, bundle ran, bridge wired, the four verifiable
+// Tier-1 events fired, AND the keybind registry fired. checkpoint.passed /
+// race.finished are reported only (need real race progress).
 const pass =
   dom.pastGate &&
   markerLogs.length > 0 &&
@@ -158,7 +178,8 @@ const pass =
   c("car.control") > 0 &&
   c("car.created") > 0 &&
   c("race.started") > 0 &&
-  c("track.afterLoad") > 0;
+  c("track.afterLoad") > 0 &&
+  keybindFired === 1;
 
 console.log(
   JSON.stringify(
@@ -169,6 +190,7 @@ console.log(
         pastGate: dom.pastGate,
         reachedGameplay: dom.reachedGameplay,
         bridgeWired,
+        keybindFired,
         events: {
           "car.control": c("car.control"),
           "car.created": c("car.created"),

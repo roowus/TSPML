@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
-import { EventBus } from '@tspml/api-bridge';
+import { EventBus, Keybinds } from '@tspml/api-bridge';
 
 /**
  * Play page (milestone M2 proof of concept).
@@ -25,6 +25,8 @@ type SwState = 'idle' | 'registering' | 'active' | 'error';
 
 const GAME_VERSION = process.env.NEXT_PUBLIC_POLYTRACK_VERSION ?? '0.6.2';
 const GAME_FRAME_SRC = `/api/proxy/?version=${GAME_VERSION}`;
+/** TSPML loader version exposed on the `api` object. */
+const TSPML_VERSION = '0.0.0';
 
 interface ModDescriptor {
   id: string;
@@ -43,12 +45,15 @@ export default function PlayPage(): ReactElement {
   const [swState, setSwState] = useState<SwState>('idle');
   const [swError, setSwError] = useState<string | null>(null);
   const [controlCount, setControlCount] = useState(0);
+  const [keybindCount, setKeybindCount] = useState(0);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
   // vanilla game never reads it; only the transformed bundle emits).
   const [bus] = useState<EventBus>(() => new EventBus());
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const keybindsRef = useRef<Keybinds | null>(null);
+  const demoKeybindRegistered = useRef(false);
 
   // Surface a throttled count of car.control events. controlCar fires on INPUT
   // CHANGES (keydown/keyup), not every frame — so the count jumps in bursts
@@ -71,11 +76,25 @@ export default function PlayPage(): ReactElement {
     };
   }, [bus]);
 
-  // Expose the bus to the same-origin game iframe so the transformed
-  // `controlCar` hook (`window.__tspml.emit`) talks to THIS bus instance.
+  // Expose the Tier-1 `api` object (events + keybinds) to the same-origin game
+  // iframe as `window.__tspml`: transformed hooks emit to `api.events`, mods
+  // call `api.keybinds.register(...)`. Built on iframe load (when the game
+  // window exists). Also registers a demo keybind (KeyF) for a visible
+  // "registry works" signal in the sidebar.
   const handleFrameLoad = (): void => {
-    const w = frameRef.current?.contentWindow as (Window & { __tspml?: EventBus }) | null;
-    if (w) w.__tspml = bus;
+    const w = frameRef.current?.contentWindow as (Window & { __tspml?: unknown }) | null;
+    if (!w) return;
+    if (!keybindsRef.current) keybindsRef.current = new Keybinds(w);
+    if (!demoKeybindRegistered.current) {
+      keybindsRef.current.register({
+        id: 'tspml.demo',
+        key: 'KeyF',
+        description: 'TSPML demo keybind',
+        onDown: () => setKeybindCount((n) => n + 1),
+      });
+      demoKeybindRegistered.current = true;
+    }
+    w.__tspml = { events: bus, keybinds: keybindsRef.current, version: TSPML_VERSION };
   };
 
   useEffect(() => {
@@ -175,6 +194,16 @@ export default function PlayPage(): ReactElement {
             {controlCount > 0
               ? `car.control × ${controlCount.toLocaleString()}`
               : 'idle (start a race)'}
+          </div>
+          <div style={bridgeRowStyle}>
+            <span
+              style={{ ...bridgeDotStyle, background: keybindCount > 0 ? '#3fb950' : '#9aa4b2' }}
+              aria-hidden="true"
+            />
+            registry:{' '}
+            {keybindCount > 0
+              ? `keybind F × ${keybindCount}`
+              : 'press F (TSPML demo keybind)'}
           </div>
           <p style={noteStyle}>
             The transform pipeline is built (M3); the <code>car.control</code>{' '}

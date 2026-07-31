@@ -8,3 +8,6 @@
  */
 export { EventBus } from './event-bus.js';
 export type { EventBusOptions } from './event-bus.js';
+
+export { Keybinds } from './keybinds.js';
+export type { KeybindsOptions } from './keybinds.js';
