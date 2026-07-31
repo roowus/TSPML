@@ -1,6 +1,6 @@
 # Events & registries (Tier 1)
 
-> The stable API surface most mods use — an `EventEmitter` + namespaced registries wired by the loader-owned bridge. Status: **M0 sketch**; signatures finalize in M4 when the bridge lands. Grounded in real deobfuscated symbols (see [deobfuscated-bundles.md](../research/deobfuscated-bundles.md)).
+> The stable API surface most mods use — an `EventEmitter` + namespaced registries wired by the loader-owned bridge. Status: **the typed event bus is implemented** (`@tspml/api` types + `@tspml/api-bridge` `EventBus`, M4 slice 1) with **per-listener error isolation** (a throwing listener is caught + logged, never blocking siblings or the game — a direct PML fix) and unsubscribe-returning `on`/`once`. Signatures below finalize as the bridge wires each event to a real game function. Grounded in real deobfuscated symbols (see [deobfuscated-bundles.md](../research/deobfuscated-bundles.md)).
 
 ## Lifecycle (on the `api` object)
 

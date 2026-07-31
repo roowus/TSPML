@@ -89,6 +89,15 @@ User chose "gate first". I traced the gate in the unpacked 0.6.2 bundle (`Yo()`/
 
 Updated the smoke test (`scripts/smoke.mjs`) to **PASS on gate-clearance** (`pastGate`) and to run **without a reload** (it now tests the real first-visit flow that previously failed); `reachedGameplay` is the stronger signal. ADR-013; findings in [portal-browser-test-findings.md](../research/portal-browser-test-findings.md). **Issues #8 + #9 closed.**
 
+## 2026-07-31 — M4-A: event bus + `@tspml/api` type surface ✅
+
+Started the API bridge. Built the **Tier-1 event bus foundation** (`source/api-bridge`, `packages/api`), fully unit-tested, no game coupling:
+
+- `@tspml/api` (types-only, zero runtime): the `TspmlEventMap` (loader lifecycle / physics / render / track / car / checkpoint / race event → payload tuple), `TspmlEventEmitter` + `TspmlListener` interfaces, and the `TspmlApi` object mods receive.
+- `@tspml/api-bridge`: `EventBus` implementing `TspmlEventEmitter` with **per-listener error isolation** (a throwing listener is caught + reported via `onError`, never blocking siblings or the game tick — a direct fix for PML's "one bad hook crashes everything"), `on`/`once` returning an unsubscribe fn (cleanup DX), mid-emit snapshot for safe subscribe/unsubscribe, `listenerCount`/`removeAllListeners`. **9 unit tests passing**.
+
+Next slice (M4-B): wire the real `controlCar` (Car module 5220, already our badge anchor) → emit `car.control` each frame via a fail-closed transform patch + mapping locator, then headless-verify it fires during a race.
+
 ## Where we stand (2026-07-31)
 
 - **Engines, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) — **115 tests green**, CI green.
