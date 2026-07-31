@@ -13,6 +13,7 @@ Background facts, all sourced.
 - [Deobfuscated bundles — the mappings substrate](./research/deobfuscated-bundles.md)
 - [Fabric architecture & its JS translation](./research/fabric-architecture.md)
 - [**PML shortcomings → TSPML improvements**](./research/pml-shortcomings-and-tspml-improvements.md) *(the "why TSPML" doc)*
+- [M1 mappings drift spike — go/no-go](./research/mappings-drift-spike.md) *(result: GO, semi-automated)*
 
 ## Design
 
