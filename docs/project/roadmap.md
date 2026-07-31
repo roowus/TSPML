@@ -5,7 +5,7 @@
 | Milestone | Status | Outcome |
 |---|---|---|
 | **M0 — Reset & docs-first foundation** | ✅ Done | Clean monorepo; full research/design/API/project docs. |
-| **M1 — De-risk spike + loader core** | 🟡 spike ✅ GO / loader core ⏳ | **Spike done: game-logic match 0.85 → GO** as semi-automated, human-in-the-loop ([report](../research/mappings-drift-spike.md)). Loader core (discover/parse/semver-resolve/topo-sort/entrypoints + tests) pending. |
+| **M1 — De-risk spike + loader core** | ✅ Done | **Spike: GO** (game-logic match 0.85, semi-automated — [report](../research/mappings-drift-spike.md)). **Loader core:** manifest parse/validate + semver + topo-sort/cycle/conflict + entrypoint invocation with error isolation, **47 tests passing**. `breaks` refinement tracked in issue #6. |
 | **M2 — Mappings v1 (manual) + portal injection MVP** | Planned | Hand-curated symbol map (cwcinc seed); Vercel portal shell + `/api/proxy` + service worker that fetches the **live** game and runs it (no transforms yet) — a "plays the real game modded" proof of concept. |
 | **M3 — AST transform + resolver** | Planned | Babel transforms resolved via mappings; **fail-closed** on hash mismatch; runtime-fallback locator tiers; per-mod compatibility report; IndexedDB bundle-hash caching. |
 | **M4 — Event bus + API bridge (Tier 1)** | Planned | physics (in-worker)/render/track/input/checkpoint/network events; registries (blocks/cars/audio/tracks/ui/settings/keybinds). |
