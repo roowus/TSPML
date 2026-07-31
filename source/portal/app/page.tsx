@@ -13,8 +13,9 @@ import type { CSSProperties, ReactElement } from 'react';
  * proxy with origin-corrected headers — so the game "thinks" it talks to Kodub
  * while every byte flows through /api/proxy.
  *
- * No game transforms are applied yet (the loader is present but inactive) —
- * this page proves the delivery path loads the real game end-to-end.
+ * With TSPML_TRANSFORM=1, the proxy AST-rewrites main.bundle.js — the demo
+ * injects a visible "TSPML ✔ LIVE" badge, proving a transformed bundle boots.
+ * Real mods bind through the API bridge in M4; the mod list below is placeholder.
  */
 
 type SwState = 'idle' | 'registering' | 'active' | 'error';
@@ -77,8 +78,10 @@ export default function PlayPage(): ReactElement {
       <header style={headerStyle}>
         <h1 style={titleStyle}>TSPML — PolyTrack, modded</h1>
         <p style={subtitleStyle}>
-          M2 proof of concept: the real game loaded through a service worker +{' '}
-          <code>/api/proxy</code>. No transforms yet.
+          The real game loaded through a service worker + <code>/api/proxy</code>.
+          With <code>TSPML_TRANSFORM=1</code>, <code>main.bundle.js</code> is
+          AST-rewritten — the green “TSPML ✔ LIVE” badge proves a transformed
+          bundle runs.
         </p>
         <ServiceWorkerBadge state={swState} error={swError} />
       </header>
@@ -108,8 +111,8 @@ export default function PlayPage(): ReactElement {
             ))}
           </ul>
           <p style={noteStyle}>
-            The loader is present but applies no game transforms in M2. Mods will
-            bind through the API bridge once the transform pipeline lands.
+            The transform pipeline is built (M3); wiring real mods through the
+            API bridge is M4. The list above is placeholder.
           </p>
         </aside>
       </div>
