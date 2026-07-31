@@ -36,8 +36,10 @@ The screen that looked like the menu was PolyTrack's anti-unofficial warning. Tr
 ### 3. "Failed to load track" — SOLVED ✅ (issue #9)
 Root cause: on a **plain first visit** the service worker was registered but not yet *controlling* the page when the game fetched the track, so the fetch bypassed the SW, went direct to `kodub.com`, and CORS-failed (`TrackLoadError: Failed to load track`). My headless runs only succeeded because they reloaded once (activating the SW) — masking the first-visit failure, which the user then hit. **Fix (`source/portal/app/page.tsx`):** mount the game iframe only after `navigator.serviceWorker` fires `controllerchange` (or immediately if already controlled on a return visit), so the game never boots before its fetches can be intercepted — **no manual reload needed**. Headless-verified on a true first visit (no reload): `reachedGameplay=true`, track loads, race on "Summer 1", 0 errors. (The smoke test dropped its reload and now tests the real first-visit flow.)
 
-### 4. Online features 400/502 🚧 (issue #7)
-One `502` on an online (leaderboard/multiplayer) call remains — non-blocking for local gameplay. Online/origin handling is M8.
+### 4. Online features 502 🚧 (issue #7) — root cause = backend bot-protection
+The leaderboard/user API is on a **different host**, `vps.kodub.com`. The SW correctly rewrites it to `/api/proxy?host=vps.kodub.com` and the proxy forwards the desktop Origin — but `vps.kodub.com` **times out for any server-side request** (verified: `curl` with a browser UA + spoofed Origin → `Connection timed out`, no response). It's bot/firewall-protected (Cloudflare-style TLS-fingerprint drop): it silently drops non-browser connections *before* the Origin header matters, so origin-spoofing can't help. In the real game the browser hits `vps.kodub.com` directly with a genuine browser fingerprint and passes; our SW reroutes that traffic through the Node proxy → dropped → `502`.
+
+Two extra plumbing gaps (moot until the bot-protection is solved, but real): the SW's `fetch(rewritten)` carries no method, so it **turns every request into a GET** (the leaderboard *submit* is a `POST` — method + body dropped); and the proxy route exports only `GET`/`OPTIONS` (no POST handler). **Implication:** online via the Vercel/portal proxy is blocked by the backend itself; the resilient path for online is the **browser-extension** delivery (real browser on the real `kodub.com` origin → genuine fingerprint → trusted). Single-player gameplay is unaffected. Scope: M8.
 
 ## What this means for the roadmap
 
