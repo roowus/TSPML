@@ -37,3 +37,7 @@
 ## Audit correction to the PML-shortcomings analysis (2026-07-30)
 
 **ADR-010 — PML can reach physics.** The research draft's claim that "sim-worker mixins are unimplemented post-0.6.0 / physics mods are blocked" is **wrong** against the 0.6.1 source (`registerSimWorkerMixin` + `getSimURL()` are implemented). TSPML's physics advantage is **DX + determinism-quarantine + a stable event surface**, not "enabling what PML couldn't." Recorded in [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
+
+## M3 transform spike result (2026-07-30)
+
+**ADR-011 — JS-Mixin AST transform is viable on the real bundle (M3 green-lit).** A Babel spike injected a HEAD-hook into `controlCar`, rewrote a literal, and wrapped the Car module's webpack factory in the **real 0.6.2 bundle**; the regenerated output passes `node --check`, module-map 211==211, +0.4% size, sub-second. **Decision:** build the full `source/transform` mixin pipeline. **Selectors locked:** module = enum string-literal anchor; method = preserved name; literal = property key (not value); **avoid** webpack ids. Module-map-entry wrap (not `__webpack_require__`) for technique [B]. Source maps, per-chunk transforms, and INVOKE-style call-site locators remain open M3/M9 work. See [transform-spike.md](../research/transform-spike.md).
