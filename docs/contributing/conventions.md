@@ -42,3 +42,10 @@
 
 - Every non-trivial decision gets an ADR in [../project/decision-log.md](../project/decision-log.md).
 - Update [../project/progress.md](../project/progress.md) at each milestone and at any meaningful discovery.
+
+## Verification & CI
+
+- **Run it yourself — don't claim something is untested if you can test it.** If a check is executable — a unit test, `curl`, a throwaway script, a headless browser — run it before asserting it works. Never leave "needs manual testing" on something you can verify; if you genuinely can't, say exactly why and file an issue. (Concrete example: the portal proxy was validated by `curl`-ing `/api/proxy/main.bundle.js?version=0.6.2` and confirming the byte-exact live 0.6.2 bundle returns with the right content-type — no browser required for the server-side path.)
+- **Tests are first-class.** Every package with logic ships unit tests; `pnpm -r test` must be green before merge. Prefer dependency-injected, headless-runnable tests so CI (and you) can run them anywhere.
+- **CI is mandatory and runs on GitHub Actions** (`.github/workflows/ci.yml`): on every push and pull request it installs deps and runs the full suite. Don't merge with red CI; watch the **Actions** tab and fix flakes immediately.
+- **Make full use of GitHub:** Actions for CI/test/build, Issues for all tracking (no matter how small), and workflow runs for heavier jobs (e.g. the mappings drift experiment) as they're added.
