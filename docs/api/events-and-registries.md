@@ -76,6 +76,18 @@ api.settings.register(name, id, type, defaultOption, options?); // type: 'boolea
 api.settings.getSetting(id);                   // returns TYPED value (fixes PML's always-string wart)
 ```
 
+> **Viability in PolyTrack 0.6.2 (discovered M4-G):** the game's content catalogs
+> are largely **frozen/closed**, so most *content* registries above are **not
+> viable** as "add new content" — `cars` (styles) and `settings` have no add path
+> (`Object.freeze` catalogs + init-time preloading into model Maps; late mutation
+> throws "model not found"). What IS viable:
+> - **`keybinds`** — bridge-owned parallel listener. ✅ **implemented** (M4-G/H; the one clean, fully-verifiable registry).
+> - **`audio`** — override existing clips via the game's own `load()` (needs an instance-capture transform). [#11](https://github.com/roowus/TSPML/issues/11)
+> - **`tracks`** — reuse the import-by-code path (viability unverified). [#12](https://github.com/roowus/TSPML/issues/12)
+>
+> The **mixin system (M5, Tier 2)** is the escape hatch for content/behavior the
+> registries can't reach. See [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
+
 ## Capability scoping
 
 The `api` object is scoped to the mod's declared `capabilities`. Calling a registry/event outside a declared capability throws a clear error at bind time. (Capability declarations are **consented-advisory** — see [safety-and-fairness.md](../design/safety-and-fairness.md).)
