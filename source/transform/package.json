@@ -5,12 +5,17 @@
   "type": "module",
   "description": "Babel AST transform pipeline applying mappings-resolved patches to game bundles before they execute, plus runtime fallback patching.",
   "license": "MIT",
-  "main": "./src/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./spike": "./src/spike.mjs"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "spike": "node src/spike.mjs",
     "test": "vitest run"
   },
@@ -18,9 +23,12 @@
     "@babel/generator": "^7.28.0",
     "@babel/parser": "^7.28.0",
     "@babel/traverse": "^7.28.0",
-    "@babel/types": "^7.28.0"
+    "@babel/types": "^7.28.0",
+    "@tspml/mappings": "workspace:*"
   },
   "devDependencies": {
+    "@types/babel__generator": "^7.6.8",
+    "@types/babel__traverse": "^7.20.6",
     "@types/node": "^22.10.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
