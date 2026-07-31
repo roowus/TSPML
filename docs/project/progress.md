@@ -145,6 +145,16 @@ The "it's a mod loader, not just an event emitter" proof. Wired `@tspml/loader` 
 
 This closes the loop end-to-end: **transform → game event → bridge `EventBus` → a real mod package's listener** (and a mod-registered keybind). TSPML now actually loads a mod.
 
+## 2026-07-31 — M5-A: mod-declared mixins (Tier-2 escape hatch is mod-authorable) ✅
+
+Started **M5** (the mixin / Tier-2 system). First slice: a **mod authors** transform patches via its manifest, instead of the loader hardcoding them.
+
+- The `@tspml/demo-hud` mod now declares a mixin: `mod.json` → `"mixins": [{"config":"mixins.json","environment":"web"}]` → `mixins.json` (a descriptor of inline `Patch`es). Its mixin injects a visible "demo-hud mixin" marker (purple, top-right) via `after` on the Car factory.
+- `source/portal/lib/demo-mods.ts` collects the bundled mods' declared mixin patches; `demo-transform.ts` applies them alongside the loader-owned bridge patches (7 patches total). All still hash-gated.
+- **Headless-verified:** `modMixinApplied=true` (the mod's declared patch ran + injected its marker), alongside the still-passing events/registries/mod-load. **129 unit tests green.**
+
+Inline anchors for now; **mappings-resolved** stable-name targeting (`Car.controlCar` via `@tspml/mappings`, fail-closed) is M5-C — that's where the mappings moat pays off for the escape hatch. Remaining M5: chaining semantics (priority-ordered `before`/`after`) + `replace` single-winner → load-time conflict error (M5-B).
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
