@@ -1,0 +1,27 @@
+{
+  "name": "@tspml/demo-hud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Example HUD mod — proves real mod loading: a mod package (mod.json + entrypoint) loaded by @tspml/loader, receiving the bridge api.",
+  "license": "MIT",
+  "main": "./dist/entrypoint.js",
+  "types": "./dist/entrypoint.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/entrypoint.d.ts",
+      "import": "./dist/entrypoint.js"
+    },
+    "./mod.json": "./mod.json"
+  },
+  "files": ["dist", "mod.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tspml/api": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

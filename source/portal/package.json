@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@tspml/api-bridge": "workspace:*",
+    "@tspml/demo-hud": "workspace:*",
+    "@tspml/loader": "workspace:*",
     "@tspml/transform": "workspace:*",
     "next": "^15.0.0",
     "react": "^19.0.0",

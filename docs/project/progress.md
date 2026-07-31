@@ -134,11 +134,23 @@ Implemented **`api.keybinds`**:
 
 Caveat (documented for modders + the `Keybinds` doc): bridge keybinds run as a *parallel* listener — they don't appear in the game's Controls settings and don't consult its conflict rules (the game's action set is a closed enum it polls itself). Future: audio registry (needs the instance-capture transform) + re-investigate custom-tracks (the natural "content appears in a list" target).
 
+## 2026-07-31 — M4-I: real mod loading (loader → mod package → api) ✅
+
+The "it's a mod loader, not just an event emitter" proof. Wired `@tspml/loader` into the portal so a **real mod package** is discovered, parsed, resolved/ordered, and invoked — its entrypoint receiving the bridge `api` and subscribing.
+
+- **New mod package `@tspml/demo-hud`** (`environments/demo-mods/example-hud/`): `mod.json` (schemaVersion 1, id `tspml-example-hud`, targets `>=0.6.0 <0.7.0`) + an entrypoint factory `(api) => { api.events.on('car.control', …); api.keybinds.register({key:'KeyG', …}); }`.
+- **`source/portal/lib/mod-loader.ts`**: statically imports the demo mod + runs `@tspml/loader`'s `load()` against the bridge api (per-mod failure isolation). The portal builds the full `api` object (`{events, keybinds, logger, version}`) on iframe load, exposes it as `window.__tspml`, and loads mods against it; a sidebar "mods: ✓ tspml-example-hud" line shows load status.
+- **Plumbing fixes surfaced:** added `main`/`types`/`exports`/`files` to `@tspml/loader`'s package.json (it was self-contained in M1, never imported cross-package before) + `environments/demo-mods/*` to `pnpm-workspace.yaml`.
+- **Headless-verified:** the smoke asserts the loaded mod's handlers fire — `modLoaded=true`, `modControl=5` (its `car.control` listener rides the same bus), `modKey=1` (its `KeyG` keybind on dispatch). All 6 events + the keybind registry still pass. **129 unit tests green.**
+
+This closes the loop end-to-end: **transform → game event → bridge `EventBus` → a real mod package's listener** (and a mod-registered keybind). TSPML now actually loads a mod.
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
 - **The portal plays PolyTrack end-to-end** (ADR-012/013) — a transformed, modded game reaches an actual race.
 - **The mod-loader loop is proven** (M4-B–F): **6 Tier-1 events** fire inside the running game — `car.control`, `car.created`, `race.started`, `track.afterLoad` (all headlessly verified) + `checkpoint.passed`, `race.finished` (wired, need real race progress) — flowing through the `EventBus` to subscribers, hash-gated.
 - **First registry works** (M4-G/H): `api.keybinds.register(...)` fires via a bridge-owned listener on the game iframe (verified). `window.__tspml` is now the full `api` object (`{events, keybinds, version}`).
+- **Real mod loading works** (M4-I): `@tspml/loader` loads a real mod package (`@tspml/demo-hud`) whose entrypoint receives the api and subscribes to events + registers a keybind — verified end-to-end. The full loop (transform → game event → bus → mod) is closed.
 - **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8 (bot-protected `vps.kodub.com`; the extension is the resilient path). Non-blocking for local gameplay.
 - **Next:** finish M4 — more Tier-1 events (render/track/checkpoint) + registries (cars/blocks/audio) via the same transform+mappings path, then wire real mod loading into the portal.
