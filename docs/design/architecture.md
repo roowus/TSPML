@@ -36,7 +36,7 @@
 ## Hook system (two tiers)
 
 - **Tier 1 — event bus + registries:** `api.events.on('physics.postStep', cb)`, `api.blocks.register(...)`, etc. Wired by the bridge; mods never see minified code. ~90% of mods.
-- **Tier 2 — declarative mixin surgery (escape hatch):** `api.mixin.before/after/around/replace/modifyArg` against stable names — for needs the events/registries don't cover. `before/after/around/modifyArg/modifyReturn` chain by priority; `replace` is single-winner with a load-time conflict error.
+- **Tier 2 — declarative mixin surgery (escape hatch):** JSON mixin descriptors (`before`/`after`/`around`/`replace`/`modifyArg`/…) targeting **stable names**, applied at transform time (not a runtime `api.mixin` object). Chaining is currently array-order ([#13](https://github.com/roowus/TSPML/issues/13) for priority); `replace` is single-winner with a load-time conflict error.
 
 See [hook-system.md](./hook-system.md).
 

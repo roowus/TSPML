@@ -16,4 +16,4 @@ export type {
 
 export type { KeybindBinding, KeybindsRegistry } from './keybinds.js';
 
-export type { TspmlApi } from './api.js';
+export type { TspmlApi, TspmlLogger } from './api.js';
