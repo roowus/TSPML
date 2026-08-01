@@ -8,6 +8,20 @@
     "granularity": "module",
     "note": "v1 module-level map. Symbol-level locators (exportRef/prototypeFn/callExpression) land in M3."
   },
+  "targets": {
+    "Car": {
+      "anchor": { "literals": ["CreateCar", "ControlCar", "TestDeterminism"], "minHits": 3 },
+      "selector": { "kind": "factory" }
+    },
+    "Car.controlCar": {
+      "anchor": { "literals": ["CreateCar", "ControlCar", "TestDeterminism"], "minHits": 3 },
+      "selector": { "kind": "method", "name": "controlCar" }
+    },
+    "Car.createCar": {
+      "anchor": { "literals": ["CreateCar", "ControlCar", "TestDeterminism"], "minHits": 3 },
+      "selector": { "kind": "method", "name": "createCar" }
+    }
+  },
   "modules": {
     "keep": {
       "concept": "Keep",

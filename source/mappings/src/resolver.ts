@@ -19,6 +19,7 @@ import type {
   Locator,
   ResolveContext,
   ResolveResult,
+  TargetSpec,
 } from './types.js';
 
 /**
@@ -94,4 +95,52 @@ export function createResolver(map: GameMap): Resolver {
  */
 export function resolve(map: GameMap, stableName: string, ctx: ResolveContext): ResolveResult {
   return createResolver(map).resolve(stableName, ctx);
+}
+
+// ── Target resolution (M5-C) ────────────────────────────────────────────────
+
+export interface TargetResolveSuccess {
+  readonly ok: true;
+  readonly target: TargetSpec;
+}
+export type TargetResolveResult =
+  | TargetResolveSuccess
+  | {
+      readonly ok: false;
+      readonly reason: 'stale-map' | 'not-found';
+      readonly message: string;
+    };
+
+/**
+ * Resolve a stable TARGET name (from `map.targets`) to a concrete
+ * {@link TargetSpec}, **fail-closed** on hash mismatch — same guarantee as the
+ * module resolver. Lets mods address e.g. `Car.controlCar` instead of an inline
+ * minified anchor.
+ */
+export function resolveTarget(
+  map: GameMap,
+  name: string,
+  ctx: ResolveContext,
+): TargetResolveResult {
+  if (normalizeHash(ctx.bundleHash) !== normalizeHash(map.bundleHash)) {
+    return {
+      ok: false,
+      reason: 'stale-map',
+      message: `map bundleHash (${map.bundleHash}) does not match live bundle (${ctx.bundleHash}); refusing to resolve target '${name}'`,
+    };
+  }
+  const targets = map.targets;
+  if (!targets) {
+    return { ok: false, reason: 'not-found', message: `map has no targets section` };
+  }
+  // Case-insensitive lookup (mirrors the module resolver).
+  const key = Object.keys(targets).find((k) => k.toLowerCase() === name.toLowerCase());
+  if (key === undefined) {
+    return {
+      ok: false,
+      reason: 'not-found',
+      message: `target '${name}' is not in the map for PolyTrack ${map.gameVersion}`,
+    };
+  }
+  return { ok: true, target: targets[key]! };
 }
