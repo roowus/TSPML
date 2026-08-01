@@ -193,14 +193,93 @@ Made the types package publishable so modders get autocomplete via `npm i -D @ts
 
 The actual `npm publish` is the one maintainer step (`npm login` + ownership); everything else is done.
 
+## 2026-08-01 — M9: regen / diff / verify pipeline (the moat, operationalized) ✅
+
+Built the missing half of the update-resilience story — the tooling that turns a
+PolyTrack version bump from a manual scramble into a one-command, human-in-the-loop
+review. Four new modules in `tooling/mappings-pipeline` (plain `.mjs`, matching the
+sibling `unpack`/`match`/`gen-map` scripts):
+
+- **`src/diff.mjs`** — the human-review core. Pure map-vs-map diff keyed by
+  `sourceModuleId` (the cross-version-stable id; see insight below). Reports module
+  relocations, stable-name moves, added/removed modules, confidence drops, newly
+  resolved/unresolved, a **target-impact** correlation, a risk level (`none`/`low`/
+  `high`), and a `formatDiff()` reviewer report.
+- **`src/verify-targets.mjs`** — the fail-closed anchor gate. Reads the unpacked new
+  bundle and confirms each carried-forward target's anchor literals still resolve
+  together in a module (`pass`/`ambiguous`/`fail`). This is what makes carrying the
+  `targets` section forward across a version bump *safe* — without it, a drifted
+  target would silently fail-closed at mod-load time.
+- **`src/fetch.mjs`** — downloads the new build's `main.bundle.js` (+ sim worker) from
+  the `app-polytrack.kodub.com` CDN into the gitignored `.cache/`, with an optional
+  `--expect-hash` pin that rejects a silent version swap.
+- **`scripts/regen.mjs`** — the orchestrator: `fetch → unpack → gen-map → diff →
+  verify`, printing a combined review report. Writes `*.candidate.json` (**never**
+  clobbers a committed map); exits non-zero on `HIGH` risk or any target `fail`.
+  Standalone `--diff` / `--verify` modes for reviewing an already-generated map.
+
+**Key insight — cross-version module identity.** A regen always matches the *same*
+fixed 0.6.0 renamed source against a new target, so every matched module carries a
+`sourceModuleId` (a 0.6.0 webcrack id) identical across versions. The diff keys
+modules by `sourceModuleId`, **not** the concept slug (which drifts with the scorer).
+`moduleId` is the thing that *relocates*. The `targets` section is carried forward
+verbatim, so it can't be diffed directly — `diff` correlates each target to its module
+by **max stable-name overlap** (a heuristic), while `verify-targets` is the
+**authoritative** all-literals check against the unpacked bundle.
+
+**Verified end-to-end against the real cached bundles** (the project's "run it
+yourself" practice):
+- *Reproducibility* — regenerating the 0.6.2 map and diffing vs committed: **56
+  matched, 0 relocated, risk NONE** (gen-map is deterministic; the diff correctly
+  reports zero drift).
+- *Real cross-version drift* — a 0.6.0-target candidate vs the 0.6.2 map: bundleHash
+  changed, **8 modules relocated, 49 stable names moved module**.
+- *Realistic HIGH-risk path* — when the Car module is unresolved in the candidate, all
+  3 targets flag `[UNRESOLVED]` → risk **HIGH** ("do not promote until re-verified").
+- *verify-targets on the real `v062-raw`* — all 3 targets (`Car`, `Car.controlCar`,
+  `Car.createCar`) resolve to module `5220`.
+- *fetch* — downloads 0.6.2 main, sha256 `8495…` **exactly matches the committed
+  bundleHash**, byte-for-byte identical to the cache; a wrong `--expect-hash` aborts.
+
+**37 unit tests** (diff + verify-targets + fetch-version-validation, CI-runnable —
+fixture maps + temp module dirs; no bundle needed). **185 tests green** total, build
+green. Pipeline README rewritten; `mappings-system.md` marked implemented;
+`*.candidate.json` gitignored so the promote workflow (`cp candidate → committed`)
+stays clean. ADR-014.
+
+**Adversarially reviewed (4-lens workflow: diff / verify-targets / fetch-legal /
+regen, each finding adversarially verified).** The review earned its keep: it caught a
+**blocker** — on the first regen of a new version, `gen-map` read carry-forward
+`targets` from `OUT` (the not-yet-written candidate) → ENOENT → silent catch → a
+**target-less candidate**, so `verify-targets` checked 0 targets and printed a
+misleading **"ALL TARGETS RESOLVE" + GREEN**; promoting would have dropped every
+mod-facing target. **Fixed at the root:** `gen-map` now reads targets from an explicit
+`GEN_PREV_MAP` baseline (passed by `regen`); `regen` additionally asserts
+(`assertTargetsCarried`) that the candidate keeps ≥ the baseline's targets — refusing
+to emit a target-less candidate; and `formatVerifications` no longer claims green on 0
+targets. Other confirmed findings fixed: `fetch` version-path traversal guard
+(`assertVersion`) + HTML/tiny-body rejection; `regen` `--out` clobber-committed guard;
+`diff` confidence-drop made scale-invariant (relative-only — weights span ~6–14000);
+the `verify-targets` 'ambiguous' note corrected (the locator picks the *first* module,
+not selector-disambiguated between modules); `modulesContaining` documented as
+intentionally conservative (distinct-literal count — a pass guarantees the runtime
+locator finds the anchor). Re-verified end-to-end on the real bundles: a full `regen`
+now reports `3 pass (of 3)` targets, not a vacuous 0.
+
+Honest scope retained: the bundle-dependent stages (`fetch`/`unpack`/`gen-map`/full
+`regen`) are local-only (webcrack + gitignored cache), like the M1 spike — they don't
+run in CI. The "candidate within hours" goal is now real for the ~85% the matcher
+auto-relocates; the residual still needs the human review this tooling surfaces. AST
+structural fingerprints (the next match-rate lever) remain future work.
+
 ## Where we stand (2026-08-01)
 
-- **Engines + bridge + scaffold, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (14) · create-tspml-mod (4) — **148 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (14) · create-tspml-mod (4) · mappings-pipeline (37) — **185 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
 - **M7-A/B ✅** — `create-tspml-mod` CLI + `@tspml/api` publish-ready.
 - **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
-- **M9-A ✅** — `gen-map.mjs` parameterized (env-var configurable, targets carried forward).
+- **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#13/#14 closed.** Open: #10 (player-only), #11 (audio — locator can't reach bootstrap), #12 (custom-tracks).
-- **Next:** M7-C (dev harness), M8 continues (api + transforms in extension), M9 full pipeline, or polish.
+- **Next:** M7-C (dev harness), M8 continues (api + transforms in extension), or polish.
