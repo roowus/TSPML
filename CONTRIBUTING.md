@@ -1,23 +1,38 @@
 # Contributing to TSPML
 
-Thanks for your interest! TSPML is a fan-made mod loader for PolyTrack — please read the [disclaimers](./README.md#-disclaimers) first.
+Thanks for your interest! TSPML is a Fabric-like mod loader for PolyTrack — please read the [disclaimers](./README.md#-disclaimers) first.
 
 ➡️ **Full guides live in [`docs/contributing/`](./docs/contributing/):**
 
 - [Setup](./docs/contributing/setup.md) — cloning and prerequisites.
-- [Conventions](./docs/contributing/conventions.md) — code style, repo layout, commits, mappings maintenance.
+- [Conventions](./docs/contributing/conventions.md) — code style, repo layout, commits, mappings maintenance, **momentum & autonomy** (always carry on).
 
 ## Quick rules
 
-- **Never commit the PolyTrack game**, its WASM, or deobfuscated source. Ship only our code + mappings metadata. (Build artifacts are gitignored.)
-- **Docs-first:** every non-trivial decision gets an ADR in [`docs/project/decision-log.md`](./docs/project/decision-log.md); update [`docs/project/progress.md`](./docs/project/progress.md) per milestone.
-- **TypeScript**, strict, ESM. Conventional Commits.
-- When code lands (M1+), `pnpm install && pnpm -r build && pnpm -r test` should pass before pushing.
+- **Always carry on — never stop to checkpoint or ask for sub-decisions.** Decide what's best + execute. See [conventions.md → Momentum & autonomy](./docs/contributing/conventions.md#momentum--autonomy-core-practice).
+- **Never commit the PolyTrack game**, its WASM, or deobfuscated source. Ship only our code + mappings metadata.
+- **Docs are living.** Every non-trivial decision gets an ADR; update progress.md per milestone. Stale docs are a bug.
+- **Run it yourself.** If a check is executable, run it. Automate browser checks with Playwright. Don't claim "untested" if you can test it.
+- **TypeScript**, strict, ESM. Conventional Commits. CI mandatory.
+- `pnpm install --ignore-scripts && pnpm -r build && pnpm -r test` should pass before pushing.
 
-## Where help is most useful (post-M0)
+## Writing a mod
 
-- M1: the mappings drift experiment + loader core.
-- M9: the auto-mappings pipeline (the update-speed moat) — gated on M1.
-- Docs, examples, and the PML resource-override importer.
+```bash
+npx create-tspml-mod my-mod   # scaffold a working starter
+```
+
+See the [getting-started guide](./docs/getting-started.md).
+
+## Where help is most useful
+
+- **M7-C:** the Vite dev harness (fast mod HMR).
+- **M8 continues:** the browser extension (api + transforms — the online path).
+- **M9:** the full auto-mappings pipeline.
+- **Docs, examples, and demo mods.**
 
 See [`docs/project/roadmap.md`](./docs/project/roadmap.md).
+
+## License
+
+MIT (our code). PolyTrack is © its developer and is not covered by this license.
