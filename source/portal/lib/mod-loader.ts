@@ -16,6 +16,8 @@ import type { SafetyReport } from '@tspml/loader';
 // returns it for the demo-hud specifier.
 import demoHudFactory from '@tspml/demo-hud';
 import demoHudManifest from '@tspml/demo-hud/mod.json';
+import checkpointCounterFactory from '@tspml/checkpoint-counter';
+import checkpointCounterManifest from '@tspml/checkpoint-counter/mod.json';
 
 export interface ModSafetyEntry {
   readonly id: string;
@@ -36,10 +38,12 @@ export interface ModLoadSummary {
 export async function loadMods(api: ModApi): Promise<ModLoadSummary> {
   const importEntry = async (specifier: string): Promise<unknown> => {
     if (specifier === 'demo-hud') return { default: demoHudFactory };
+    if (specifier === 'checkpoint-counter') return { default: checkpointCounterFactory };
     return await import(/* webpackIgnore: true */ /* @vite-ignore */ specifier);
   };
   const descriptors: ModDescriptor[] = [
     { manifest: demoHudManifest as unknown, entry: 'demo-hud' },
+    { manifest: checkpointCounterManifest as unknown, entry: 'checkpoint-counter' },
   ];
   const result = await load(descriptors, { api, importEntry });
 

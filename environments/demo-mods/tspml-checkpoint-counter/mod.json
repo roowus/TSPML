@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "tspml-checkpoint-counter",
+  "name": "Tspml Checkpoint Counter",
+  "version": "0.1.0",
+  "description": "Tspml Checkpoint Counter — a TSPML mod.",
+  "entrypoint": "entrypoint.js",
+  "targets": [
+    ">=0.6.0 <0.7.0"
+  ],
+  "mixins": [
+    {
+      "config": "mixins.json",
+      "environment": "web"
+    }
+  ],
+  "authors": [
+    "your-name"
+  ],
+  "license": "MIT"
+}

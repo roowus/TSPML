@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tspml/api-bridge": "workspace:*",
+    "@tspml/checkpoint-counter": "workspace:*",
     "@tspml/demo-hud": "workspace:*",
     "@tspml/loader": "workspace:*",
     "@tspml/mappings": "workspace:*",
