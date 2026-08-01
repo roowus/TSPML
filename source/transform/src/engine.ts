@@ -261,3 +261,22 @@ export function transform(
     parseErrorCount,
   };
 }
+
+/**
+ * Stable-sort `patches` by `priority` DESC (higher first; ties keep original
+ * order). The engine applies patches in array order, so the caller should sort
+ * before calling `transform`. This gives mods a deterministic priority hook.
+ *
+ * NOTE on runtime order (#13): the engine applies in sorted order; for `before`
+ * (unshift at HEAD), a later-applied patch ends up CLOSER to the method head
+ * (runs first). So desc-sort → highest-priority applied first → lowest runs
+ * first for `before`. For `around` (wrap), desc-sort → highest wraps outermost
+ * (runs last / outermost). Full per-op "higher-priority-runs-first" semantics
+ * is a tracked refinement; this helper provides the sort hook mods need today.
+ */
+export function sortPatchesByPriority(patches: readonly Patch[]): Patch[] {
+  return patches
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => (b.p.priority ?? 0) - (a.p.priority ?? 0) || a.i - b.i)
+    .map(({ p }) => p);
+}
