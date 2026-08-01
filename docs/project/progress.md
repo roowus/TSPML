@@ -193,12 +193,14 @@ Made the types package publishable so modders get autocomplete via `npm i -D @ts
 
 The actual `npm publish` is the one maintainer step (`npm login` + ownership); everything else is done.
 
-## Where we stand (2026-07-31)
+## Where we stand (2026-08-01)
 
-- **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
-- **The portal plays PolyTrack end-to-end** (ADR-012/013) — a transformed, modded game reaches an actual race.
-- **The mod-loader loop is proven** (M4-B–F): **6 Tier-1 events** fire inside the running game — `car.control`, `car.created`, `race.started`, `track.afterLoad` (all headlessly verified) + `checkpoint.passed`, `race.finished` (wired, need real race progress) — flowing through the `EventBus` to subscribers, hash-gated.
-- **First registry works** (M4-G/H): `api.keybinds.register(...)` fires via a bridge-owned listener on the game iframe (verified). `window.__tspml` is now the full `api` object (`{events, keybinds, version}`).
-- **Real mod loading works** (M4-I): `@tspml/loader` loads a real mod package (`@tspml/demo-hud`) whose entrypoint receives the api and subscribes to events + registers a keybind — verified end-to-end. The full loop (transform → game event → bus → mod) is closed.
-- **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8 (bot-protected `vps.kodub.com`; the extension is the resilient path). Non-blocking for local gameplay.
-- **Next:** finish M4 — more Tier-1 events (render/track/checkpoint) + registries (cars/blocks/audio) via the same transform+mappings path, then wire real mod loading into the portal.
+- **Engines + bridge + scaffold, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (14) · create-tspml-mod (4) — **148 tests green**, CI green.
+- **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
+- **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
+- **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
+- **M7-A/B ✅** — `create-tspml-mod` CLI + `@tspml/api` publish-ready.
+- **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
+- **M9-A ✅** — `gen-map.mjs` parameterized (env-var configurable, targets carried forward).
+- **#13/#14 closed.** Open: #10 (player-only), #11 (audio — locator can't reach bootstrap), #12 (custom-tracks).
+- **Next:** M7-C (dev harness), M8 continues (api + transforms in extension), M9 full pipeline, or polish.
