@@ -28,6 +28,11 @@ const TGT = process.env.GEN_TGT ?? join(CACHE, "webcrack/v062-raw");
 const BUNDLE = process.env.GEN_BUNDLE ?? join(CACHE, "pt-0.6.2-raw-main.js");
 const GAME_VERSION = process.env.GEN_VERSION ?? "0.6.2";
 const OUT = process.env.GEN_OUT ?? join(PKG_DIR, `../maps/polytrack-${GAME_VERSION}.json`);
+// Where to read the carry-forward `targets` section from. Defaults to OUT (standalone
+// in-place regen reads its own targets). regen.mjs sets this to the COMMITTED baseline
+// map — because OUT is the not-yet-written candidate, reading targets from OUT on a
+// first regen would ENOENT and silently drop all targets (M9 review finding: blocker).
+const PREV_MAP = process.env.GEN_PREV_MAP ?? OUT;
 
 // ---------------------------------------------------------------------------
 // Matcher (verbatim from tooling/mappings-pipeline/src/match.mjs)
@@ -337,16 +342,19 @@ const map = {
   unresolved: unresolvedOut,
 };
 
-// Carry forward the hand-curated `targets` section from the existing map (M5-C).
-// On a new version, the human verifies each target's anchor still matches.
+// Carry forward the hand-curated `targets` section from the baseline map (M5-C).
+// Read from PREV_MAP (the committed baseline under regen), NOT OUT — OUT is the
+// candidate being written and does not exist yet on a first regen, so reading it
+// would ENOENT and silently drop every target. On a new version the human verifies
+// each carried target's anchor still resolves (verify-targets.mjs).
 try {
-  const prev = JSON.parse(await readFile(OUT, "utf8"));
+  const prev = JSON.parse(await readFile(PREV_MAP, "utf8"));
   if (prev.targets && typeof prev.targets === "object") {
     map.targets = prev.targets;
-    console.error(`targets carried forward: ${Object.keys(prev.targets).length} entries (verify against the new build)`);
+    console.error(`targets carried forward: ${Object.keys(prev.targets).length} entries from ${PREV_MAP} (verify against the new build)`);
   }
 } catch {
-  // No existing map — no targets to carry (human adds them later).
+  // No baseline map / baseline has no targets — none to carry (human adds them later).
 }
 
 await writeFile(OUT, JSON.stringify(map, null, 2) + "\n", "utf8");

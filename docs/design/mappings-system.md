@@ -36,6 +36,16 @@ The canonical stable namespace is human-curated; per-build concrete locators are
 
 ## Auto-regeneration pipeline (gated on the M1 spike)
 
+> **Status: IMPLEMENTED (M9).** The full fetch → unpack → match/gen → diff → verify
+> pipeline lives in [`tooling/mappings-pipeline`](../../tooling/mappings-pipeline/).
+> One command regenerates a candidate map and prints a human-review report:
+> `node tooling/mappings-pipeline/scripts/regen.mjs <version>` (writes a
+> `*.candidate.json` — never clobbers a committed map). See that package's README for
+> the maintainer workflow. The semi-automated, human-in-the-loop scope (ADR-005)
+> stands: the matcher relocates ~85% of modules automatically; `diff.mjs` surfaces
+> the rest for review and `verify-targets.mjs` is the fail-closed anchor gate that
+> makes carrying `targets` forward safe across a version bump.
+
 On each new PolyTrack release:
 
 1. Fetch the new `main.bundle.js` + chunks + `simulation_worker.bundle.js`.
