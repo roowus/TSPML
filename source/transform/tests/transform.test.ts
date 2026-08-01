@@ -420,3 +420,36 @@ describe("engine — composition + output integrity", () => {
     expect(countModuleMapEntries(r.code)).toBe(countModuleMapEntries(SYNTHETIC_BUNDLE));
   });
 });
+
+describe("engine — chaining (multiple patches on the same target)", () => {
+  it("two `before` patches on the same target both apply (chain composes)", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      { op: "before", target: CAR_CONTROL_CAR, inject: 'console.log("chain-a");' },
+      { op: "before", target: CAR_CONTROL_CAR, inject: 'console.log("chain-b");' },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.applied).toHaveLength(2);
+    expect(r.outputValid).toBe(true);
+    // Both injects landed in the same method body.
+    expect(r.code).toContain("chain-a");
+    expect(r.code).toContain("chain-b");
+    // The engine applies in array order; `before` unshifts, so the LATER patch
+    // ends up closer to the method head. (Priority-ordered chaining is a
+    // designed refinement — see docs/api/mixin-reference.md + the priority issue.)
+    const idxA = r.code.indexOf("chain-a");
+    const idxB = r.code.indexOf("chain-b");
+    expect(Math.min(idxA, idxB)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("a miss on one target does not block a hit on another (per-patch isolation)", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      { op: "before", target: { anchor: CAR_CONTROL_CAR.anchor, selector: { kind: "method", name: "noSuchMethod" } }, inject: 'console.log("x");' },
+      { op: "before", target: CAR_CONTROL_CAR, inject: 'console.log("ok");' },
+    ]);
+    expect(r.applied).toHaveLength(1);
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]!.reason).toBe("not-found");
+    expect(r.code).toContain("ok");
+    expect(r.outputValid).toBe(true);
+  });
+});

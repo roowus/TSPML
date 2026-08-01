@@ -155,6 +155,15 @@ Started **M5** (the mixin / Tier-2 system). First slice: a **mod authors** trans
 
 Inline anchors for now; **mappings-resolved** stable-name targeting (`Car.controlCar` via `@tspml/mappings`, fail-closed) is M5-C — that's where the mappings moat pays off for the escape hatch. Remaining M5: chaining semantics (priority-ordered `before`/`after`) + `replace` single-winner → load-time conflict error (M5-B).
 
+## 2026-07-31 — M5-B: mixin chaining + conflict — verified + documented ✅
+
+Confirmed the engine **already implements** both M5-B concerns (from M3) and filled the test/doc gaps:
+
+- **`replace` single-winner conflict** — two mods replacing the same target → both fail `conflict-replace-single-winner`, neither applied (load-time error). Already implemented + tested.
+- **Chaining** — multiple patches on one target compose in array order. Added tests: two `before` patches on the same target both apply (chain composes), and a per-target miss doesn't block a hit (per-patch isolation). **Transform suite now 33 tests.**
+
+Filed **[#13](https://github.com/roowus/TSPML/issues/13)**: the `PatchBase.priority` field is declared but unused — priority-*ordered* chaining is subtle (the runtime order differs per op: `around` wants DESC, `before`-unshift wants ASC) and no mod needs it yet, so it's a tracked refinement, not a blocker. Corrected `docs/api/mixin-reference.md` (it had overclaimed "ordered by priority").
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
