@@ -2,6 +2,8 @@
 
 > TSPML copies **Fabric's layering**, not PML's mechanics. The thesis: concentrate *all* version-coupling in two maintained artifacts (the **mappings file** + the **API bridge**) so ordinary mods target stable names and ride through PolyTrack updates without recompilation.
 
+> **Implementation status (M4-M5 ✅, M6-M9 🚧):** the layered design below is now **proven end-to-end** — 6 Tier-1 events fire inside the running game, mods load + subscribe, mod-declared mixins target stable names resolved fail-closed via the mappings, and a warn-only safety classifier labels mods. The portal plays a transformed, modded PolyTrack headlessly verified. See [progress.md](../project/progress.md) + [roadmap.md](../project/roadmap.md).
+
 ## Layered design
 
 ```
