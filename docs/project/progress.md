@@ -184,6 +184,15 @@ Started **M7 (modder DX)**. First slice: a one-command mod scaffold — the "sim
 
 **140 unit tests green.** (M7 continues: dev harness + a publishable `@tspml/api`.)
 
+## 2026-07-31 — M7-B: `@tspml/api` publish-ready ✅
+
+Made the types package publishable so modders get autocomplete via `npm i -D @tspml/api`:
+- Dropped `private`, set `version: 0.1.0`, added `publishConfig: { access: public }` (scoped packages need this), `repository`, `keywords`, `sideEffects: false`, + `prepublishOnly` build.
+- Verified `npm pack --dry-run` ships exactly `dist/` type defs + README (zero runtime, no source).
+- Documented install/usage + the maintainer publish steps in `packages/api/README.md`.
+
+The actual `npm publish` is the one maintainer step (`npm login` + ownership); everything else is done.
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.

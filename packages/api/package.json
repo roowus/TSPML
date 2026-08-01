@@ -1,9 +1,8 @@
 {
   "name": "@tspml/api",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
-  "description": "Published TypeScript type definitions for the entire stable game surface, giving modders autocomplete against stable names. Zero runtime.",
+  "description": "TypeScript type definitions for the TSPML stable game surface — gives modders autocomplete against stable names. Zero runtime.",
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,11 +12,24 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
+  "sideEffects": false,
+  "keywords": ["polytrack", "tspml", "modding", "types", "game-mods"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roowus/TSPML.git",
+    "directory": "packages/api"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": false
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "typescript": "^5.6.0"
   }
 }
+
