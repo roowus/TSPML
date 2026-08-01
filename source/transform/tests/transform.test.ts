@@ -17,7 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { transform } from "../src/index.js";
+import { sortPatchesByPriority, transform } from "../src/index.js";
 import { findModulePath } from "../src/locators.js";
 // Internal babel helpers (parse/traverse/t) — fine to reach into from tests.
 import { parse, traverse, t } from "../src/babel.js";
@@ -451,5 +451,27 @@ describe("engine — chaining (multiple patches on the same target)", () => {
     expect(r.failed[0]!.reason).toBe("not-found");
     expect(r.code).toContain("ok");
     expect(r.outputValid).toBe(true);
+  });
+});
+
+describe("sortPatchesByPriority", () => {
+  it("sorts by priority descending, stable for ties", () => {
+    const patches = [
+      { op: "before", target: CAR_CONTROL_CAR, inject: "a", priority: 0 },
+      { op: "before", target: CAR_CONTROL_CAR, inject: "b", priority: 10 },
+      { op: "before", target: CAR_CONTROL_CAR, inject: "c", priority: 5 },
+      { op: "before", target: CAR_CONTROL_CAR, inject: "d", priority: 10 },
+    ];
+    const sorted = sortPatchesByPriority(patches as unknown as Parameters<typeof sortPatchesByPriority>[0]);
+    expect(sorted.map((p) => p.inject)).toEqual(["b", "d", "c", "a"]);
+  });
+
+  it("no-op when all priorities are equal (default 0)", () => {
+    const patches = [
+      { op: "before", target: CAR_CONTROL_CAR, inject: "x" },
+      { op: "before", target: CAR_CONTROL_CAR, inject: "y" },
+    ];
+    const sorted = sortPatchesByPriority(patches as unknown as Parameters<typeof sortPatchesByPriority>[0]);
+    expect(sorted.map((p) => p.inject)).toEqual(["x", "y"]);
   });
 });
