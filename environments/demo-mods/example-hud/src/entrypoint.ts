@@ -18,10 +18,9 @@ interface DemoCounters {
   key: number;
   loaded: boolean;
 }
+/** Extends the published API with smoke-test counters hung off the runtime object. */
 interface DemoApi extends TspmlApi {
   __demoHud?: DemoCounters;
-  /** The loader hands mods a console-shaped logger (see @tspml/loader ModApi). */
-  logger: Pick<Console, 'log' | 'error' | 'warn' | 'info' | 'debug'>;
 }
 
 export default function exampleHud(api: DemoApi, _game: unknown): void {

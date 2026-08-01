@@ -5,6 +5,7 @@ import { Keybinds } from '../src/keybinds.js';
 // and lets tests dispatch synthetic keyboard events.
 interface MockEvent {
   code: string;
+  repeat: boolean;
   preventedDefault: boolean;
 }
 function mockWindow() {
@@ -16,8 +17,8 @@ function mockWindow() {
     removeEventListener(type: string, l: (e: MockEvent) => void) {
       listeners[type] = (listeners[type] ?? []).filter((x) => x !== l);
     },
-    dispatch(type: string, code: string) {
-      const e: MockEvent = { code, preventedDefault: false };
+    dispatch(type: string, code: string, opts: { repeat?: boolean } = {}) {
+      const e: MockEvent = { code, repeat: opts.repeat ?? false, preventedDefault: false };
       (listeners[type] ?? []).forEach((l) =>
         l({ ...e, preventDefault: () => { e.preventedDefault = true; } } as unknown as MockEvent & { preventDefault: () => void }),
       );
@@ -86,5 +87,30 @@ describe('Keybinds', () => {
     kb.dispose();
     win.dispatch('keydown', 'KeyF');
     expect(down).not.toHaveBeenCalled();
+  });
+
+  it('ignores keydown auto-repeat by default (edge-triggered)', () => {
+    const win = mockWindow();
+    const kb = new Keybinds(win as unknown as Window);
+    const down = vi.fn();
+    kb.register({ id: 'm1', key: 'KeyF', onDown: down });
+
+    win.dispatch('keydown', 'KeyF');
+    win.dispatch('keydown', 'KeyF', { repeat: true });
+    win.dispatch('keydown', 'KeyF', { repeat: true });
+    expect(down).toHaveBeenCalledTimes(1);
+    kb.dispose();
+  });
+
+  it('fires onDown on auto-repeat when allowRepeat is true', () => {
+    const win = mockWindow();
+    const kb = new Keybinds(win as unknown as Window);
+    const down = vi.fn();
+    kb.register({ id: 'm1', key: 'KeyF', onDown: down, allowRepeat: true });
+
+    win.dispatch('keydown', 'KeyF');
+    win.dispatch('keydown', 'KeyF', { repeat: true });
+    expect(down).toHaveBeenCalledTimes(2);
+    kb.dispose();
   });
 });
