@@ -159,7 +159,11 @@ importers:
 
   tooling/cli: {}
 
-  tooling/create-tspml-mod: {}
+  tooling/create-tspml-mod:
+    devDependencies:
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)
 
   tooling/mappings-pipeline:
     devDependencies:

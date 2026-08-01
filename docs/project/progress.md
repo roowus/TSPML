@@ -174,6 +174,16 @@ The mappings moat now pays off for the Tier-2 escape hatch. A mod authors a mixi
 
 **Headless-verified:** `modMixinApplied=true` — the stable-name-targeted mixin ran and injected its marker. **136 unit tests green.** This closes [#14](https://github.com/roowus/TSPML/issues/14); **M5 is complete** (mod-declared mixins + chaining/conflict + mappings-resolved targeting).
 
+## 2026-07-31 — M7-A: `create-tspml-mod` scaffold CLI ✅
+
+Started **M7 (modder DX)**. First slice: a one-command mod scaffold — the "simple to use" half of the goal.
+
+- `tooling/create-tspml-mod`: `scaffoldMod(id, dir)` generates a **working starter mod** mirroring the proven `@tspml/demo-hud` structure — `mod.json` (schemaVersion 1, valid `[a-z0-9-]` id, targets, mixins), `src/entrypoint.ts` (factory subscribing to `car.control` + a `KeyH` keybind), `mixins.json` (a starter Tier-2 mixin targeting the stable name `Car`), `tsconfig.json`, `README.md`.
+- `bin/create-tspml-mod.mjs` → `npx create-tspml-mod <name>` (or `node bin/...`).
+- **4 unit tests** + verified end-to-end: scaffolding `tspml-test-mod` produces 6 valid files with a loader-valid manifest.
+
+**140 unit tests green.** (M7 continues: dev harness + a publishable `@tspml/api`.)
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
