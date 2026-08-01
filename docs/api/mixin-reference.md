@@ -45,4 +45,6 @@ On `bundleHash` mismatch the loader **fails closed**: no AST/physics/ranked loca
 
 ## Declarative mixin files (M5-A — implemented)
 
-Mixins are declared as JSON descriptor files referenced from `mod.json`'s `mixins[]` (e.g. `@tspml/demo-hud`'s `mixins.json`) — packagable, reviewable patches using the same ops/targeting/conflict policy as above. The portal collects them and the transform applies them alongside the loader-owned bridge patches. Inline anchors for now; **mappings-resolved stable-name targeting** is M5-C.
+Mixins are declared as JSON descriptor files referenced from `mod.json`'s `mixins[]` (e.g. `@tspml/demo-hud`'s `mixins.json`) — packagable, reviewable patches using the same ops/targeting/conflict policy as above. The portal collects them and the transform applies them alongside the loader-owned bridge patches.
+
+**Targeting (M5-C — implemented):** a patch may target either an inline anchor (`{ target: { anchor: { literals }, selector } }`) or a **stable name** (`{ symbol: "Car.controlCar", op, inject }`), resolved fail-closed via `@tspml/mappings` to a concrete `TargetSpec` — so mods are decoupled from the build's minification. The map's `targets` section pins stable names (e.g. `Car`, `Car.controlCar`, `Car.createCar`) for the current build.

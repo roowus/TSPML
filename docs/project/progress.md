@@ -164,6 +164,16 @@ Confirmed the engine **already implements** both M5-B concerns (from M3) and fil
 
 Filed **[#13](https://github.com/roowus/TSPML/issues/13)**: the `PatchBase.priority` field is declared but unused — priority-*ordered* chaining is subtle (the runtime order differs per op: `around` wants DESC, `before`-unshift wants ASC) and no mod needs it yet, so it's a tracked refinement, not a blocker. Corrected `docs/api/mixin-reference.md` (it had overclaimed "ordered by priority").
 
+## 2026-07-31 — M5-C: mappings-resolved mixins (mods target stable names) ✅
+
+The mappings moat now pays off for the Tier-2 escape hatch. A mod authors a mixin targeting a **stable name** (`{ symbol: "Car", op, inject }`) instead of a hardcoded minified anchor; the portal resolves it fail-closed via `@tspml/mappings` → a concrete `TargetSpec` → the transform applies it.
+
+- **`@tspml/mappings`**: added a `targets` section to the map (stable name → `TargetSpec`: anchor+selector) for the proven symbols (`Car`, `Car.controlCar`, `Car.createCar`); `TargetSpec`/`ModuleAnchor`/`TargetSelector` types; `resolveTarget(map, name, ctx)` — **fail-closed** on hash mismatch (returns no target on stale-map); `validateMap` validates the `targets` section. **5 new resolver tests** (found / case-insensitive / stale-map / not-found).
+- **Portal**: `demo-transform` resolves `{symbol}` patches via the map (drops unresolvable ones) before transforming; the hash gate now uses `map.bundleHash` (single source of truth). The demo-hud mod's mixin now targets `symbol: "Car"` (was an inline anchor).
+- **Gotcha fixed:** `loadDefaultMap()` uses `import.meta.url`, which Next rewrites to a web asset path (broke `readFile` in the bundle) → switched to a direct JSON import + `validateMap` (sync).
+
+**Headless-verified:** `modMixinApplied=true` — the stable-name-targeted mixin ran and injected its marker. **136 unit tests green.** This closes [#14](https://github.com/roowus/TSPML/issues/14); **M5 is complete** (mod-declared mixins + chaining/conflict + mappings-resolved targeting).
+
 ## Where we stand (2026-07-31)
 
 - **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.

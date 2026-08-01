@@ -14,10 +14,13 @@ export type {
   GameMap,
   Locator,
   MapGenerated,
+  ModuleAnchor,
   ModuleEntry,
   ModuleLocator,
   ResolveContext,
   ResolveResult,
+  TargetSelector,
+  TargetSpec,
   UnresolvedEntry,
 } from './types.js';
 export { MAP_FORMAT_VERSION } from './types.js';
@@ -32,5 +35,5 @@ export {
 } from './map.js';
 
 // Resolver
-export { createResolver, resolve } from './resolver.js';
-export type { Resolver } from './resolver.js';
+export { createResolver, resolve, resolveTarget } from './resolver.js';
+export type { Resolver, TargetResolveResult } from './resolver.js';

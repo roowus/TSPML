@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createResolver, loadDefaultMap, resolve } from '../src/index.js';
+import { createResolver, loadDefaultMap, resolve, resolveTarget } from '../src/index.js';
 import type { GameMap } from '../src/index.js';
 
 /** A tiny hand-rolled map for deterministic resolver tests. */
@@ -130,5 +130,48 @@ describe('resolve (stateless) against the real bundled map', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('stale-map');
     expect('locator' in res).toBe(false);
+  });
+});
+
+describe('resolveTarget (M5-C) — stable name -> TargetSpec, fail-closed', () => {
+  it('resolves a known target from the real 0.6.2 map', async () => {
+    const map = await loadDefaultMap();
+    const res = resolveTarget(map, 'Car.controlCar', { bundleHash: map.bundleHash });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.target.selector.kind).toBe('method');
+      expect(res.target.selector.name).toBe('controlCar');
+      expect(res.target.anchor.literals).toContain('ControlCar');
+    }
+  });
+
+  it('resolves the Car factory target', async () => {
+    const map = await loadDefaultMap();
+    const res = resolveTarget(map, 'Car', { bundleHash: map.bundleHash });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.target.selector.kind).toBe('factory');
+  });
+
+  it('resolves case-insensitively', async () => {
+    const map = await loadDefaultMap();
+    const res = resolveTarget(map, 'car.createcar', { bundleHash: map.bundleHash });
+    expect(res.ok).toBe(true);
+  });
+
+  it('fails closed (stale-map) on a hash mismatch — returns no target', async () => {
+    const map = await loadDefaultMap();
+    const res = resolveTarget(map, 'Car.controlCar', {
+      bundleHash: 'sha256:deadbeef'.padEnd(71, '0'),
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('stale-map');
+    expect('target' in res).toBe(false);
+  });
+
+  it('returns not-found for an unknown target', async () => {
+    const map = await loadDefaultMap();
+    const res = resolveTarget(map, 'Nope.nada', { bundleHash: map.bundleHash });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('not-found');
   });
 });

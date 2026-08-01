@@ -37,6 +37,30 @@ export interface ModuleLocator {
   readonly moduleId: string;
 }
 
+/**
+ * A concrete transform target — the SAME shape @tspml/transform's locator
+ * consumes (module by anchor literals, within-module by selector). Stored in
+ * the map under `targets` so mods can address a STABLE NAME (e.g.
+ * `Car.controlCar`) instead of hardcoding minified anchors (M5-C).
+ */
+export interface ModuleAnchor {
+  /** ≥1 distinctive literals (enum members / magic strings / numeric constants). */
+  readonly literals: readonly (string | number)[];
+  /** Min literal hits required (defaults to literals.length). */
+  readonly minHits?: number;
+}
+export interface TargetSelector {
+  readonly kind: 'method' | 'property' | 'factory';
+  /** Preserved method name (kind: 'method'). */
+  readonly name?: string;
+  /** Property key (kind: 'property'). */
+  readonly key?: string;
+}
+export interface TargetSpec {
+  readonly anchor: ModuleAnchor;
+  readonly selector: TargetSelector;
+}
+
 /** A module-level mapping entry: one stable concept -> one 0.6.2 module. */
 export interface ModuleEntry {
   /** Human-readable stable concept label. */
@@ -90,6 +114,12 @@ export interface GameMap {
   readonly modules: Readonly<Record<string, ModuleEntry>>;
   /** Game-logic modules not confidently relocated this build (graceful). */
   readonly unresolved: readonly UnresolvedEntry[];
+  /**
+   * Stable name → concrete transform target (M5-C). Lets mods address e.g.
+   * `Car.controlCar` instead of an inline minified anchor. Optional + fail-closed
+   * (resolved only when the live bundle matches `bundleHash`).
+   */
+  readonly targets?: Readonly<Record<string, TargetSpec>>;
 }
 
 /** The concrete target returned by a successful resolution. */
