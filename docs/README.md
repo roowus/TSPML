@@ -2,7 +2,7 @@
 
 **TSPML** — *The Second Poly Mod Loader* — a versatile-yet-simple mod loader for the online 3D racing game [PolyTrack](https://www.kodub.com/apps/polytrack), inspired by [Fabric](https://fabricmc.net/) for Minecraft.
 
-> Start here: [why TSPML exists](./research/pml-shortcomings-and-tspml-improvements.md) → [the architecture](./design/architecture.md) → [the roadmap](./project/roadmap.md).
+> Start here: [getting started (write your first mod)](./getting-started.md) · [why TSPML exists](./research/pml-shortcomings-and-tspml-improvements.md) → [the architecture](./design/architecture.md) → [the roadmap](./project/roadmap.md).
 
 ## Research
 
