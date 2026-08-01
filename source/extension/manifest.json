@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "TSPML — The Second Poly Mod Loader",
+  "version": "0.1.0",
+  "description": "Run TSPML mods on PolyTrack directly on kodub.com (the resilient fallback path — online features work natively, no proxy).",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.kodub.com/apps/polytrack*",
+        "*://kodub.com/apps/polytrack*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "icons": {},
+  "permissions": []
+}
