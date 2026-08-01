@@ -43,6 +43,13 @@
 - Every non-trivial decision gets an ADR in [../project/decision-log.md](../project/decision-log.md).
 - Update [../project/progress.md](../project/progress.md) at each milestone and at any meaningful discovery.
 
+## Momentum & autonomy (core practice)
+
+- **Always carry on — never stop to checkpoint or ask for sub-decisions.** When you hit a fork (which approach, naming, file placement, test strategy, doc structure), **decide what's best yourself and execute.** The owner will redirect if wrong. Stopping to ask "should I do A or B?" or "want me to continue?" breaks flow — pick one (prefer the simpler), implement it, test it, document it, commit it.
+- **Don't file issues as a substitute for doing the work.** Issues are for genuine deferred follow-ups (lower priority, blocked, or needs-the-owner). If you can decide + do it now, do it — don't issue it.
+- **No breaks.** When a milestone finishes, immediately start the next one. Don't pause to summarize and wait — the progress doc is the summary. Pick the next piece, decide the approach, and carry on.
+- **Commit + push + verify CI, then move on.** Don't block on CI — start the next piece while CI runs. If CI fails, fix it; otherwise keep going.
+
 ## Verification & CI
 
 - **Run it yourself — don't claim something is untested if you can test it.** If a check is executable — a unit test, `curl`, a throwaway script, a headless browser — run it before asserting it works. Never leave "needs manual testing" on something you can verify; if you genuinely can't, say exactly why and file an issue. (Concrete example: the portal proxy was validated by `curl`-ing `/api/proxy/main.bundle.js?version=0.6.2` and confirming the byte-exact live 0.6.2 bundle returns with the right content-type — no browser required for the server-side path.)
