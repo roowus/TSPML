@@ -272,13 +272,48 @@ run in CI. The "candidate within hours" goal is now real for the ~85% the matche
 auto-relocates; the residual still needs the human review this tooling surfaces. AST
 structural fingerprints (the next match-rate lever) remain future work.
 
+## 2026-08-01 — M7-C: Vite dev harness with scoped mod HMR ✅
+
+Completed **M7** (modder DX). Built `@tspml/dev-harness` — a Vite dev server that runs
+the real transformed game plus your mod with **scoped mod hot-reload**: save the mod's
+entrypoint and it hot-swaps in place while the game keeps running (no reload, no
+rebuild). Cuts the edit→see loop from "rebuild transform+api-bridge + full browser
+reload (game reboots)" to "save → instant".
+
+- **`game-proxy.ts`** — a Vite `configureServer` middleware serving the real game under
+  `/game/*`: fetches the CDN with the desktop origin forwarded, injects the
+  `polytrackModConfiguration` gate + `<base>` into the HTML, and AST-rewrites
+  `main.bundle.js` (hash-gated). This is the harness analog of the portal's `/api/proxy`
+  + service worker — but **simpler: no service worker** (Vite intercepts `/game/*`
+  in-process).
+- **`tracking-api.ts`** (the HMR enabler) — wraps the bridge `api` so every
+  `events.on`/`once` + `keybinds.register` the mod makes is recorded; `disposeAll()`
+  tears them down. Enables scoped mod HMR with **no change to the mod API** — the mod
+  uses `api` normally; the harness cleans up after it. Unit-tested (5 tests).
+- **`main.ts`** — boots the game iframe, exposes `window.__tspml`, runs the mod against a
+  tracked api, wires `import.meta.hot.accept` to swap the entrypoint on save.
+- The dev mod is aliased to its **source** (not dist) so Vite HMRs edits; point
+  `TSPML_DEV_MOD` at your own mod.
+
+**Headless-verified (`pnpm smoke`):** the transformed game boots → gate clears → a real
+race ("Summer 1", `0/3`, `00:00.000`) → bridge wired → dev mod loaded → `car.control`
+fires (×3) → **editing the mod source hot-swaps it (`modLoadCount++`) with the game
+un-reloaded** (`gameSurvivedHmr: true`). Vite's own log confirms the swap path:
+`[vite] hot updated: .../entrypoint.ts via /src/main.ts`.
+
+**Honest scope:** entrypoint logic (events/keybinds) hot-swaps; a mod-declared **mixin**
+change alters the bundle transform and needs a full reload (documented). The bridge
+patches are an intentional attributed copy of the portal's (extract to `@tspml/shared` so
+portal + harness share one source — [#34](https://github.com/roowus/TSPML/issues/34)).
+**190 tests green** (5 new).
+
 ## Where we stand (2026-08-01)
 
-- **Engines + bridge + scaffold + pipeline, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (14) · create-tspml-mod (4) · mappings-pipeline (37) — **185 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (14) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **190 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
-- **M7-A/B ✅** — `create-tspml-mod` CLI + `@tspml/api` publish-ready.
+- **M7 ✅** — `create-tspml-mod` CLI + `@tspml/api` publish-ready + **Vite dev harness with scoped mod HMR**.
 - **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#13/#14 closed.** Open: #10 (player-only), #11 (audio — locator can't reach bootstrap), #12 (custom-tracks).
