@@ -1240,6 +1240,35 @@
         "kind": "method",
         "name": "createCar"
       }
+    },
+    "TrackSelectionUi": {
+      "anchor": {
+        "literals": [
+          "Custom tracks",
+          "No custom tracks",
+          "Official tracks",
+          "Community tracks"
+        ],
+        "minHits": 3
+      },
+      "selector": {
+        "kind": "method",
+        "name": "constructor"
+      }
+    },
+    "TrackCodec": {
+      "anchor": {
+        "literals": [
+          "PolyTrack2",
+          "Part list does not exist",
+          "Part id is out of range",
+          "Failed to get canvas context"
+        ],
+        "minHits": 4
+      },
+      "selector": {
+        "kind": "factory"
+      }
     }
   }
 }
