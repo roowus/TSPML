@@ -27,8 +27,11 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | [#10](https://github.com/roowus/TSPML/issues/10) | Player-only event filtering | race.started/checkpoint/finish fire per-car (player+ghosts); needs an isReplay accessor. |
 | [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform. |
 | [#36](https://github.com/roowus/TSPML/issues/36) | Port `api.tracks` to the portal | Implemented + verified in the harness; the portal needs the pre-bridge early-capture stub too. |
-| [#13](https://github.com/roowus/TSPML/issues/13) | Priority-ordered chaining | The `priority` field is declared but unused; per-op runtime ordering is subtle. |
 | [#34](https://github.com/roowus/TSPML/issues/34) | Share the Tier-1 bridge patches | Portal + dev-harness each carry a copy; extract to `@tspml/shared` so they can't drift. |
+
+> Not exhaustive — the full backlog is in [GitHub issues](https://github.com/roowus/TSPML/issues)
+> (~20 open, mostly small docs/API-drift fixes). This table is the subset that gates a
+> milestone.
 
 ## Go/no-go gate (M1) — PASSED
 
