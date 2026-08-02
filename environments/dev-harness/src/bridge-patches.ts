@@ -103,4 +103,45 @@ export const BRIDGE_PATCHES: readonly Patch[] = [
       `if (e) { if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) window.__tspml.events.emit('checkpoint.passed', this.getNextCheckpointIndex()); if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) window.__tspml.events.emit('race.finished', { frames: e.finishFrames }); }`,
     ),
   },
+  // ── custom-tracks registry capture (#12) ────────────────────────────────────
+  // The game's TrackManager lives in the BOOTSTRAP, which the module locator cannot
+  // reach (the same wall issue #11 hits for audio). But its CALLERS are real modules,
+  // so we capture the instance instead: it is constructor param 5 of the
+  // track-selection UI. Verified against the live 0.6.2 bundle in this harness —
+  // the captured object exposes saveCustomTrack/deleteCustomTrack/forEachCustomTrack
+  // and a registered track appears in the game's own "Custom tracks" list.
+  //
+  // Both patches only READ a value into window.__tspml — no game behaviour changes.
+  {
+    op: "before",
+    target: {
+      anchor: {
+        literals: ["Custom tracks", "No custom tracks", "Official tracks", "Community tracks"],
+        minHits: 3,
+      },
+      selector: { kind: "method", name: "constructor" },
+    },
+    // constructor(e,t,n,r,a,...) — `a` is the TrackManager.
+    inject: `try { if (typeof window !== "undefined" && window.__tspml && window.__tspml.captureTrackManager) window.__tspml.captureTrackManager(a); } catch (_e) {}`,
+  },
+  {
+    op: "after",
+    target: {
+      anchor: {
+        literals: [
+          "PolyTrack2",
+          "Part list does not exist",
+          "Part id is out of range",
+          "Failed to get canvas context",
+        ],
+        // All four are needed: "PolyTrack2" alone also matches module 6582, and
+        // "Checkpoint has no checkpoint order" also matches 6762.
+        minHits: 4,
+      },
+      selector: { kind: "factory" },
+    },
+    // The module factory's `t` is the exports object; `t.A` is the track codec class
+    // (statics fromExportString/fromSaveString).
+    inject: `try { if (typeof window !== "undefined" && window.__tspml && window.__tspml.captureTrackCodec && t && t.A) window.__tspml.captureTrackCodec(t.A); } catch (_e) {}`,
+  },
 ];
