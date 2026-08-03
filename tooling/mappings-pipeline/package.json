@@ -3,13 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "webcrack/wakaru plus structural-diff pipeline that regenerates a candidate symbol map per PolyTrack release, and the 0.6.0-vs-0.6.2 drift experiment (M1 go/no-go spike).",
+  "description": "webcrack + structural-diff pipeline that regenerates a candidate symbol map per PolyTrack release, plus the 0.6.0-vs-0.6.2 drift experiment (M1 go/no-go spike) and the M9 regen/diff/verify review tooling.",
   "license": "MIT",
   "scripts": {
+    "test": "vitest run",
     "unpack": "node src/unpack.mjs",
-    "match": "node src/match.mjs"
+    "match": "node src/match.mjs",
+    "gen": "node ../../source/mappings/scripts/gen-map.mjs",
+    "fetch": "node src/fetch.mjs",
+    "diff": "node scripts/regen.mjs --diff",
+    "verify": "node scripts/regen.mjs --verify",
+    "regen": "node scripts/regen.mjs"
   },
   "devDependencies": {
+    "vitest": "^2.1.0",
     "webcrack": "^2.16.0"
   }
 }

@@ -32,6 +32,10 @@ pnpm-debug.log*
 !.vscode/extensions.json
 .cache/
 
+# Mappings regen review artifacts — transient output of `regen.mjs`. Promote a
+# candidate to the committed map with `cp`, then delete it; never commit these.
+*.candidate.json
+
 # ─────────────────────────────────────────────────────────────
 # NEVER commit the PolyTrack game or deobfuscated source.
 # Legal posture: ship only our code + mappings metadata.
