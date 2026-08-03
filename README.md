@@ -57,7 +57,7 @@ See [`docs/project/decision-log.md`](./docs/project/decision-log.md) (ADR-001 th
 ```
 docs/          research, design, API specs, project, contributing (docs-first)
 source/        loader, api-bridge, transform, mappings, portal, extension, shared
-tooling/       mappings-pipeline, create-tspml-mod, cli
+tooling/       mappings-pipeline, create-tspml-mod, typecheck, cli
 environments/  dev-harness, demo-mods (@tspml/demo-hud)
 packages/      @tspml/api (publishable types)
 ```

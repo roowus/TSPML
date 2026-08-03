@@ -30,3 +30,13 @@ jobs:
 
       - run: pnpm -r test
       - run: pnpm -r build
+
+      # Typechecks the code no package build covers: the five headless smoke
+      # scripts and the mappings-pipeline `.mjs` sources. Both are plain `.mjs`,
+      # so `pnpm -r build` (per-package `tsc -p` plus next/vite build) never read
+      # them and vitest never imports them. See issue #25 and
+      # tooling/typecheck/tsconfig.smokes.json for why it is non-strict.
+      #
+      # Runs AFTER build: it typechecks scripts that import from workspace
+      # packages, which must have emitted their declarations first.
+      - run: pnpm -r lint

@@ -74,7 +74,8 @@ export async function loadModuleSources(dir) {
  * ambiguity check below surfaces multi-module hits regardless.
  *
  * @param {Map<string, string>} sources  moduleId -> source text
- * @param {(string|number)[]} literals
+ * @param {readonly (string|number)[]} literals  read-only: the committed map's own
+ *   `literals` arrays are `readonly`, and this function only ever reads them
  * @param {number} minHits
  * @returns {string[]} moduleIds whose source contains >= minHits distinct literals
  */
@@ -113,6 +114,7 @@ export function verifyTargets(map, sources) {
     const literals = spec.anchor.literals ?? [];
     const minHits = spec.anchor.minHits ?? literals.length;
     const modules = modulesContaining(sources, literals, minHits);
+    /** @type {TargetVerification["status"]} */
     let status;
     let note;
     if (modules.length === 1) {

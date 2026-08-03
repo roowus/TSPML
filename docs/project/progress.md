@@ -543,9 +543,106 @@ interacts, which is the game's suspended `AudioContext`, not a registry failure.
 
 **247 tests green** (22 new: 14 api-bridge · 6 dev-harness · 2 shared), `pnpm -r build` clean.
 
+## 2026-08-03 — #25: CI runs the smokes, and the first typecheck of the unchecked ✅
+
+Two gaps, both of the same shape: **code nothing was reading.**
+
+**The smokes never ran in CI.** They are the only end-to-end proof a transformed game
+boots — the injects reference the bundle's minified parameter names and only ever meet
+a parser when a real bundle is transformed, so this whole failure class is invisible to
+`pnpm -r test`. Now `.github/workflows/smoke.yml` runs all three portal smokes per-PR
+and daily.
+
+**It is deliberately advisory, not a required check.** The job fetches the live game at
+run time, so it can go red for reasons that have nothing to do with the commit: the CDN
+is down, or Kodub shipped 0.6.3 and the pinned hash no longer matches. A required check
+that goes red on someone else's release teaches people to ignore red. What earns its
+keep is the **daily** schedule — it finds a game update the day it lands, not the next
+time somebody opens a PR.
+
+**A canary job makes a red smoke interpretable.** It compares the live
+`main.bundle.js` against the map's `bundleHash` *before* the smokes run. Canary red
+means the game shipped a new build, every surface has fail-closed to vanilla, and the
+downstream failures are expected fallout. Canary green + smoke red means the commit
+broke something. Without that split, "smoke is red" is two very different messages
+wearing the same colour.
+
+Verified the CI-critical unknown first, rather than writing the workflow and hoping:
+**does the smoke pass against `next start`?** CI should exercise the path the product
+ships, and nobody had ever run the smoke against a production build. It does —
+1,791,279 B served vs 1,782,239 B upstream, all Tier-1 events, `PASS: true`.
+
+### The lint half found a real bug in the highest-consequence code
+
+`pnpm lint` existed at the root and matched **no package at all**. Rather than adding a
+linter for style, [`@tspml/typecheck`](../../tooling/typecheck) typechecks the two
+bodies of `.mjs` that nothing read: the five headless smokes, and the mappings
+pipeline. Neither is covered by `pnpm -r build` (per-package `tsc -p` plus
+next/vite build — none of which see a loose `.mjs`) and neither is imported by vitest.
+
+The pipeline is the code that regenerates the symbol map on a game release. A mistake
+there does not fail loudly; it produces a *plausible but wrong candidate map*, and the
+map is what every surface hash-gates against. First run, four findings, one real:
+
+**`regen.mjs` passed `stdio: "inherit"` to `execFile`, which has no `stdio` option.**
+Node ignored it, so gen-map's report — the thing a maintainer reads to decide whether
+to promote a candidate map — was buffered into a string the callback discarded instead
+of being printed. `execFile` would also have truncated it at the 1 MB default
+`maxBuffer` had anything read it. Fixed to `spawn`.
+
+**Why that survived every run and every test:** the symptom is *"the regen is oddly
+quiet."* Silence reads as normal. There is no error, no crash, no wrong value — just an
+absent report, and absence is exactly what a human does not notice. This is the second
+time in two days that a bug hid in something that *looks like nothing happening* (the
+first was the early-capture stub, where a dropped capture left the registry waiting
+forever with no error anywhere). Worth naming as a class: **when a failure mode is
+silence, no amount of running the thing will find it — only a checker that reads the
+code, or a test that asserts the output exists.**
+
+The other three were type hygiene: a `readonly` array passed to a mutable parameter, a
+`let status` widened to `string` where a three-value union was meant, and a mixed-element
+array needing a tuple annotation before `re.test()` typechecked.
+
+### Two decisions worth recording
+
+**Non-strict, deliberately.** Under `strict` the smokes alone produce **231**
+diagnostics — nearly all `noImplicitAny` on inline callback params, plus complaints
+about result objects built up field by field. That is a large diff that makes the
+smokes harder to read and catches no defect. Non-strict `checkJs` still catches what
+these scripts actually get wrong, which I verified by injecting each kind and
+confirming a non-zero exit: `page.waitForTimeut` → *"Did you mean 'waitForTimeout'?"*,
+`page.frames().nope()`, `browser.closeNow()`. A checker earns `strict` by letting a
+real defect through, not by being available.
+
+**The bridge globals are typed `any` on purpose.** The smokes read `window.__tspml`
+inside `page.evaluate()`, whose callbacks run in the *game frame's realm* — the value
+does not exist in the Node process doing the checking, so there is nothing to import.
+Typing it properly would make five smokes compile-time consumers of the bridge's
+internals, so refactoring `__tspml` would break the typecheck of scripts that do not
+care about it. `api.audio`/`api.tracks` already have real types in `@tspml/api`.
+
+### The test had to spawn real processes
+
+`tests/regen-runnode.test.mjs` (5 tests) guards the fix, and both obvious shortcuts
+would have been worthless:
+
+- **Mocking `child_process` would have passed against the broken code.** The bug was
+  that Node *ignored an option we correctly passed*. A mock asserting "we passed
+  `stdio: "inherit"`" is true of both versions. Only real inherited stdio distinguishes
+  them — the assertion has to be that the parent's own fd receives the child's bytes.
+- **Re-declaring `runNode` in the test would also have passed.** So `regen.mjs` now
+  *exports* it, behind a `process.argv[1] === fileURLToPath(import.meta.url)` guard so
+  importing the module does not kick off a regen (mirroring `fetch.mjs`). The test
+  drives the real function.
+
+Confirmed by reverting to the `execFile` form: **4 of the 5 fail.** A regression test
+that never fails against the bug it describes is decoration.
+
+**252 tests green** (5 new), `pnpm -r build` + `pnpm -r lint` clean.
+
 ## Where we stand (2026-08-03)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (11) — **247 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (42) · dev-harness (11) — **252 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -555,5 +652,6 @@ interacts, which is the game's suspended `AudioContext`, not a registry failure.
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
 - **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
 - **#11 ✅** — audio registry: a mod's clip replaces a real game sound in **both** surfaces, via the *same* capture as `api.tracks`. Two content registries now work.
-- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
+- **#25 ✅** — CI runs the three portal smokes (advisory per-PR + daily, with a bundle-hash canary so a red smoke is interpretable), and `pnpm -r lint` is real: [`@tspml/typecheck`](../../tooling/typecheck) checks the `.mjs` no build reads. Found a live defect in `regen.mjs`.
+- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
 - **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto.
