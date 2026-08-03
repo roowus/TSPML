@@ -427,3 +427,49 @@ portal.
 - **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
 - **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
 - **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
+
+## 2026-08-03 — #43 spike: WASM constants can be located structurally
+
+#43 is the one capability gap in PML's favour (they ship `registerPhysicsMixin`,
+byte-offset patching of `polytrack_physics.wasm`) and it gates M11. It poses an open
+question: can we locate constants *structurally*, so the map stays re-derivable,
+rather than copying their offset table? Spiked it. **Answer: yes, 97.4%.**
+
+**Finding 1 — the physics binary is byte-identical across 0.6.0/0.6.1/0.6.2.**
+396,005 B, sha256 `d4ef0267…4c180e`, all three. The JS bundle re-minifies every
+release; this artifact has not moved once. So offset patching works *today* and
+breaks *silently* on the next recompile — and a wasm-specific hash pin is cheap right
+now because there is exactly one hash to pin. (It lives at
+`<ver>/polytrack_physics.wasm`, not under `lib/` as the glue's `importScripts` hints.)
+
+**Finding 2 — no name section.** 14 exports, all single letters. Structural matching
+isn't the better option, it's the only one.
+
+**Finding 3 — constants alone don't locate.** 36 f64 constants (all math-library: π,
+trig coefficients) and 98 f32 (physics runs in f32 — a patcher must compare through
+`Math.fround` or find nothing). No gravity constant exists in the 9–10.5 range, so
+that knob is probably a runtime parameter, not a baked-in value. And a symmetric-clamp
+idiom for ±10 matches 3 sites — the same ambiguity as the `"PolyTrack2"` anchor.
+
+**Finding 4 — fingerprint the containing function, then index within it.** Sorted
+multiset of float constants + opcode-byte histogram, no offsets or indices:
+**535/549 functions (97.4%) uniquely identified**; constants alone got 151/188. Four
+residual collision groups are near-certainly byte-identical template instantiations.
+
+Relocation was tested for real rather than asserted: inserting 4,096 bytes before the
+code section leaves the stale offset pointing at garbage while the signature
+re-derives the exact new address, uniquely.
+
+`locateBySignature` **fails closed on ambiguity as well as absence**. For JS a
+mis-target is a patch that does nothing; here it would write a float into an
+unidentified function, so anything short of a unique match must refuse.
+
+Shipped as `tooling/mappings-pipeline/src/wasm-locate.mjs` + 14 tests that build
+synthetic wasm byte by byte, so CI never needs the proprietary binary. Three guards
+mutation-checked (ambiguity→pick-first, dropped tiling check, offset in fingerprint).
+Write-up: `docs/research/wasm-structural-location.md`.
+
+**Locating only — no patcher, deliberately.** That is a separate decision gated on the
+hash pin, and physics mods must feed the warn-only `classifySafety` labelling.
+Cross-version validation is impossible until PolyTrack ships a *different* binary;
+that release is the first real test.
