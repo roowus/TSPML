@@ -54,6 +54,24 @@
 
 - **Run it yourself — don't claim something is untested if you can test it.** If a check is executable — a unit test, `curl`, a throwaway script, a headless browser — run it before asserting it works. Never leave "needs manual testing" on something you can verify; if you genuinely can't, say exactly why and file an issue. (Concrete example: the portal proxy was validated by `curl`-ing `/api/proxy/main.bundle.js?version=0.6.2` and confirming the byte-exact live 0.6.2 bundle returns with the right content-type — no browser required for the server-side path.)
 - **Automate browser/UI checks with a headless browser (Playwright).** If a step would otherwise be "open it in a browser and look," script it FIRST: launch headless Chromium, capture console messages, uncaught `pageerror`s, and failed network requests; assert on the DOM (e.g. an injected marker exists, a `<canvas>` rendered); save a screenshot. Only hand the *subjective* parts to a human ("does it look/play right"). Do not offload automatable verification to the user. (See `source/portal/scripts/smoke.mjs`.)
+- **Verifying the parts is not verifying the whole.** This has now cost us three
+  times (#25's canary, #41's sidebar, #19's scaffold), so treat it as a rule: if
+  the deliverable is a *sequence* — generate then build, read a field then fetch
+  a URL, load the game then render the chrome — one test must run the whole
+  sequence. In every case each individual piece had been checked and worked; the
+  seam between them was what broke. Corollaries:
+  - **Asserting on generated text is not asserting the generated thing works.**
+    #19 shipped a scaffold whose `pnpm install` died on the first command while
+    four tests asserting its file contents stayed green. Run the real compiler
+    against the real output.
+  - **When the failure mode is silence, running the thing never finds it.** Only
+    a checker that reads the code, or a test that asserts the output *exists*,
+    will. Absence throws no error.
+- **Prove a new assertion fails.** Reintroduce the defect it describes and watch
+  it go red before you trust it. This is cheap and it keeps catching things: two
+  of #19's five guards were themselves broken (regexes matching the wrong
+  interface and the import path), and mutation is what surfaced it — they were
+  green either way.
 - **Tests are first-class.** Every package with logic ships unit tests; `pnpm -r test` must be green before merge. Prefer dependency-injected, headless-runnable tests so CI (and you) can run them anywhere.
 - **CI is mandatory and runs on GitHub Actions** (`.github/workflows/ci.yml`): on every push and pull request it installs deps and runs the full suite. Don't merge with red CI; watch the **Actions** tab and fix flakes immediately.
 - **Make full use of GitHub:** Actions for CI/test/build, Issues for all tracking (no matter how small), and workflow runs for heavier jobs (e.g. the mappings drift experiment) as they're added.
