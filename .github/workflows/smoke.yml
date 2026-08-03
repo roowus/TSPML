@@ -68,15 +68,35 @@ jobs:
         name: compare live main.bundle.js against the map's bundleHash
         run: |
           set -uo pipefail
-          VERSION="$(node -p "require('./source/mappings/maps/polytrack-0.6.2.json').version")"
-          PINNED="$(node -p "require('./source/mappings/maps/polytrack-0.6.2.json').bundleHash")"
+          MAP=./source/mappings/maps/polytrack-0.6.2.json
+          # `gameVersion`, not `version` — the map has no `version` field, and the
+          # first run of this job read one anyway. `node -p` printed the string
+          # "undefined", the URL 404'd, `curl -f` failed, and the canary reported
+          # "the game shipped a new build" on a day the live bundle hashed EXACTLY
+          # to the pin. A canary that cries wolf is worse than no canary, so the
+          # two guards below make that specific failure impossible to mistake for
+          # drift again.
+          VERSION="$(node -p "require('$MAP').gameVersion")"
+          PINNED="$(node -p "require('$MAP').bundleHash")"
           echo "pinned: $VERSION $PINNED"
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "undefined" ] || [ -z "$PINNED" ] || [ "$PINNED" = "undefined" ]; then
+            echo "::error title=Canary is broken, not the game::Could not read gameVersion/bundleHash from $MAP (got version='$VERSION' hash='$PINNED'). This is a defect in this workflow or a map schema change — NOT bundle drift."
+            exit 1
+          fi
 
           # Bare GET — the static asset CDN needs no headers (the anti-bot wall is
           # on vps.kodub.com, the multiplayer backend, not here).
-          LIVE="sha256:$(curl -fsSL --retry 3 --retry-delay 5 \
-            "https://app-polytrack.kodub.com/$VERSION/main.bundle.js" | shasum -a 256 | cut -d' ' -f1)"
-          echo "live:   $LIVE"
+          URL="https://app-polytrack.kodub.com/$VERSION/main.bundle.js"
+          # Separate the fetch from the hash so a transport failure is reported as
+          # a transport failure. Piping curl into shasum hashes the empty string on
+          # a 404 and yields a perfectly plausible wrong hash.
+          if ! curl -fsSL --retry 3 --retry-delay 5 -o /tmp/live-bundle.js "$URL"; then
+            echo "::error title=Canary could not fetch the bundle::GET $URL failed. CDN down, or the URL shape changed. Not necessarily drift."
+            exit 1
+          fi
+          LIVE="sha256:$(shasum -a 256 /tmp/live-bundle.js | cut -d' ' -f1)"
+          echo "live:   $LIVE  ($(wc -c < /tmp/live-bundle.js) bytes)"
 
           if [ "$LIVE" = "$PINNED" ]; then
             echo "matches=true" >> "$GITHUB_OUTPUT"

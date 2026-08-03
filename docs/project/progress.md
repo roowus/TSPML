@@ -572,6 +572,24 @@ Verified the CI-critical unknown first, rather than writing the workflow and hop
 ships, and nobody had ever run the smoke against a production build. It does —
 1,791,279 B served vs 1,782,239 B upstream, all Tier-1 events, `PASS: true`.
 
+**The canary's first real run failed — and it was the canary that was broken.** It read
+`version` from the map; the field is `gameVersion`. `node -p` printed the string
+`"undefined"`, the URL 404'd, `curl -f` failed, and the job reported *"the game shipped a
+new build"* on a day the live bundle hashed **exactly** to the pin.
+
+That is the worst failure available to a job whose entire purpose is telling you which
+kind of red you are looking at. A canary that cries wolf is worse than no canary: it
+launders a defect in our own CI into "not our problem, Kodub shipped something." Two
+guards now make the confusion impossible — an explicit check that the map fields
+actually read, and a fetch separated from the hash. The second matters more than it
+looks: piping `curl` straight into `shasum` **hashes the empty string on a 404** and
+produces a perfectly plausible wrong hash. Both paths now say *"canary is broken, not
+the game."*
+
+It took a live CI run to find, because locally every piece had been verified
+individually — the hash matched, the URL worked — just never through the script that
+would run them. **Verifying the parts is not verifying the whole.**
+
 ### The lint half found a real bug in the highest-consequence code
 
 `pnpm lint` existed at the root and matched **no package at all**. Rather than adding a
