@@ -22,7 +22,9 @@ import { createRequire } from "node:module";
 import { resolveTarget, validateMap } from "@tspml/mappings";
 import type { GameMap } from "@tspml/mappings";
 import type { Patch } from "@tspml/transform";
-import { BRIDGE_PATCHES } from "./bridge-patches";
+// The loader-owned patches + pre-bridge stub, shared with the portal (#34) so the two
+// surfaces cannot drift — which they already had before the extraction.
+import { BRIDGE_PATCHES, EARLY_CAPTURE_SCRIPT_TAG } from "@tspml/shared";
 
 // require() for JSON (Node's ESM loader wants `with {type:"json"}` for static JSON
 // imports, which the Vite config loader doesn't reliably pass through). createRequire
@@ -131,36 +133,20 @@ function buildUpstream(version: string, segments: string[], search: URLSearchPar
 }
 
 /**
- * A pre-bridge stub, injected ahead of the game's own scripts.
+ * Inject the <base> + gate script + pre-bridge capture stub into the proxied HTML,
+ * before the deferred bundles.
  *
- * Capture patches (#12) run wherever their target module runs — and the track CODEC's
- * module factory runs during bundle init, BEFORE the parent frame's `load` handler
- * installs the real `window.__tspml`. Without this stub that capture hits an absent
- * bridge and is silently dropped (the track store, captured later when the game builds
- * its menu, arrives fine — which is what makes the failure look so puzzling).
- *
- * So: stand up a minimal `__tspml` early whose capture functions just record. `main.ts`
- * reads `__tspmlEarly` when it installs the real bridge and replays what was captured.
- * Same-origin iframe, so the parent can read this object directly.
+ * The stub is load-bearing, not belt-and-braces: the track codec's capture fires during
+ * BUNDLE INIT, before `main.ts`'s frame-`load` handler installs the real
+ * `window.__tspml`, so without it that capture is dropped and the registry never
+ * attaches. See @tspml/shared's early-capture.ts for the full account; `main.ts` replays
+ * what it recorded via `readEarlyCaptures`.
  */
-const EARLY_CAPTURE_STUB = `
-(function () {
-  var early = { manager: null, codec: null };
-  window.__tspmlEarly = early;
-  window.__tspml = window.__tspml || {};
-  if (!window.__tspml.captureTrackManager)
-    window.__tspml.captureTrackManager = function (m) { early.manager = m; };
-  if (!window.__tspml.captureTrackCodec)
-    window.__tspml.captureTrackCodec = function (c) { early.codec = c; };
-})();
-`.trim();
-
-/** Inject the <base> + gate script into the proxied HTML, before the deferred bundles. */
 function rewriteHtml(html: string, version: string): string {
   const inject = [
     `<base href="/game/?version=${version}">`,
     '<script>window.polytrackModConfiguration = Object.assign(window.polytrackModConfiguration || {}, { modName: "TSPML-dev", author: "roowus" });</script>',
-    `<script>${EARLY_CAPTURE_STUB}</script>`,
+    EARLY_CAPTURE_SCRIPT_TAG,
   ].join("\n");
   return /<head[^>]*>/i.test(html)
     ? html.replace(/<head[^>]*>/i, (m) => `${m}\n${inject}`)

@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
-import { EventBus, Keybinds } from '@tspml/api-bridge';
+import { EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
+import type { GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
 import type { ModApi } from '@tspml/loader';
+import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
 
 /**
@@ -21,6 +23,11 @@ import { loadMods } from '@/lib/mod-loader';
  * frame (M4-B). This page creates the Tier-1 EventBus (@tspml/api-bridge),
  * exposes it to the iframe as `window.__tspml`, and subscribes — the "bridge"
  * counter in the sidebar ticks up while you race. Real mods bind the same way.
+ *
+ * It also hosts the custom-track registry (`api.tracks`, #36). That one is not just
+ * another api member: it needs two objects out of the running game, handed over by
+ * the shared capture patches at two very different moments — see
+ * {@link attachTracksIfReady} and @tspml/shared's early-capture.ts.
  */
 
 type SwState = 'idle' | 'registering' | 'active' | 'error';
@@ -43,16 +50,24 @@ export default function PlayPage(): ReactElement {
   const [keybindCount, setKeybindCount] = useState(0);
   const [modsStatus, setModsStatus] = useState('…');
   const [safetyStatus, setSafetyStatus] = useState('');
+  const [tracksStatus, setTracksStatus] = useState('waiting for the game…');
   const [loadedMods, setLoadedMods] = useState<LoadedModRow[]>([]);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
   // vanilla game never reads it; only the transformed bundle emits).
   const [bus] = useState<EventBus>(() => new EventBus());
+  // The custom-track registry. Constructed unattached: `register` QUEUES until the
+  // capture patches hand over the game's objects, so a mod can call it at load time
+  // without caring that the game's menu does not exist yet.
+  const [tracks] = useState<Tracks>(() => new Tracks());
   const frameRef = useRef<HTMLIFrameElement>(null);
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
   const modsLoadedRef = useRef(false);
+  // The two captures arrive independently and out of order (see attachTracksIfReady).
+  const trackManagerRef = useRef<GameTrackManager | null>(null);
+  const trackCodecRef = useRef<GameTrackCodec | null>(null);
 
   // Surface a throttled count of car.control events. controlCar fires on INPUT
   // CHANGES (keydown/keyup), not every frame — so the count jumps in bursts
@@ -75,11 +90,29 @@ export default function PlayPage(): ReactElement {
     };
   }, [bus]);
 
-  // Expose the Tier-1 `api` object (events + keybinds) to the same-origin game
-  // iframe as `window.__tspml`: transformed hooks emit to `api.events`, mods
-  // call `api.keybinds.register(...)`. Built on iframe load (when the game
-  // window exists). Also registers a demo keybind (KeyF) for a visible
-  // "registry works" signal in the sidebar.
+  /**
+   * Attach the track registry once BOTH captures have landed (#36).
+   *
+   * The two arrive at unrelated moments and in either order: the codec's module
+   * factory runs during bundle init (before this component's frame-`load` handler,
+   * hence the early-capture replay below), while the TrackManager is handed over much
+   * later, when the game builds its track-selection menu. So neither capture can
+   * attach on its own — whichever is second does it. Idempotent: `tracks.ready`
+   * guards a second attach.
+   */
+  const attachTracksIfReady = (): void => {
+    const manager = trackManagerRef.current;
+    const codec = trackCodecRef.current;
+    if (!manager || !codec || tracks.ready) return;
+    tracks.attach({ manager, codec });
+    setTracksStatus('✓ attached');
+  };
+
+  // Expose the Tier-1 `api` object (events + keybinds + tracks) to the same-origin
+  // game iframe as `window.__tspml`: transformed hooks emit to `api.events`, mods
+  // call `api.keybinds.register(...)` / `api.tracks.register(...)`, and the capture
+  // patches call `captureTrack*`. Built on iframe load (when the game window exists).
+  // Also registers a demo keybind (KeyF) for a visible "registry works" signal.
   const handleFrameLoad = (): void => {
     const w = frameRef.current?.contentWindow as (Window & { __tspml?: unknown }) | null;
     if (!w) return;
@@ -93,14 +126,33 @@ export default function PlayPage(): ReactElement {
       });
       demoKeybindRegistered.current = true;
     }
-    // The Tier-1 `api` object handed to mods (events + keybinds + logger).
+    // The Tier-1 `api` object handed to mods, PLUS the two capture callbacks the
+    // shared track-capture patches invoke from inside the game (not part of the mod
+    // API — the loader owns them).
     const api = {
       events: bus,
       keybinds: keybindsRef.current,
+      tracks,
       logger: console,
       version: TSPML_VERSION,
+      captureTrackManager: (m: GameTrackManager) => {
+        trackManagerRef.current = m;
+        attachTracksIfReady();
+      },
+      captureTrackCodec: (c: GameTrackCodec) => {
+        trackCodecRef.current = c;
+        attachTracksIfReady();
+      },
     };
     w.__tspml = api;
+    // Replay anything the pre-bridge stub recorded before `api` existed just now. The
+    // codec capture fires during bundle init, so without this it is simply lost and
+    // the registry never attaches (@tspml/shared's EARLY_CAPTURE_STUB, injected by
+    // the proxy route).
+    const early = readEarlyCaptures<GameTrackManager, GameTrackCodec>(w);
+    if (early.manager) trackManagerRef.current = early.manager;
+    if (early.codec) trackCodecRef.current = early.codec;
+    attachTracksIfReady();
     // Load the bundled demo mods via @tspml/loader — a real mod package receives
     // this api and subscribes. Per-mod failure isolation (never boot-aborts).
     if (!modsLoadedRef.current) {
@@ -274,10 +326,19 @@ export default function PlayPage(): ReactElement {
               safety: {safetyStatus}
             </div>
           ) : null}
+          <div style={bridgeRowStyle}>
+            <span
+              style={{ ...bridgeDotStyle, background: tracksStatus.startsWith('✓') ? '#3fb950' : '#9aa4b2' }}
+              aria-hidden="true"
+            />
+            tracks: {tracksStatus}
+          </div>
           <p style={noteStyle}>
             The transform pipeline is built (M3); the <code>car.control</code>{' '}
             event is wired end-to-end (M4-B) — its count ticks up while you race.
-            The list above is driven by <code>@tspml/loader</code> results.
+            The list above is driven by <code>@tspml/loader</code> results. Once{' '}
+            <code>tracks</code> reads attached, a mod can put its own track in the
+            game’s Custom tracks list via <code>api.tracks</code>.
           </p>
         </aside>
       </div>

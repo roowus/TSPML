@@ -54,24 +54,48 @@ A cold-start Babel AST parse+transform of ~5 MB of JS on the main thread is mult
 
 The loader must run with **zero network access** for already-installed mods (all code + map cached in IndexedDB by hash). Network is only required for discovery, publish, and map updates. Mirror the current map inside the extension/userscript bundle as a last-resort fallback.
 
+## What a surface injects (the shared set)
+
+Delivery is two injections, not one, and **both** are owned by
+[`@tspml/shared`](../../source/shared) rather than by any surface — the portal and the
+dev harness each carried a private copy until [#34](https://github.com/roowus/TSPML/issues/34),
+and had already drifted apart:
+
+| Injection | Where | Why it must be shared |
+|---|---|---|
+| `BRIDGE_PATCHES` | into `main.bundle.js`, via `@tspml/transform` | The badge, the 6 Tier-1 emits, and the 2 track-capture patches. A surface that misses one silently lacks a feature — which is exactly what happened: the portal had no capture patches, so `api.tracks` could not work there. |
+| `EARLY_CAPTURE_SCRIPT_TAG` | into the game's `<head>`, ahead of its deferred bundles | The codec capture fires during **bundle init**, before the host installs `window.__tspml`. Without the stub that capture is dropped and `api.tracks` never attaches — see [hook-system.md](./hook-system.md). |
+
+What stays surface-specific: the portal's mappings `{symbol}` resolution + sha256
+hash-gate (`lib/demo-transform.ts`), the harness's Vite middleware (`src/game-proxy.ts`),
+the extension's content-script plumbing. The test is whether the code would be
+byte-identical across all three.
+
+Both surfaces then converge on the same host-side shape: install the real bridge on the
+frame's window, expose `captureTrackManager` / `captureTrackCodec`, call
+`readEarlyCaptures` to replay what the stub caught, and attach the registry once **both**
+objects are in hand — in either order, since neither capture can attach alone.
+
 ## Current implementation status (verified by browser tests)
 
-The portal + SW + proxy + transform pipeline is implemented and **run-validated**. What a browser load actually shows today (full detail: [portal-browser-test-findings.md](../research/portal-browser-test-findings.md)):
+The portal + SW + proxy + transform pipeline is implemented and **run-validated end to
+end** — the portal's headless smokes (`pnpm --filter @tspml/portal smoke` and
+`smoke:tracks`) drive the real game and assert on it (full detail:
+[portal-browser-test-findings.md](../research/portal-browser-test-findings.md)):
 
 ```
 portal loads → /api/proxy serves the real live bundle (byte-exact) ✅
   → TSPML_TRANSFORM=1: main.bundle.js is AST-rewritten → transformed bundle RUNS ✅
-     (green "TSPML ✔ LIVE" badge in DOM+console, WebGL canvas 804×452, 0 JS errors)
-  → PolyTrack "unofficial version" warning (origin allowlist) 🚧 issue #8, M4
-  → (past it) "Unhandled Rejection: Failed to load track" 🚧 issue #9, M7/M8
-  → online/leaderboard requests 400/502 🚧 issue #7, M8
+     (green "TSPML ✔ LIVE" badge in DOM+console, WebGL canvas, 0 JS errors)
+  → past the "unofficial version" gate, into gameplay ✅ (was issue #8 — closed)
+  → track loads; the 4 race-setup Tier-1 events fire ✅ (was issue #9 — closed)
+  → mods load, mixins apply, api.tracks attaches and reaches the game's list ✅
+  → online/leaderboard requests still fail 🚧 issue #7 / M8 (bot-protected upstream)
 ```
 
-**Proven:** proxying, `<base href>` HTML rewrite, AST transform run-validity. **Not yet playable end-to-end** — and crucially, the blockers are the game's own origin/online self-protection, *not* the transform. Concretely:
+Notes on the pieces that were hard to get right:
 
-- **`<base href="/api/proxy/">` HTML rewrite is required.** The proxied document lives at `/api/proxy` (no trailing slash), so the browser treats `proxy` as a filename and resolves the game's relative `<script src="main.bundle.js">` to `/api/main.bundle.js` (404). Injecting `<base>` fixes every relative ref at once. *This was only caught by a real browser load — `curl` always used the full path.*
-- **PolyTrack's "unofficial version" gate** (issue #8) blocks gameplay from non-allowlisted origins (`localhost` is not on `kodub`/`crazygames`/`webgamer`/`kongregate`). The check lives in the **webpack bootstrap** (runs before the module graph), so it needs AST/browser tracing and a transform to force the official-host check to pass — the same problem PML solves with Origin-spoofing. **First M4 task.**
-- **"Failed to load track"** (issue #9): the game reaches the track-load step and throws — the track-data fetch either 400s via the proxy (Origin not trusted) or bypassed the service worker on first load (SW was still "registering", not `active` → the fetch went direct to `kodub.com` → CORS-failed). Fix: SW-active-before-fetch (reload-on-claim) + correct track-endpoint forwarding. **M7/M8.**
-- **Online 400/502** (issue #7): leaderboard/multiplayer calls fail through the proxy. Online/origin handling. **M8.**
-
-The service worker is registered on `/` and calls `skipWaiting()`/`clients.claim()`, so it controls the page after the first reload (the smoke test reloads once for exactly this reason — runtime kodub fetches only route through the proxy on the second load).
+- **`<base href="/api/proxy/">` HTML rewrite is required.** The proxied document lives at `/api/proxy` (no trailing slash), so the browser treats `proxy` as a filename and resolves the game's relative `<script src="main.bundle.js">` to `/api/main.bundle.js` (404). Injecting `<base>` fixes every relative ref at once. *This was only caught by a real browser load — `curl` always used the full path.* Related trap: `curl` of `/api/proxy/?version=…` 308-redirects to the slashless form, so without `-L` you see an empty body and may wrongly conclude the `<head>` injections are missing.
+- **PolyTrack's "unofficial version" gate is cleared via the game's OWN path** (closed #8): setting `window.polytrackModConfiguration = {modName, author}` in `<head>` — PolyTrack's first-class mod-loader signal — rather than by bundle surgery (ADR-013).
+- **The service worker must CONTROL the page before the game mounts** (closed #9). It is registered on `/` and calls `skipWaiting()`/`clients.claim()`; the portal mounts the iframe only on `controllerchange`, because a runtime kodub fetch that escapes the SW CORS-fails ("Failed to load track"). The smokes reload once for the same reason.
+- **Online 400/502** (issue #7): leaderboard/multiplayer calls still fail through the proxy. Root-caused as **bot / TLS-fingerprint protection** on `vps.kodub.com`, not merely an untrusted origin — which is why the extension path (a real browser on the real origin) is the resilient fix rather than more proxy tuning. **M8.**

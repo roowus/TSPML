@@ -414,9 +414,67 @@ unspecified. `mixin-reference.md` now says exactly that.
 **203 tests green** (2 new: keybind auto-repeat), `pnpm -r build` clean including the
 portal.
 
+## 2026-08-02 — #34 + #36: one copy of the injections, and `api.tracks` in the portal ✅
+
+These two were done together on purpose. `api.tracks` worked only in the **dev harness** —
+a tool for mod authors — and not in the **portal**, which is the product. Porting it meant
+copying the bridge patches a third time, which is exactly the drift
+[#34](https://github.com/roowus/TSPML/issues/34) existed to stop. So #34 first, then #36
+fell out of it.
+
+**The duplication had already caused the bug.** The two copies were not merely at risk of
+diverging; they had diverged. The portal's copy had **no track-capture patches at all**, so
+`api.tracks` could not have worked there even with the host wiring in place. Extracting to
+[`@tspml/shared`](../../source/shared) fixed the defect as a side effect of removing the
+duplication — the strongest argument for doing it.
+
+The package owns **both** injections, because a surface can forget either one:
+
+| Export | Injected into | Forgetting it costs |
+|---|---|---|
+| `BRIDGE_PATCHES` | `main.bundle.js`, via `@tspml/transform` | a silently missing feature (what happened) |
+| `EARLY_CAPTURE_SCRIPT_TAG` / `readEarlyCaptures` | the game's `<head>`, ahead of its bundles | `api.tracks` never attaches, with no error anywhere |
+
+**The stub is load-bearing, and now we have evidence rather than an argument.** The portal
+smoke reports which captures arrived pre-bridge: `earlyCodec: true, earlyManager: false`.
+The codec really is handed over during bundle init, before the frame-`load` handler installs
+`window.__tspml` — so without the recording stub it is dropped, the late TrackManager
+capture succeeds, and the registry waits forever on a half-complete pair. Generalized in
+[hook-system.md](../design/hook-system.md): any new instance capture must ask where its
+target module runs *relative to the bridge*.
+
+**Tests that could not previously exist.** While the payloads were duplicated inline in two
+surfaces, a broken inject only surfaced when someone ran the transform against the real
+(gitignored, machine-local) bundle in a browser. 22 tests now hold them to their contracts:
+every inject/wrap **parses** (`new Function`, wraps evaluated as expressions since the
+engine emits `return (wrap)(X)`), every payload is try/catch-wrapped so a throw cannot
+escape into game code, every payload that *touches* the bridge guards it, `minHits` never
+exceeds `literals.length` (a typo there would silently disable a hook), and the codec's
+four-literal anchor is pinned against the regression that made it resolve to the wrong
+module.
+
+One of those tests failed first and was right to: the badge inject touches no bridge (it
+guards `typeof document`), so an "every payload guards `window.__tspml`" invariant was
+over-broad. Split into three narrower tests instead of loosened.
+
+**Verified against the live game, not just typechecked.** The portal now has its own
+committed `smoke:tracks` — the harness twin, minus the harness's dev-only `window.__tspmlDev`
+inspection hook, which the portal deliberately does not ship (it reads the captured objects
+off `api.tracks`'s own host instead; documented in the script). It drives only what a mod
+can: register a real code → the track appears in the **game's own** Custom tracks list → an
+invalid code is a typed `invalid-code` failure, not a throw → unregister → gone. `PASS`.
+Both pre-existing smokes still pass, so the extraction changed no behaviour.
+
+**A trap worth writing down:** `curl` of `/api/proxy/?version=…` **308-redirects** to the
+slashless form, so without `-L` you get an empty body and can wrongly conclude the `<head>`
+injections never landed. Same trailing-slash asymmetry the `<base href>` rewrite exists to
+fix.
+
+**225 tests green** (22 new, all in the new `source/shared`), `pnpm -r build` clean.
+
 ## Where we stand (2026-08-02)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **203 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · shared (22) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **225 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -424,6 +482,7 @@ portal.
 - **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
+- **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
 - **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
-- **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
-- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
+- **Open:** #10 (player-only), #11 (audio — try instance capture next), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
+- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique — now a documented pattern with a shared home for its capture patches.
