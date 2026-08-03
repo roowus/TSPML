@@ -59,6 +59,8 @@ export class Keybinds implements KeybindsRegistry {
   private dispatch(e: KeyboardEvent, phase: 'down' | 'up'): void {
     for (const binding of this.bindings.values()) {
       if (binding.key !== e.code) continue;
+      // Edge-trigger by default: browser auto-repeat would multi-fire toggles.
+      if (phase === 'down' && e.repeat && !binding.allowRepeat) continue;
       if (binding.preventDefault) {
         try {
           e.preventDefault();
