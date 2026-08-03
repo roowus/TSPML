@@ -362,9 +362,61 @@ tracking-api now also disposes a hot-swapped mod's tracks.
 
 **201 tests green** (11 new).
 
-## Where we stand (2026-08-01)
+## 2026-08-02 — the M9/M7-C/#12 stack landed on `main` (+ the review-bugs PR)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (25) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **201 tests green**, CI green.
+Four open PRs merged, `main` linear: [#33](https://github.com/roowus/TSPML/pull/33) (M9
+pipeline) → [#35](https://github.com/roowus/TSPML/pull/35) (M7-C dev harness) →
+[#37](https://github.com/roowus/TSPML/pull/37) (`api.tracks`, #12) →
+[#32](https://github.com/roowus/TSPML/pull/32) (review bugs). Closes
+[#20](https://github.com/roowus/TSPML/issues/20),
+[#22](https://github.com/roowus/TSPML/issues/22),
+[#23](https://github.com/roowus/TSPML/issues/23),
+[#29](https://github.com/roowus/TSPML/issues/29),
+[#31](https://github.com/roowus/TSPML/issues/31).
+[#18](https://github.com/roowus/TSPML/issues/18) stays open — #32 added `logger` to
+`TspmlApi`, but the loader's `ModApi` still lacks `keybinds`/`version`.
+
+**Merging a stack is not four independent merges.** Two things worth writing down:
+
+1. **Squash-merging the bottom of a stack strands the ones above it.** Each squash
+   rewrites its commits under a new SHA, so the next branch up still carries the *old*
+   copies and conflicts against `main`. Each PR needs replaying onto `main` after the one
+   below lands. And `--delete-branch` on the bottom PR deletes the branch the next PR is
+   *based on* — GitHub responds by **closing** that PR, not retargeting it. Retarget the
+   whole stack to `main` **before** merging anything.
+2. **`git add -A` during a conflict resolution will stage conflict markers.** It happened
+   on one file that had conflicted but wasn't in the set being fixed — `<<<<<<<` markers
+   committed into a doc. Caught only by diffing the merge result against an
+   independently-rebased tree and expecting *zero* differing files. Stage conflicted
+   paths by name, and grep the tree for markers before committing.
+
+**#32's conflict was semantic, not textual.** `main` had put the M6-B safety indicator in
+the same `useState` cluster and the same `loadMods().then()` block that #32 rewrote to
+replace the placeholder mod list. Both features were wanted, so both were kept — verified
+in a real browser rather than by typecheck, because a dropped `setSafetyStatus` compiles
+fine: the sidebar shows `tspml-checkpoint-counter` + `tspml-example-hud` as `loaded`, the
+placeholder gone, `safety: ✓ vanillaSafe · 1 warn` intact, zero page errors. (The portal
+smoke only asserts on the game canvas — it would not have caught a broken sidebar.
+Widening it is part of [#25](https://github.com/roowus/TSPML/issues/25).)
+
+**#32 also carried three stale doc claims** that would have regressed `main`, ironic for a
+PR whose purpose was doc accuracy — it was authored before M6/M7/M9 landed. Its roadmap
+rows would have flipped M4 back to *In progress* and M9 back to *Planned*; and it cited
+[#13](https://github.com/roowus/TSPML/issues/13) as open for mixin priority chaining in
+two files, though `sortPatchesByPriority` shipped in `fe9e926`. Rewriting those from the
+implementation surfaced that the honest description is narrower than "priority chaining
+works": it is an **opt-in helper** callers pass patches through, and the ordering inverts
+per op — for `around` the highest priority wraps outermost, but for `before` (which
+unshifts at the method head) the highest-priority patch is applied first and so ends up
+*furthest* from the head. Short-circuit propagation across nested `around` hooks is still
+unspecified. `mixin-reference.md` now says exactly that.
+
+**203 tests green** (2 new: keybind auto-repeat), `pnpm -r build` clean including the
+portal.
+
+## Where we stand (2026-08-02)
+
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **203 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -372,5 +424,6 @@ tracking-api now also disposes a hot-swapped mod's tracks.
 - **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
-- **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches).
+- **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
+- **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
 - **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
