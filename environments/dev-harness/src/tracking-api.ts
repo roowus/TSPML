@@ -23,10 +23,21 @@ export interface Registrable {
   register(binding: { id: string }): () => void;
 }
 
+/**
+ * Minimal custom-track registry surface (#12). Unlike events/keybinds, `register`
+ * is async and does NOT return an unsubscriber — it returns a result carrying the
+ * registered name — so tracking records the NAME and disposes via `unregister`.
+ */
+export interface TrackRegistrable {
+  register(track: { code: string; name?: string }): Promise<{ ok: boolean; name?: string }>;
+  unregister(name: string): boolean;
+}
+
 /** The api handed to a mod. */
 export interface ModLikeApi {
   events: Subscribable;
   keybinds: Registrable;
+  tracks?: TrackRegistrable;
   readonly logger?: unknown;
   readonly version?: string;
 }
@@ -35,6 +46,7 @@ export interface ModLikeApi {
 export interface TrackedModApi {
   events: Subscribable;
   keybinds: Registrable;
+  tracks?: TrackRegistrable | undefined;
   readonly logger?: unknown;
   readonly version?: string | undefined;
   /** Tear down every subscription the mod made through this tracked api. */
@@ -68,9 +80,28 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
     register: (binding) => track(api.keybinds.register(binding)),
   };
 
+  // Tracks the mod registered, so a hot-swap doesn't leave the previous mod's
+  // tracks in the player's list. Recorded by name (register has no unsubscriber).
+  const registeredTracks = new Set<string>();
+  const inner = api.tracks;
+  const tracks: TrackRegistrable | undefined = inner
+    ? {
+        register: async (t) => {
+          const res = await inner.register(t);
+          if (res.ok && res.name) registeredTracks.add(res.name);
+          return res;
+        },
+        unregister: (name) => {
+          registeredTracks.delete(name);
+          return inner.unregister(name);
+        },
+      }
+    : undefined;
+
   return {
     events,
     keybinds,
+    tracks,
     logger: api.logger,
     version: api.version,
     disposeAll: () => {
@@ -83,6 +114,14 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
         }
       }
       offs.clear();
+      for (const name of [...registeredTracks]) {
+        try {
+          inner?.unregister(name);
+        } catch {
+          /* keep going */
+        }
+      }
+      registeredTracks.clear();
     },
   };
 }

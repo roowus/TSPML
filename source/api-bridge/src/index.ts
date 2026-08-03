@@ -11,3 +11,13 @@ export type { EventBusOptions } from './event-bus.js';
 
 export { Keybinds } from './keybinds.js';
 export type { KeybindsOptions } from './keybinds.js';
+
+export { Tracks } from './tracks.js';
+export type {
+  GameTrackCodec,
+  GameTrackManager,
+  ParsedTrack,
+  TrackHost,
+  TrackMetadataLike,
+  TracksOptions,
+} from './tracks.js';

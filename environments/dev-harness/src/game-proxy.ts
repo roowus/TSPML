@@ -59,10 +59,30 @@ function resolveDeclaredPatch(
 const MOD_MIXINS: readonly Record<string, unknown>[] =
   (devModMixins.patches ?? []) as readonly Record<string, unknown>[];
 
-/** All patches: bridge (badge + Tier-1 events) + the dev mod's declared mixins. */
+/**
+ * Extra patches for TARGET INVESTIGATION: point TSPML_EXTRA_PATCHES at a JSON file
+ * of `{ patches: [...] }` (same shape as a mod's mixins.json) and the harness applies
+ * them on top of the bridge's. This is how you probe a candidate target against the
+ * real bundle — write the patch, load the page, see whether it applied — WITHOUT
+ * editing committed code or inventing a one-off script. Dev-only, never in the portal.
+ */
+const EXTRA_PATCHES: readonly Record<string, unknown>[] = (() => {
+  const p = process.env.TSPML_EXTRA_PATCHES;
+  if (!p) return [];
+  try {
+    const j = require(p) as { patches?: unknown[] };
+    return (j.patches ?? []) as readonly Record<string, unknown>[];
+  } catch (err) {
+    console.warn(`[tspml] TSPML_EXTRA_PATCHES could not be read (${p}):`, (err as Error).message);
+    return [];
+  }
+})();
+
+/** All patches: bridge (badge + Tier-1 events) + the dev mod's mixins + probe patches. */
 const ALL_PATCHES: readonly Record<string, unknown>[] = [
   ...(BRIDGE_PATCHES as unknown as readonly Record<string, unknown>[]),
   ...MOD_MIXINS,
+  ...EXTRA_PATCHES,
 ];
 
 /** Apply the transform. Returns the (possibly transformed) source + a flag. */
@@ -110,11 +130,37 @@ function buildUpstream(version: string, segments: string[], search: URLSearchPar
   return `https://${GAME_HOST}/${version}/${segments.join("/")}${qs ? `?${qs}` : ""}`;
 }
 
+/**
+ * A pre-bridge stub, injected ahead of the game's own scripts.
+ *
+ * Capture patches (#12) run wherever their target module runs — and the track CODEC's
+ * module factory runs during bundle init, BEFORE the parent frame's `load` handler
+ * installs the real `window.__tspml`. Without this stub that capture hits an absent
+ * bridge and is silently dropped (the track store, captured later when the game builds
+ * its menu, arrives fine — which is what makes the failure look so puzzling).
+ *
+ * So: stand up a minimal `__tspml` early whose capture functions just record. `main.ts`
+ * reads `__tspmlEarly` when it installs the real bridge and replays what was captured.
+ * Same-origin iframe, so the parent can read this object directly.
+ */
+const EARLY_CAPTURE_STUB = `
+(function () {
+  var early = { manager: null, codec: null };
+  window.__tspmlEarly = early;
+  window.__tspml = window.__tspml || {};
+  if (!window.__tspml.captureTrackManager)
+    window.__tspml.captureTrackManager = function (m) { early.manager = m; };
+  if (!window.__tspml.captureTrackCodec)
+    window.__tspml.captureTrackCodec = function (c) { early.codec = c; };
+})();
+`.trim();
+
 /** Inject the <base> + gate script into the proxied HTML, before the deferred bundles. */
 function rewriteHtml(html: string, version: string): string {
   const inject = [
     `<base href="/game/?version=${version}">`,
     '<script>window.polytrackModConfiguration = Object.assign(window.polytrackModConfiguration || {}, { modName: "TSPML-dev", author: "roowus" });</script>',
+    `<script>${EARLY_CAPTURE_STUB}</script>`,
   ].join("\n");
   return /<head[^>]*>/i.test(html)
     ? html.replace(/<head[^>]*>/i, (m) => `${m}\n${inject}`)
