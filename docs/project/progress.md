@@ -462,3 +462,57 @@ class as #19's stand-in drift test — strip comments before scanning code. Both
 mutation-checked.
 
 Also corrected a stale count in the pipeline README (26 → 39 tests).
+
+## 2026-08-03 — #2 (isolated-vm on Node 25)
+
+Closed #2. The issue's diagnosis was right about the symptom and wrong about the
+consequences, so both got corrected.
+
+**What is true:** `isolated-vm` has no working build on Node 25 (darwin-arm64), by
+any route. No prebuild — 6.1.2 ships abi127/abi137 (Node 22/24), Node 25 is abi141.
+No source build — with a working python (brew python 3.14's `pyexpat` is broken;
+`npm_config_python=/usr/bin/python3` gets past it) node-gyp compiles and links, and
+the addon then **segfaults on `new ivm.Isolate()`**, reproducibly. No newer version —
+isolated-vm@7 ships abi137/abi147 and declares `engines: >=26`; Node 25 sits in the
+gap on both sides.
+
+**What is no longer true:** the issue said install exits 1 and no lockfile is
+generated. pnpm 10 does not run dependency build scripts by default, so the failing
+`node-gyp` never runs at install time. Verified in a fresh clone: plain `pnpm install`
+exits 0, `pnpm install --frozen-lockfile` exits 0, and `pnpm-lock.yaml` is committed
+and unchanged. Also: isolated-vm is a **required** webcrack dependency, not an
+optional one — that misreading is what made "optional dep fails to build" sound
+harmless.
+
+**What it actually costs:** only webcrack's obfuscator.io deobfuscation, which the
+*minified* PolyTrack bundle never triggers. webcrack imports isolated-vm lazily
+inside the sandbox call, so the missing addon is never loaded. Measured: unpacking
+the real 0.6.2 bundle on Node 25 yields 212 modules, **byte-identical (`diff -rq`) to
+the same unpack on Node 22**. So M3 is not blocked, which was the open worry.
+
+**The fix is legibility, not capability.** New `src/sandbox.mjs`: on an ABI with a
+prebuild it passes no `sandbox` and webcrack uses its own; on any other ABI it
+substitutes one throwing a named, catchable error. Without it the failure is a raw
+`No native build was found`, or — if a stale source build is in the tree — a bare
+SIGSEGV with no output at all. Keyed on the **ABI**, not the Node major: prebuilds are
+named `isolated-vm.abi<N>.node`, and Node 25 is excluded for being abi141, not 25.
+
+5 tests, ABI injected rather than read from the runtime so both branches are covered
+whichever Node runs the suite (CI is 22, local is 25 — a test that only exercises its
+own runtime's branch is half a test). Suite green on **both** Node 22 and Node 25.
+
+Mutations verified before trusting the guards:
+
+```
+M1 always substitute (ignore prebuilt ABIs)  -> 1 failed | 43 passed
+M2 generic error message                     -> 1 failed | 43 passed
+M3 key on node major instead of ABI          -> 2 failed | 42 passed
+restored                                     -> 44 passed
+```
+
+Docs corrected where they had inherited the wrong story: `TESTING.md` no longer tells
+contributors to `pnpm install --ignore-scripts`, and the drift-spike's "optional dep
+fails to build" bullet now says what it does and does not block.
+
+Stacked on `docs/webcrack-node-25` (#5/PR #48) rather than branched off `main` — the
+fix lands in `unpack.mjs` and the pipeline README, which that PR already owns.
