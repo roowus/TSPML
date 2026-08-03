@@ -19,6 +19,35 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | **M8 — Online/origin handling** | 🚧 Blocked | Root cause found: `vps.kodub.com` is **bot-protected** (bot/TLS-fingerprint drop, not just origin). The **extension path** (real browser on kodub.com origin) is the resilient fix. |
 | **M9 — Auto-mappings pipeline** | ✅ Done | `regen.mjs` orchestrates **fetch → unpack → gen-map → diff → verify-targets**: a one-command candidate-map regen + human-review report (`*.candidate.json`, never clobbers committed). Pure `diff`/`verify-targets` logic unit-tested (26 tests); validated end-to-end on real 0.6.0/0.6.2 bundles. |
 | **M10 — PML narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry: **`api.tracks` is now it** ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code, verified against the live game). Car-styles/settings remain non-viable (frozen catalogs); audio is [#11](https://github.com/roowus/TSPML/issues/11). |
+| **M11 — Physics WASM patching** | 🆕 Planned | **Newly identified capability gap ([#43](https://github.com/roowus/TSPML/issues/43)).** PML `v0.6.2` shipped `registerPhysicsMixin` (byte-offset `PATCH_F32`/`PATCH_I32` into `polytrack_physics.wasm`); TSPML has **no** answer. Physics tuning is a headline mod category and anchor discipline cannot reach WASM constants. See [pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md). |
+
+## Strategy correction (2026-08-03)
+
+A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap was built on
+— full detail in
+[pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md):
+
+1. **"PML breaks every release" is an overclaim.** Their hardcoded mangled identifiers were
+   **byte-identical** 0.6.1 → 0.6.2, and the 0.6.0 → 0.6.1 delta was four string constants.
+   They adapted across two game versions in **11 days**. Our advantage is the **failure
+   mode** — detected-and-fail-closed vs. discovered-by-breakage-and-possibly-silent — **not
+   the frequency**, and not the cost of their update.
+2. **They are ahead on physics.** `registerPhysicsMixin` is a real capability we lack (M11).
+
+**Consequences for direction:**
+
+- **The mappings pipeline's *automation* is now the load-bearing investment**, not the
+  mappings idea itself. If our release-day cost is not decisively lower than "edit four
+  constants", centralization is a thin story. Measure it honestly on the first real 0.6.3.
+- **Stop marketing the API as a differentiator in kind.** They have an official API mod
+  (`pml-api`); it is a year-stale stub whose only act is creating an empty `EventTarget`,
+  and it calls a method the loader has since removed. "Shipped and tested vs. unstarted" is
+  the honest claim, and it is still a good one.
+- **Keep the API in-tree.** `pml-api` rotted precisely because it lives outside the loader.
+  Ours is imported by the portal and harness and covered in the same CI run — that is the
+  concrete argument for our layering, and it is stronger than the abstract one.
+- **`pml2` risk downgraded.** Last commit 2025-07-31, twelve months cold. The predicted
+  self-disruption did not happen; the effort went into 0.6.2 of the existing loader.
 
 ## Open follow-up issues
 
@@ -28,6 +57,7 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform. |
 | [#36](https://github.com/roowus/TSPML/issues/36) | Port `api.tracks` to the portal | Implemented + verified in the harness; the portal needs the pre-bridge early-capture stub too. |
 | [#34](https://github.com/roowus/TSPML/issues/34) | Share the Tier-1 bridge patches | Portal + dev-harness each carry a copy; extract to `@tspml/shared` so they can't drift. |
+| [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
 
 > Not exhaustive — the full backlog is in [GitHub issues](https://github.com/roowus/TSPML/issues)
 > (18 open, mostly small docs/API-drift fixes). This table is the subset that gates a
