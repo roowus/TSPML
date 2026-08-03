@@ -24,4 +24,4 @@ export type {
   TracksRegistry,
 } from './tracks.js';
 
-export type { TspmlApi } from './api.js';
+export type { TspmlApi, TspmlLogger } from './api.js';

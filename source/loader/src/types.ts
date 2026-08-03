@@ -5,11 +5,8 @@
 // package entrypoint.
 
 /**
- * A mod id. Globally unique, lowercase, matching `/^[a-z0-9-]+$/`.
- *
- * NOTE: `docs/api/mod-json-spec.md` mentions `[a-z0-9-_]` (with underscore) in a
- * prose comment, but the authoritative M1 contract is `/^[a-z0-9-]+$/` (no
- * underscore). This regex is the loader's acceptance criterion.
+ * A mod id. Globally unique, lowercase, matching `/^[a-z0-9-]+$/`
+ * (letters, digits, hyphens — no underscore). Matches `docs/api/mod-json-spec.md`.
  */
 export const ID_PATTERN = /^[a-z0-9-]+$/;
 

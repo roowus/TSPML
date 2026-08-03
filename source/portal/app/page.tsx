@@ -30,18 +30,11 @@ const GAME_FRAME_SRC = `/api/proxy/?version=${GAME_VERSION}`;
 /** TSPML loader version exposed on the `api` object. */
 const TSPML_VERSION = '0.0.0';
 
-interface ModDescriptor {
+interface LoadedModRow {
   id: string;
-  name: string;
-  version: string;
-  loaded: boolean;
+  status: 'loaded' | 'failed';
+  reason?: string;
 }
-
-// Placeholder mod list — wired to the real registry in a later milestone.
-const PLACEHOLDER_MODS: ModDescriptor[] = [
-  { id: 'tspml.example-hud', name: 'Example HUD', version: '0.1.0', loaded: false },
-  { id: 'tspml.example-track', name: 'Example Track Pack', version: '0.1.0', loaded: false },
-];
 
 export default function PlayPage(): ReactElement {
   const [swState, setSwState] = useState<SwState>('idle');
@@ -50,6 +43,7 @@ export default function PlayPage(): ReactElement {
   const [keybindCount, setKeybindCount] = useState(0);
   const [modsStatus, setModsStatus] = useState('…');
   const [safetyStatus, setSafetyStatus] = useState('');
+  const [loadedMods, setLoadedMods] = useState<LoadedModRow[]>([]);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
@@ -113,6 +107,11 @@ export default function PlayPage(): ReactElement {
       modsLoadedRef.current = true;
       void loadMods(api as unknown as ModApi)
         .then((s) => {
+          const rows: LoadedModRow[] = [
+            ...s.loaded.map((id) => ({ id, status: 'loaded' as const })),
+            ...s.failed.map((f) => ({ id: f.id, status: 'failed' as const, reason: f.reason })),
+          ];
+          setLoadedMods(rows);
           setModsStatus(
             s.loaded.length > 0
               ? `✓ ${s.loaded.join(', ')}`
@@ -211,15 +210,30 @@ export default function PlayPage(): ReactElement {
         <aside style={asideStyle} aria-label="Mods">
           <h2 style={asideTitleStyle}>Mods</h2>
           <ul style={listStyle}>
-            {PLACEHOLDER_MODS.map((mod) => (
-              <li key={mod.id} style={listItemStyle}>
-                <div style={modNameStyle}>{mod.name}</div>
+            {loadedMods.length === 0 ? (
+              <li style={listItemStyle}>
                 <div style={modMetaStyle}>
-                  <code>{mod.id}</code> · v{mod.version}
+                  {swState === 'active' ? 'loading…' : 'waiting for game…'}
                 </div>
-                <span style={modStatusStyle}>{mod.loaded ? 'loaded' : 'inactive'}</span>
               </li>
-            ))}
+            ) : (
+              loadedMods.map((mod) => (
+                <li key={mod.id} style={listItemStyle}>
+                  <div style={modNameStyle}>
+                    <code>{mod.id}</code>
+                  </div>
+                  {mod.reason ? <div style={modMetaStyle}>{mod.reason.slice(0, 72)}</div> : null}
+                  <span
+                    style={{
+                      ...modStatusStyle,
+                      color: mod.status === 'loaded' ? '#3fb950' : '#f85149',
+                    }}
+                  >
+                    {mod.status}
+                  </span>
+                </li>
+              ))
+            )}
           </ul>
           <div style={bridgeRowStyle}>
             <span
@@ -263,7 +277,7 @@ export default function PlayPage(): ReactElement {
           <p style={noteStyle}>
             The transform pipeline is built (M3); the <code>car.control</code>{' '}
             event is wired end-to-end (M4-B) — its count ticks up while you race.
-            The mod list above is placeholder.
+            The list above is driven by <code>@tspml/loader</code> results.
           </p>
         </aside>
       </div>
