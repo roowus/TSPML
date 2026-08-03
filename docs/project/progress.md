@@ -307,14 +307,70 @@ patches are an intentional attributed copy of the portal's (extract to `@tspml/s
 portal + harness share one source — [#34](https://github.com/roowus/TSPML/issues/34)).
 **190 tests green** (5 new).
 
+## 2026-08-01 — #12: the custom-tracks registry works ✅ (first content registry)
+
+`api.tracks` lets a mod hand over a PolyTrack import code and get a real entry in the
+player's **Custom tracks** list. It was the last plausible *content* registry (car
+styles and settings are frozen catalogs; audio is [#11](https://github.com/roowus/TSPML/issues/11)),
+so it is what **unblocks M10** — the PML importer needed at least one to exist.
+
+**How it reaches the game.** The registry drives two game objects the module locator
+cannot find, because they live past the **bootstrap wall** (the same wall #11 hits):
+
+- **track store** — captured as a constructor parameter of the track-selection UI
+  (module 8185). You can't locate the class, but you *can* catch the instance being
+  handed to a caller that is a real module.
+- **track codec** — an export of the track-data module (9117), used to parse the
+  import code and to reject a bad one.
+
+Both patches only read a reference out; neither changes game behaviour. Generalized as
+**instance capture** in [hook-system.md](../design/hook-system.md) — the technique is
+the reusable result here, and it is the most promising route for #11.
+
+**Two gotchas worth remembering.**
+
+1. **Anchor uniqueness is not optional.** The codec's first anchor set matched the
+   *wrong* module: `"PolyTrack2"` also appears in 6582 and `"Checkpoint has no
+   checkpoint order"` in 6762, so `fromExportString` was simply not a function. Fixed
+   with four literals at `minHits: 4` (`"Part id is out of range"` /
+   `"Failed to get canvas context"` are unique to 9117). `verify-targets` now passes
+   **5/5** targets, both new ones unambiguous.
+2. **Capture timing differs per target.** The store is captured late (menu build), but
+   the codec's module factory runs during **bundle init** — before the parent frame's
+   `load` handler installs `window.__tspml`. The codec capture was therefore hitting an
+   absent bridge and being dropped silently, and the registry never attached: half the
+   captures worked, which made it look like an anchor problem rather than a timing one.
+   Fixed with a **pre-bridge stub** injected ahead of the game's scripts that records
+   early captures into `window.__tspmlEarly` for `main.ts` to replay. The portal needs
+   the same stub before it can ship this — [#36](https://github.com/roowus/TSPML/issues/36).
+
+**Design calls** (all encoded in tests): a name collision is **refused** by default —
+the colliding track may be the player's own, so clobbering it is data loss; `overwrite`
+must be explicit. `persist` is **opt-in**, because the game's store writes to
+localStorage and a persisted mod track would outlive the mod. Registrations made before
+capture are **queued and drained on attach**, so a mod can register at `init`. Every
+game call is isolated into a typed failure — a bad code is `{ ok: false, reason:
+'invalid-code' }`, never a throw.
+
+**Headlessly verified against the live game** (`pnpm --filter @tspml/dev-harness
+smoke:tracks`, new): registry attached → a real code minted via the game's own codec →
+`api.tracks.register()` → track present in the **game's own** custom-track list →
+invalid code rejected as `invalid-code` → collision refused as `name-exists` →
+`overwrite: true` succeeds → `unregister` removes it from the game's list. The M7-C
+smoke still passes (HMR intact, `gameSurvivedHmr: true`), which matters because the
+tracking-api now also disposes a hot-swapped mod's tracks.
+
+**201 tests green** (11 new).
+
 ## Where we stand (2026-08-01)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (14) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **190 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (25) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **201 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
 - **M7 ✅** — `create-tspml-mod` CLI + `@tspml/api` publish-ready + **Vite dev harness with scoped mod HMR**.
 - **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
-- **#13/#14 closed.** Open: #10 (player-only), #11 (audio — locator can't reach bootstrap), #12 (custom-tracks).
-- **Next:** M7-C (dev harness), M8 continues (api + transforms in extension), or polish.
+- **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
+- **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches).
+- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.

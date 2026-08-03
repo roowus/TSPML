@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:tracks": "node scripts/smoke-tracks.mjs"
   },
   "dependencies": {
     "@tspml/api-bridge": "workspace:*",

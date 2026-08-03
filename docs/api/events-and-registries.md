@@ -65,8 +65,9 @@ api.cars.registerCarStyle(id, style);
 api.audio.registerSound(name, urls);           // absolute URLs
 api.audio.playSound(name, volume);
 
-api.tracks.register(id, data);
-api.tracks.override(id, data);
+api.tracks.register({ code, name?, author?, overwrite?, persist? }); // ✅ implemented — see below
+api.tracks.unregister(name);
+api.tracks.list();
 
 api.ui.addWidget(id, { render, mount, unmount });
 
@@ -82,11 +83,55 @@ api.settings.getSetting(id);                   // returns TYPED value (fixes PML
 > (`Object.freeze` catalogs + init-time preloading into model Maps; late mutation
 > throws "model not found"). What IS viable:
 > - **`keybinds`** — bridge-owned parallel listener. ✅ **implemented** (M4-G/H; the one clean, fully-verifiable registry).
+> - **`tracks`** — reuse the import-by-code path. ✅ **implemented** ([#12](https://github.com/roowus/TSPML/issues/12); see below).
 > - **`audio`** — override existing clips via the game's own `load()` (needs an instance-capture transform). [#11](https://github.com/roowus/TSPML/issues/11)
-> - **`tracks`** — reuse the import-by-code path (viability unverified). [#12](https://github.com/roowus/TSPML/issues/12)
 >
 > The **mixin system (M5, Tier 2)** is the escape hatch for content/behavior the
 > registries can't reach. See [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
+
+### `api.tracks` — custom tracks (implemented)
+
+A mod hands over a **PolyTrack import code** (the `PolyTrack2…` string the game's own
+Export button produces). The registry parses it with the **game's codec** and saves it
+through the **game's track store**, so the result is indistinguishable from a
+hand-imported track and the game's track-selection UI refreshes itself — TSPML ships no
+UI patch for this.
+
+```ts
+const res = await api.tracks.register({
+  code: 'PolyTrack2…',        // required
+  name: 'My Track',           // optional — defaults to the name in the code; also the store KEY
+  author: 'you',              // optional — defaults to the author in the code
+  overwrite: false,           // default false: refuse a name collision, never clobber
+  persist: false,             // default false: session-scoped, removed on mod unload
+});
+if (!res.ok) console.warn(res.reason); // 'invalid-code' | 'name-exists' | 'save-failed' | 'not-ready'
+else console.log(res.name, res.trackId);
+
+api.tracks.unregister('My Track'); // true if it was ours and the game removed it
+api.tracks.list();                 // RegisteredTrack[] — what THIS session registered
+```
+
+Three behaviors worth knowing:
+
+- **Failures are typed, never thrown.** A bad code returns `{ ok: false, reason:
+  'invalid-code' }`. Game calls that throw (e.g. storage quota) become `'save-failed'`
+  with a `detail`.
+- **A name collision is refused by default.** The colliding track may be the *player's
+  own*; clobbering it silently would be data loss. Pass `overwrite: true` to mean it.
+- **`persist` is opt-in.** The game's store writes to `localStorage`, so a persisted mod
+  track outlives the mod. Session-scoped registrations are removed on unload, which
+  keeps an uninstalled mod from littering the player's track list.
+
+Registrations made **before** the game has built its menu are queued and drained on
+capture, so a mod can call `register` at `init` without knowing game lifecycle.
+
+> **How the game objects are reached.** The track store lives in the bundle's
+> *bootstrap*, past the wall the module locator can see (the same wall [#11](https://github.com/roowus/TSPML/issues/11)
+> hits for audio). Its **callers** are real modules, so the bridge captures the live
+> instance from a constructor parameter instead of locating the class — see
+> [hook-system.md](../design/hook-system.md). Both capture patches only read a value
+> out; neither changes game behavior.
 
 ## Capability scoping
 

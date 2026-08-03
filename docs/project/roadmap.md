@@ -4,7 +4,7 @@
 
 ## Current status (2026-08-01)
 
-The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). 190 unit tests, CI green.
+The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** now works: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)), which unblocks M10. 201 unit tests, CI green.
 
 | Milestone | Status | Outcome |
 |---|---|---|
@@ -18,7 +18,7 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | **M7 — Dev harness + scaffold + types** | ✅ Done | `create-tspml-mod` CLI (one-command scaffolding); `@tspml/api` publish-ready (types for modder autocomplete); **`@tspml/dev-harness`** — Vite dev server that proxies + transforms the real game in-process (no service worker) and **hot-swaps the mod entrypoint on save** while the game keeps running. Headlessly verified (game boots, gate clears, Tier-1 events fire, mod hot-reloads, game survives). |
 | **M8 — Online/origin handling** | 🚧 Blocked | Root cause found: `vps.kodub.com` is **bot-protected** (bot/TLS-fingerprint drop, not just origin). The **extension path** (real browser on kodub.com origin) is the resilient fix. |
 | **M9 — Auto-mappings pipeline** | ✅ Done | `regen.mjs` orchestrates **fetch → unpack → gen-map → diff → verify-targets**: a one-command candidate-map regen + human-review report (`*.candidate.json`, never clobbers committed). Pure `diff`/`verify-targets` logic unit-tested (26 tests); validated end-to-end on real 0.6.0/0.6.2 bundles. |
-| **M10 — PML narrow importer + registry + polish** | ⏳ Blocked | Blocked on content registries (car-styles/settings not viable — frozen catalogs; audio #11, custom-tracks #12 pending). The importer depends on at least one working content registry. |
+| **M10 — PML narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry: **`api.tracks` is now it** ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code, verified against the live game). Car-styles/settings remain non-viable (frozen catalogs); audio is [#11](https://github.com/roowus/TSPML/issues/11). |
 
 ## Open follow-up issues
 
@@ -26,9 +26,12 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 |---|---|---|
 | [#10](https://github.com/roowus/TSPML/issues/10) | Player-only event filtering | race.started/checkpoint/finish fire per-car (player+ghosts); needs an isReplay accessor. |
 | [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform. |
-| [#12](https://github.com/roowus/TSPML/issues/12) | Custom-tracks registry | Re-investigate the import-by-code path. |
-| [#13](https://github.com/roowus/TSPML/issues/13) | Priority-ordered chaining | The `priority` field is declared but unused; per-op runtime ordering is subtle. |
+| [#36](https://github.com/roowus/TSPML/issues/36) | Port `api.tracks` to the portal | Implemented + verified in the harness; the portal needs the pre-bridge early-capture stub too. |
 | [#34](https://github.com/roowus/TSPML/issues/34) | Share the Tier-1 bridge patches | Portal + dev-harness each carry a copy; extract to `@tspml/shared` so they can't drift. |
+
+> Not exhaustive — the full backlog is in [GitHub issues](https://github.com/roowus/TSPML/issues)
+> (~20 open, mostly small docs/API-drift fixes). This table is the subset that gates a
+> milestone.
 
 ## Go/no-go gate (M1) — PASSED
 

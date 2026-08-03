@@ -23,9 +23,41 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 - `api.blocks` — custom track pieces (supersedes `pmlapi.editorExtras`; grounded in `PartObject`/`trackParts`)
 - `api.cars` — car skins/styles (`getCarStyle`/`setCarStyle`/`carColors`/`VisualCar`)
 - `api.audio` — `registerSound(name,[url])` / `playSound(name,vol)` (supersedes `pmlapi.soundManager`)
-- `api.tracks` — register/override community tracks
+- `api.tracks` — register custom tracks by import code (**implemented**, [#12](https://github.com/roowus/TSPML/issues/12); see *instance capture* below)
 - `api.ui` — HUD widgets/panels
 - `api.keybinds` / `api.settings` — where `getSetting` returns **typed** values (fixes PML's always-string wart)
+
+### Instance capture — reaching past the bootstrap wall
+
+Some of the game's most useful objects are **not in a locatable module**. The webpack
+module map ends at a fixed bundle offset; the code past it (the bootstrap) constructs
+long-lived managers — the track store, the audio manager — that the module locator
+cannot see. That wall is why [#11](https://github.com/roowus/TSPML/issues/11) (audio)
+is hard.
+
+The way through is to stop trying to locate the **class** and instead capture the live
+**instance** from a caller that *is* a real module. A manager built in the bootstrap is
+still *passed into* module-resident constructors, so a `before`-op patch on such a
+constructor can read the parameter out into the bridge:
+
+```
+op: before, target: { anchor: <literals unique to the caller>, selector: { kind: 'method', name: 'constructor' } }
+inject: capture(param_n)  →  window.__tspml.captureX(...)
+```
+
+This is how `api.tracks` gets the game's track store (constructor parameter of the
+track-selection UI) and its codec (an export of the track-data module). Three
+properties make it safe and worth generalizing:
+
+- **Read-only.** The patch copies a reference out; it changes no game behavior, so a
+  mis-target degrades to "capture never happens", not to corrupted state.
+- **Late-binding by nature.** Capture happens when the game builds that UI, so the
+  registry must start unbound and **queue** calls until `attach()`. `api.tracks` does
+  exactly this, which is why a mod can register at `init`.
+- **Anchor discipline still applies.** Anchors must be literals *unique* to the target
+  module. Verified the hard way for the codec: `"PolyTrack2"` alone also matches
+  another module, so that target needs four literals with `minHits: 4`. See
+  [mappings-system.md](./mappings-system.md).
 
 ## Tier 2 — mixin surgery (escape hatch)
 
