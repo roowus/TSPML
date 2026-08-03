@@ -198,14 +198,45 @@ await page.screenshot({ path: menuShot });
 
 // controlCar (car.control) + race.started are input-driven: race.started fires
 // on first throttle. Focus the canvas, then drive + poll for events.
+//
+// The click can legitimately fail on a CI runner — Playwright's actionability
+// checks time out against a swiftshader-rendered canvas that never settles, and
+// the first CI run of this smoke failed exactly there: clickOk false, so nothing
+// had keyboard focus, so race.started stayed 0 while every non-input assertion
+// passed. Fall back to a forced click (skips actionability) and then to focusing
+// the canvas directly. The click is only ever a means of getting focus onto the
+// game frame; it is not itself under test, which is why a fallback is honest
+// here rather than a way of making red go green.
 let clickOk = true;
+let focusPath = "click";
 try {
-  await gameFrame.locator("canvas").first().click({ timeout: 3000 });
+  await gameFrame.locator("canvas").first().click({ timeout: 5000 });
 } catch (e) {
   clickOk = false;
+  try {
+    await gameFrame.locator("canvas").first().click({ timeout: 5000, force: true });
+    focusPath = "force-click";
+  } catch (e2) {
+    try {
+      await gameFrame.locator("canvas").first().focus({ timeout: 3000 });
+      focusPath = "focus";
+    } catch (e3) {
+      focusPath = "none";
+    }
+  }
 }
 let counts = {};
-for (let attempt = 0; attempt < 6; attempt++) {
+for (let attempt = 0; attempt < 8; attempt++) {
+  // Re-assert focus each round. A single click at the top is fragile: the game
+  // can move focus itself (the race auto-starts, menus mount), and on a slow
+  // runner the first rounds land before anything is listening.
+  if (attempt > 0) {
+    await gameFrame
+      .locator("canvas")
+      .first()
+      .click({ timeout: 2000, force: true })
+      .catch(() => {});
+  }
   await page.keyboard.down("ArrowUp");
   await page.waitForTimeout(600);
   await page.keyboard.up("ArrowUp");
@@ -303,6 +334,9 @@ console.log(
         canvasSize: dom.canvasSize,
         badgePresent: dom.badgePresent,
         clickOk,
+        // Which route got keyboard focus onto the game frame. Reported, not
+        // asserted — "none" alongside a green run is worth knowing about.
+        focusPath,
         jsPageErrors: pageErrors.length,
         failedRequests: failed.length,
       },
