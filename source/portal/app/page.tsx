@@ -42,6 +42,7 @@ export default function PlayPage(): ReactElement {
   const [controlCount, setControlCount] = useState(0);
   const [keybindCount, setKeybindCount] = useState(0);
   const [modsStatus, setModsStatus] = useState('…');
+  const [safetyStatus, setSafetyStatus] = useState('');
   const [loadedMods, setLoadedMods] = useState<LoadedModRow[]>([]);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
@@ -118,6 +119,14 @@ export default function PlayPage(): ReactElement {
                 ? `✗ ${s.failed[0]!.reason.slice(0, 48)}`
                 : 'none',
           );
+          // M6-B: surface the warn-only safety classification.
+          const sr = s.safety[0]?.report;
+          if (sr) {
+            const w = sr.warnings.length;
+            setSafetyStatus(
+              `${sr.vanillaSafe ? '✓' : '⚠'} vanillaSafe${sr.leaderboardRisk === 'warn' ? ' (lb-risk)' : ''}${w > 0 ? ` · ${w} warn` : ''}`,
+            );
+          }
         })
         .catch((e) => setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`));
     }
@@ -256,6 +265,15 @@ export default function PlayPage(): ReactElement {
             />
             mods: {modsStatus}
           </div>
+          {safetyStatus ? (
+            <div style={bridgeRowStyle}>
+              <span
+                style={{ ...bridgeDotStyle, background: safetyStatus.startsWith('⚠') ? '#d29922' : '#3fb950' }}
+                aria-hidden="true"
+              />
+              safety: {safetyStatus}
+            </div>
+          ) : null}
           <p style={noteStyle}>
             The transform pipeline is built (M3); the <code>car.control</code>{' '}
             event is wired end-to-end (M4-B) — its count ticks up while you race.

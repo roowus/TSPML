@@ -21,10 +21,18 @@ import { fileURLToPath } from "node:url";
 
 const PKG_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CACHE = join(PKG_DIR, "../../../tooling/mappings-pipeline/.cache");
-const SRC = join(CACHE, "webcrack/v060-renamed");
-const TGT = join(CACHE, "webcrack/v062-raw");
-const BUNDLE = join(CACHE, "pt-0.6.2-raw-main.js");
-const OUT = join(PKG_DIR, "../maps/polytrack-0.6.2.json");
+// Env-var overridable (M9): lets `GEN_VERSION=0.7.0 GEN_TGT=... node gen-map.mjs`
+// regenerate a candidate map for ANY version without editing this file.
+const SRC = process.env.GEN_SRC ?? join(CACHE, "webcrack/v060-renamed");
+const TGT = process.env.GEN_TGT ?? join(CACHE, "webcrack/v062-raw");
+const BUNDLE = process.env.GEN_BUNDLE ?? join(CACHE, "pt-0.6.2-raw-main.js");
+const GAME_VERSION = process.env.GEN_VERSION ?? "0.6.2";
+const OUT = process.env.GEN_OUT ?? join(PKG_DIR, `../maps/polytrack-${GAME_VERSION}.json`);
+// Where to read the carry-forward `targets` section from. Defaults to OUT (standalone
+// in-place regen reads its own targets). regen.mjs sets this to the COMMITTED baseline
+// map — because OUT is the not-yet-written candidate, reading targets from OUT on a
+// first regen would ENOENT and silently drop all targets (M9 review finding: blocker).
+const PREV_MAP = process.env.GEN_PREV_MAP ?? OUT;
 
 // ---------------------------------------------------------------------------
 // Matcher (verbatim from tooling/mappings-pipeline/src/match.mjs)
@@ -322,17 +330,32 @@ const bundleHash = "sha256:" + createHash("sha256").update(bundle).digest("hex")
 
 const map = {
   formatVersion: 1,
-  gameVersion: "0.6.2",
+  gameVersion: GAME_VERSION,
   bundleHash,
   generated: {
     from: "M1 drift spike (tooling/mappings-pipeline)",
     matcher: "report-sn-relaxed configuration (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5)",
-    granularity: "module",
-    note: "v1 module-level map. Symbol-level locators (exportRef/prototypeFn/callExpression) land in M3.",
+    granularity: "module + targets (M5-C)",
+    note: "v1 module-level map. `targets` (stable name -> TargetSpec) are hand-curated + carried forward on regen; verify against the new build.",
   },
   modules,
   unresolved: unresolvedOut,
 };
+
+// Carry forward the hand-curated `targets` section from the baseline map (M5-C).
+// Read from PREV_MAP (the committed baseline under regen), NOT OUT — OUT is the
+// candidate being written and does not exist yet on a first regen, so reading it
+// would ENOENT and silently drop every target. On a new version the human verifies
+// each carried target's anchor still resolves (verify-targets.mjs).
+try {
+  const prev = JSON.parse(await readFile(PREV_MAP, "utf8"));
+  if (prev.targets && typeof prev.targets === "object") {
+    map.targets = prev.targets;
+    console.error(`targets carried forward: ${Object.keys(prev.targets).length} entries from ${PREV_MAP} (verify against the new build)`);
+  }
+} catch {
+  // No baseline map / baseline has no targets — none to carry (human adds them later).
+}
 
 await writeFile(OUT, JSON.stringify(map, null, 2) + "\n", "utf8");
 

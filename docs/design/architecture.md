@@ -2,6 +2,8 @@
 
 > TSPML copies **Fabric's layering**, not PML's mechanics. The thesis: concentrate *all* version-coupling in two maintained artifacts (the **mappings file** + the **API bridge**) so ordinary mods target stable names and ride through PolyTrack updates without recompilation.
 
+> **Implementation status (M4-M5 ✅, M6-M9 🚧):** the layered design below is now **proven end-to-end** — 6 Tier-1 events fire inside the running game, mods load + subscribe, mod-declared mixins target stable names resolved fail-closed via the mappings, and a warn-only safety classifier labels mods. The portal plays a transformed, modded PolyTrack headlessly verified. See [progress.md](../project/progress.md) + [roadmap.md](../project/roadmap.md).
+
 ## Layered design
 
 ```
@@ -36,7 +38,7 @@
 ## Hook system (two tiers)
 
 - **Tier 1 — event bus + registries:** `api.events.on('physics.postStep', cb)`, `api.blocks.register(...)`, etc. Wired by the bridge; mods never see minified code. ~90% of mods.
-- **Tier 2 — declarative mixin surgery (escape hatch):** JSON mixin descriptors (`before`/`after`/`around`/`replace`/`modifyArg`/…) targeting **stable names**, applied at transform time (not a runtime `api.mixin` object). Chaining is currently array-order ([#13](https://github.com/roowus/TSPML/issues/13) for priority); `replace` is single-winner with a load-time conflict error.
+- **Tier 2 — declarative mixin surgery (escape hatch):** JSON mixin descriptors (`before`/`after`/`around`/`replace`/`modifyArg`/…) targeting **stable names**, applied at transform time (not a runtime `api.mixin` object). Chaining is priority-ordered (`sortPatchesByPriority`, stable within equal priority); `replace` is single-winner with a load-time conflict error.
 
 See [hook-system.md](./hook-system.md).
 

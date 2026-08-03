@@ -10,28 +10,40 @@
  * `importEntry`; a fallback dynamic `import()` covers any future URL/path mods.
  */
 import type { ModApi, ModDescriptor } from '@tspml/loader';
-import { load } from '@tspml/loader';
+import { classifySafety, load, parseVersionManifest } from '@tspml/loader';
+import type { SafetyReport } from '@tspml/loader';
 // Statically imported so the bundler includes the demo mod; `importEntry` below
 // returns it for the demo-hud specifier.
 import demoHudFactory from '@tspml/demo-hud';
 import demoHudManifest from '@tspml/demo-hud/mod.json';
+import checkpointCounterFactory from '@tspml/checkpoint-counter';
+import checkpointCounterManifest from '@tspml/checkpoint-counter/mod.json';
+
+export interface ModSafetyEntry {
+  readonly id: string;
+  readonly report: SafetyReport;
+}
 
 export interface ModLoadSummary {
   readonly loaded: readonly string[];
   readonly failed: ReadonlyArray<{ id: string; reason: string }>;
+  readonly safety: readonly ModSafetyEntry[];
 }
 
 /**
  * Load the bundled demo mods against the given (bridge) api. Per-mod failure
- * isolation: a bad mod is reported, never boot-aborts.
+ * isolation: a bad mod is reported, never boot-aborts. Also classifies each
+ * mod's safety (M6-B, warn-only) for the portal to surface.
  */
 export async function loadMods(api: ModApi): Promise<ModLoadSummary> {
   const importEntry = async (specifier: string): Promise<unknown> => {
     if (specifier === 'demo-hud') return { default: demoHudFactory };
+    if (specifier === 'checkpoint-counter') return { default: checkpointCounterFactory };
     return await import(/* webpackIgnore: true */ /* @vite-ignore */ specifier);
   };
   const descriptors: ModDescriptor[] = [
     { manifest: demoHudManifest as unknown, entry: 'demo-hud' },
+    { manifest: checkpointCounterManifest as unknown, entry: 'checkpoint-counter' },
   ];
   const result = await load(descriptors, { api, importEntry });
 
@@ -41,5 +53,17 @@ export async function loadMods(api: ModApi): Promise<ModLoadSummary> {
     if (s.status === 'loaded') loaded.push(id);
     else failed.push({ id, reason: s.reason ?? 'unknown' });
   }
-  return { loaded, failed };
+
+  // M6-B: classify each mod's safety (warn-only — never blocks).
+  const safety: ModSafetyEntry[] = [];
+  for (const desc of descriptors) {
+    try {
+      const manifest = parseVersionManifest(desc.manifest);
+      safety.push({ id: manifest.id, report: classifySafety(manifest) });
+    } catch {
+      // Bad manifest — already in `failed`; skip classification.
+    }
+  }
+
+  return { loaded, failed, safety };
 }

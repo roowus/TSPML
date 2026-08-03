@@ -2,23 +2,37 @@
 
 > Each milestone is independently useful. Status is tracked here and in [progress.md](./progress.md).
 
+## Current status (2026-08-01)
+
+The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** now works: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)), which unblocks M10. 201 unit tests, CI green.
+
 | Milestone | Status | Outcome |
 |---|---|---|
 | **M0 — Reset & docs-first foundation** | ✅ Done | Clean monorepo; full research/design/API/project docs. |
-| **M1 — De-risk spike + loader core** | ✅ Done | **Spike: GO** (game-logic match 0.85, semi-automated — [report](../research/mappings-drift-spike.md)). **Loader core:** manifest parse/validate + semver + topo-sort/cycle/conflict + entrypoint invocation with error isolation, **47 tests passing**. `breaks` refinement tracked in issue #6. |
-| **M2 — Mappings v1 (manual) + portal injection MVP** | ✅ Done | Mappings v1: 56-entry 0.6.2 map + **fail-closed resolver** (20 tests). Portal MVP: Next.js + `/api/proxy` (Origin-forwarded, SSRF-guarded) + service worker (17 tests). Symbol-level locators + real transforms are M3; "game runs" needs browser validation (see portal README). |
-| **M3 — AST transform + resolver** | ✅ Done | `source/transform`: `transform()` with all 7 mixin ops, **fail-closed** on hash mismatch, source maps, replace single-winner conflict, re-parse gate. 31 tests (spike [report](../research/transform-spike.md), ADR-011). Deferred to M9: INVOKE locators, per-chunk, IndexedDB. |
-| **M4 — Event bus + API bridge (Tier 1)** | 🚧 In progress | **Done:** typed `@tspml/api` + `EventBus`, 6 wired events (`car.control`/`created`, `race.started`/`finished`, `track.afterLoad`, `checkpoint.passed`), `api.keybinds`, real mod loading in the portal. **Open:** more events (physics/render/network), player-only filtering ([#10](https://github.com/roowus/TSPML/issues/10)), audio/tracks registries ([#11](https://github.com/roowus/TSPML/issues/11)/[#12](https://github.com/roowus/TSPML/issues/12)), unload ([#17](https://github.com/roowus/TSPML/issues/17)), API surface unify ([#18](https://github.com/roowus/TSPML/issues/18)). |
-| **M5 — Mixin system (Tier 2)** | ✅ Done (core) | Declarative JSON mixins, all 7 ops, array-order chaining + `replace` single-winner, mappings-resolved stable-name targets. **Open:** priority-ordered chaining ([#13](https://github.com/roowus/TSPML/issues/13)). |
-| **M6 — Safety (warn-only) + determinism lint** | Planned | vanillaSafe classification + labels + risk warnings; determinism lint (warnings); consented-advisory capability prompts ([#21](https://github.com/roowus/TSPML/issues/21)). |
-| **M7 — Dev harness + scaffold + types** | 🚧 In progress | **Done:** `create-tspml-mod` scaffold + publish-ready `@tspml/api`. **Open:** external-ready scaffold ([#19](https://github.com/roowus/TSPML/issues/19)), Vite dev harness, VS Code extension. |
-| **M8 — Online/origin handling** | Planned | Proxy Origin/Referer forwarding for leaderboard/multiplayer; validate online features from the portal origin; extension/userscript fallback if blocked. |
-| **M9 — Auto-mappings pipeline** | Planned *(gated on M1 success)* | webcrack+wakaru+structural-diff+anchor matching; regen candidate map per release; human-review diff tool. |
-| **M10 — PML narrow importer + registry + polish** | Planned | skins/audio/blocks importer; registry (Cloudflare Workers + D1) + `tspml publish`; docs completion; 1.0. |
+| **M1 — De-risk spike + loader core** | ✅ Done | **Spike: GO** (game-logic match 0.85, semi-automated — [report](../research/mappings-drift-spike.md)). **Loader core:** manifest/semver/topo-sort/entrypoint, 47→53 tests (incl. safety classifier). |
+| **M2 — Mappings v1 + portal MVP** | ✅ Done | 56-entry 0.6.2 map + **fail-closed resolver** (20→25 tests). Portal: proxy + SW + gate neutralized — **plays end-to-end**. |
+| **M3 — AST transform + resolver** | ✅ Done | All 7 mixin ops, fail-closed on hash, source maps, replace conflict, re-parse gate. 31→33 tests (chaining verified — spike [report](../research/transform-spike.md), ADR-011). |
+| **M4 — Event bus + API bridge (Tier 1)** | ✅ Done | 6 Tier-1 events (car.control/created, race.started, track.afterLoad, checkpoint.passed, race.finished); keybinds registry; **real mod loading** (loader→mod→api→event). |
+| **M5 — Mixin system (Tier 2)** | ✅ Done | **Mod-declared mixins** (mod.json → descriptor); chaining + `replace` single-winner conflict; **mappings-resolved stable-name targeting** (the moat pays off). |
+| **M6 — Safety (warn-only) + determinism lint** | ✅ Classifier + surfaced | `classifySafety` (warn-only, 6 tests) + **surfaced in the portal** (sidebar safety indicator). Remaining: determinism lint (static analysis of mixin targets), capability consent prompts. |
+| **M7 — Dev harness + scaffold + types** | ✅ Done | `create-tspml-mod` CLI (one-command scaffolding); `@tspml/api` publish-ready (types for modder autocomplete); **`@tspml/dev-harness`** — Vite dev server that proxies + transforms the real game in-process (no service worker) and **hot-swaps the mod entrypoint on save** while the game keeps running. Headlessly verified (game boots, gate clears, Tier-1 events fire, mod hot-reloads, game survives). |
+| **M8 — Online/origin handling** | 🚧 Blocked | Root cause found: `vps.kodub.com` is **bot-protected** (bot/TLS-fingerprint drop, not just origin). The **extension path** (real browser on kodub.com origin) is the resilient fix. |
+| **M9 — Auto-mappings pipeline** | ✅ Done | `regen.mjs` orchestrates **fetch → unpack → gen-map → diff → verify-targets**: a one-command candidate-map regen + human-review report (`*.candidate.json`, never clobbers committed). Pure `diff`/`verify-targets` logic unit-tested (26 tests); validated end-to-end on real 0.6.0/0.6.2 bundles. |
+| **M10 — PML narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry: **`api.tracks` is now it** ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code, verified against the live game). Car-styles/settings remain non-viable (frozen catalogs); audio is [#11](https://github.com/roowus/TSPML/issues/11). |
 
-## Go/no-go gate (M1)
+## Open follow-up issues
 
-The entire "update-resilient mappings moat" rests on whether JS minified bundles can be structurally matched across versions. **Before building M2+ on it**, M1 runs a controlled experiment (webcrack/wakaru on 0.6.0 vs 0.6.2, match modules by stable anchors) and publishes per-class match rates:
+| # | Title | Scope |
+|---|---|---|
+| [#10](https://github.com/roowus/TSPML/issues/10) | Player-only event filtering | race.started/checkpoint/finish fire per-car (player+ghosts); needs an isReplay accessor. |
+| [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform. |
+| [#36](https://github.com/roowus/TSPML/issues/36) | Port `api.tracks` to the portal | Implemented + verified in the harness; the portal needs the pre-bridge early-capture stub too. |
+| [#34](https://github.com/roowus/TSPML/issues/34) | Share the Tier-1 bridge patches | Portal + dev-harness each carry a copy; extract to `@tspml/shared` so they can't drift. |
 
-- **≥ ~80% game-logic match** → proceed with the auto-pipeline (M9) and the "resilient" positioning.
-- **< ~80%** → fall back to an **honestly-declared human-curated map** (per-update cost ≈ PML) and reposition TSPML as "better DX + better failure diagnostics, same per-update map cost as PML" until a better identity scheme (call-graph fingerprinting, string-literal co-occurrence) is found.
+> Not exhaustive — the full backlog is in [GitHub issues](https://github.com/roowus/TSPML/issues)
+> (~20 open, mostly small docs/API-drift fixes). This table is the subset that gates a
+> milestone.
+
+## Go/no-go gate (M1) — PASSED
+
+The "update-resilient mappings moat" thesis was validated: JS minified bundles CAN be structurally matched across versions (game-logic match **0.85** across 0.6.0→0.6.2). The auto-pipeline (M9) proceeds as **semi-automated, human-in-the-loop** (~85% auto, ~15% human review). The "fully automatic within hours" overclaim is retired.

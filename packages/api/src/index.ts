@@ -16,4 +16,12 @@ export type {
 
 export type { KeybindBinding, KeybindsRegistry } from './keybinds.js';
 
+export type {
+  RegisteredTrack,
+  TrackRegisterFailure,
+  TrackRegisterResult,
+  TrackRegistration,
+  TracksRegistry,
+} from './tracks.js';
+
 export type { TspmlApi, TspmlLogger } from './api.js';

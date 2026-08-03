@@ -5,22 +5,8 @@
   "generated": {
     "from": "M1 drift spike (tooling/mappings-pipeline)",
     "matcher": "report-sn-relaxed configuration (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5)",
-    "granularity": "module",
-    "note": "v1 module-level map. Symbol-level locators (exportRef/prototypeFn/callExpression) land in M3."
-  },
-  "targets": {
-    "Car": {
-      "anchor": { "literals": ["CreateCar", "ControlCar", "TestDeterminism"], "minHits": 3 },
-      "selector": { "kind": "factory" }
-    },
-    "Car.controlCar": {
-      "anchor": { "literals": ["CreateCar", "ControlCar", "TestDeterminism"], "minHits": 3 },
-      "selector": { "kind": "method", "name": "controlCar" }
-    },
-    "Car.createCar": {
-      "anchor": { "literals": ["CreateCar", "ControlCar", "TestDeterminism"], "minHits": 3 },
-      "selector": { "kind": "method", "name": "createCar" }
-    }
+    "granularity": "module + targets (M5-C)",
+    "note": "v1 module-level map. `targets` (stable name -> TargetSpec) are hand-curated + carried forward on regen; verify against the new build."
   },
   "modules": {
     "keep": {
@@ -1212,5 +1198,77 @@
       ],
       "reason": "no confident match (best shared anchors: 51/67)"
     }
-  ]
+  ],
+  "targets": {
+    "Car": {
+      "anchor": {
+        "literals": [
+          "CreateCar",
+          "ControlCar",
+          "TestDeterminism"
+        ],
+        "minHits": 3
+      },
+      "selector": {
+        "kind": "factory"
+      }
+    },
+    "Car.controlCar": {
+      "anchor": {
+        "literals": [
+          "CreateCar",
+          "ControlCar",
+          "TestDeterminism"
+        ],
+        "minHits": 3
+      },
+      "selector": {
+        "kind": "method",
+        "name": "controlCar"
+      }
+    },
+    "Car.createCar": {
+      "anchor": {
+        "literals": [
+          "CreateCar",
+          "ControlCar",
+          "TestDeterminism"
+        ],
+        "minHits": 3
+      },
+      "selector": {
+        "kind": "method",
+        "name": "createCar"
+      }
+    },
+    "TrackSelectionUi": {
+      "anchor": {
+        "literals": [
+          "Custom tracks",
+          "No custom tracks",
+          "Official tracks",
+          "Community tracks"
+        ],
+        "minHits": 3
+      },
+      "selector": {
+        "kind": "method",
+        "name": "constructor"
+      }
+    },
+    "TrackCodec": {
+      "anchor": {
+        "literals": [
+          "PolyTrack2",
+          "Part list does not exist",
+          "Part id is out of range",
+          "Failed to get canvas context"
+        ],
+        "minHits": 4
+      },
+      "selector": {
+        "kind": "factory"
+      }
+    }
+  }
 }

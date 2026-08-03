@@ -75,10 +75,10 @@ Module anchors use **string/numeric literals only** (not identifiers). INVOKE-st
 
 | Op | Across mods |
 |---|---|
-| `before` / `after` / `around` / `modifyArg` / `modifyReturn` / `modifyConstant` | **chain** — applied in **array order**; multiple patches on one target compose (tested). Ordered-by-`priority` is [#13](https://github.com/roowus/TSPML/issues/13) (the `priority` field is declared but not yet used). |
+| `before` / `after` / `around` / `modifyArg` / `modifyReturn` / `modifyConstant` | **chain** — applied in array order; multiple patches on one target compose (tested). Pass patches through `sortPatchesByPriority` (exported by `@tspml/transform`) to order by the `priority` field first — descending, stable within equal priority. |
 | `replace` | **single-winner** — two mods on the same target = load-time **CONFLICT ERROR** (both fail `conflict-replace-single-winner`, neither applied — implemented + tested). |
 
-**`around` semantics:** `proceed()` invokes the original body (preserving params + `this`); nested `around` hooks compose in array order. Priority-ordered nesting + short-circuit propagation are part of [#13](https://github.com/roowus/TSPML/issues/13).
+**`around` semantics:** `proceed()` invokes the original body (preserving params + `this`); nested `around` hooks compose in application order — with `sortPatchesByPriority`, the highest priority wraps outermost (so it runs first on the way in, last on the way out). Note the mirror image for `before`, which unshifts at the method head: the highest-priority patch is applied first and therefore ends up furthest from the head. Short-circuit propagation across nested `around` hooks is not specified yet.
 
 ## Failure behavior
 

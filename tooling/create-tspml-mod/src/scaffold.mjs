@@ -81,9 +81,18 @@ export default function entrypoint(api: TspmlApi): void {
   api.logger.log('[${id}] loaded');
 }
 `;
+  // Self-contained tsconfig (NOT extending the repo's base — the mod may live
+  // at any depth). Mirrors the strictness settings from tsconfig.base.json.
   const tsconfig = {
-    extends: "../../tsconfig.base.json",
-    compilerOptions: { outDir: "dist", rootDir: "src" },
+    compilerOptions: {
+      target: "ES2022",
+      module: "ESNext",
+      moduleResolution: "Bundler",
+      strict: true,
+      declaration: true,
+      outDir: "dist",
+      rootDir: "src",
+    },
     include: ["src"],
   };
   const readme = `# ${title}

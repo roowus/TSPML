@@ -193,12 +193,184 @@ Made the types package publishable so modders get autocomplete via `npm i -D @ts
 
 The actual `npm publish` is the one maintainer step (`npm login` + ownership); everything else is done.
 
-## Where we stand (2026-07-31)
+## 2026-08-01 — M9: regen / diff / verify pipeline (the moat, operationalized) ✅
 
-- **Engines + bridge, all unit-tested in isolation:** loader (47) · mappings (20) · transform (31) · portal rewrite (17) · api-bridge (14) — **129 tests green**, CI green.
-- **The portal plays PolyTrack end-to-end** (ADR-012/013) — a transformed, modded game reaches an actual race.
-- **The mod-loader loop is proven** (M4-B–F): **6 Tier-1 events** fire inside the running game — `car.control`, `car.created`, `race.started`, `track.afterLoad` (all headlessly verified) + `checkpoint.passed`, `race.finished` (wired, need real race progress) — flowing through the `EventBus` to subscribers, hash-gated.
-- **First registry works** (M4-G/H): `api.keybinds.register(...)` fires via a bridge-owned listener on the game iframe (verified). `window.__tspml` is now the full `api` object (`{events, keybinds, version}`).
-- **Real mod loading works** (M4-I): `@tspml/loader` loads a real mod package (`@tspml/demo-hud`) whose entrypoint receives the api and subscribes to events + registers a keybind — verified end-to-end. The full loop (transform → game event → bus → mod) is closed.
-- **Remaining delivery gap:** online (leaderboard/multiplayer) `502` through the proxy — issue #7, M8 (bot-protected `vps.kodub.com`; the extension is the resilient path). Non-blocking for local gameplay.
-- **Next:** finish M4 — more Tier-1 events (render/track/checkpoint) + registries (cars/blocks/audio) via the same transform+mappings path, then wire real mod loading into the portal.
+Built the missing half of the update-resilience story — the tooling that turns a
+PolyTrack version bump from a manual scramble into a one-command, human-in-the-loop
+review. Four new modules in `tooling/mappings-pipeline` (plain `.mjs`, matching the
+sibling `unpack`/`match`/`gen-map` scripts):
+
+- **`src/diff.mjs`** — the human-review core. Pure map-vs-map diff keyed by
+  `sourceModuleId` (the cross-version-stable id; see insight below). Reports module
+  relocations, stable-name moves, added/removed modules, confidence drops, newly
+  resolved/unresolved, a **target-impact** correlation, a risk level (`none`/`low`/
+  `high`), and a `formatDiff()` reviewer report.
+- **`src/verify-targets.mjs`** — the fail-closed anchor gate. Reads the unpacked new
+  bundle and confirms each carried-forward target's anchor literals still resolve
+  together in a module (`pass`/`ambiguous`/`fail`). This is what makes carrying the
+  `targets` section forward across a version bump *safe* — without it, a drifted
+  target would silently fail-closed at mod-load time.
+- **`src/fetch.mjs`** — downloads the new build's `main.bundle.js` (+ sim worker) from
+  the `app-polytrack.kodub.com` CDN into the gitignored `.cache/`, with an optional
+  `--expect-hash` pin that rejects a silent version swap.
+- **`scripts/regen.mjs`** — the orchestrator: `fetch → unpack → gen-map → diff →
+  verify`, printing a combined review report. Writes `*.candidate.json` (**never**
+  clobbers a committed map); exits non-zero on `HIGH` risk or any target `fail`.
+  Standalone `--diff` / `--verify` modes for reviewing an already-generated map.
+
+**Key insight — cross-version module identity.** A regen always matches the *same*
+fixed 0.6.0 renamed source against a new target, so every matched module carries a
+`sourceModuleId` (a 0.6.0 webcrack id) identical across versions. The diff keys
+modules by `sourceModuleId`, **not** the concept slug (which drifts with the scorer).
+`moduleId` is the thing that *relocates*. The `targets` section is carried forward
+verbatim, so it can't be diffed directly — `diff` correlates each target to its module
+by **max stable-name overlap** (a heuristic), while `verify-targets` is the
+**authoritative** all-literals check against the unpacked bundle.
+
+**Verified end-to-end against the real cached bundles** (the project's "run it
+yourself" practice):
+- *Reproducibility* — regenerating the 0.6.2 map and diffing vs committed: **56
+  matched, 0 relocated, risk NONE** (gen-map is deterministic; the diff correctly
+  reports zero drift).
+- *Real cross-version drift* — a 0.6.0-target candidate vs the 0.6.2 map: bundleHash
+  changed, **8 modules relocated, 49 stable names moved module**.
+- *Realistic HIGH-risk path* — when the Car module is unresolved in the candidate, all
+  3 targets flag `[UNRESOLVED]` → risk **HIGH** ("do not promote until re-verified").
+- *verify-targets on the real `v062-raw`* — all 3 targets (`Car`, `Car.controlCar`,
+  `Car.createCar`) resolve to module `5220`.
+- *fetch* — downloads 0.6.2 main, sha256 `8495…` **exactly matches the committed
+  bundleHash**, byte-for-byte identical to the cache; a wrong `--expect-hash` aborts.
+
+**37 unit tests** (diff + verify-targets + fetch-version-validation, CI-runnable —
+fixture maps + temp module dirs; no bundle needed). **185 tests green** total, build
+green. Pipeline README rewritten; `mappings-system.md` marked implemented;
+`*.candidate.json` gitignored so the promote workflow (`cp candidate → committed`)
+stays clean. ADR-014.
+
+**Adversarially reviewed (4-lens workflow: diff / verify-targets / fetch-legal /
+regen, each finding adversarially verified).** The review earned its keep: it caught a
+**blocker** — on the first regen of a new version, `gen-map` read carry-forward
+`targets` from `OUT` (the not-yet-written candidate) → ENOENT → silent catch → a
+**target-less candidate**, so `verify-targets` checked 0 targets and printed a
+misleading **"ALL TARGETS RESOLVE" + GREEN**; promoting would have dropped every
+mod-facing target. **Fixed at the root:** `gen-map` now reads targets from an explicit
+`GEN_PREV_MAP` baseline (passed by `regen`); `regen` additionally asserts
+(`assertTargetsCarried`) that the candidate keeps ≥ the baseline's targets — refusing
+to emit a target-less candidate; and `formatVerifications` no longer claims green on 0
+targets. Other confirmed findings fixed: `fetch` version-path traversal guard
+(`assertVersion`) + HTML/tiny-body rejection; `regen` `--out` clobber-committed guard;
+`diff` confidence-drop made scale-invariant (relative-only — weights span ~6–14000);
+the `verify-targets` 'ambiguous' note corrected (the locator picks the *first* module,
+not selector-disambiguated between modules); `modulesContaining` documented as
+intentionally conservative (distinct-literal count — a pass guarantees the runtime
+locator finds the anchor). Re-verified end-to-end on the real bundles: a full `regen`
+now reports `3 pass (of 3)` targets, not a vacuous 0.
+
+Honest scope retained: the bundle-dependent stages (`fetch`/`unpack`/`gen-map`/full
+`regen`) are local-only (webcrack + gitignored cache), like the M1 spike — they don't
+run in CI. The "candidate within hours" goal is now real for the ~85% the matcher
+auto-relocates; the residual still needs the human review this tooling surfaces. AST
+structural fingerprints (the next match-rate lever) remain future work.
+
+## 2026-08-01 — M7-C: Vite dev harness with scoped mod HMR ✅
+
+Completed **M7** (modder DX). Built `@tspml/dev-harness` — a Vite dev server that runs
+the real transformed game plus your mod with **scoped mod hot-reload**: save the mod's
+entrypoint and it hot-swaps in place while the game keeps running (no reload, no
+rebuild). Cuts the edit→see loop from "rebuild transform+api-bridge + full browser
+reload (game reboots)" to "save → instant".
+
+- **`game-proxy.ts`** — a Vite `configureServer` middleware serving the real game under
+  `/game/*`: fetches the CDN with the desktop origin forwarded, injects the
+  `polytrackModConfiguration` gate + `<base>` into the HTML, and AST-rewrites
+  `main.bundle.js` (hash-gated). This is the harness analog of the portal's `/api/proxy`
+  + service worker — but **simpler: no service worker** (Vite intercepts `/game/*`
+  in-process).
+- **`tracking-api.ts`** (the HMR enabler) — wraps the bridge `api` so every
+  `events.on`/`once` + `keybinds.register` the mod makes is recorded; `disposeAll()`
+  tears them down. Enables scoped mod HMR with **no change to the mod API** — the mod
+  uses `api` normally; the harness cleans up after it. Unit-tested (5 tests).
+- **`main.ts`** — boots the game iframe, exposes `window.__tspml`, runs the mod against a
+  tracked api, wires `import.meta.hot.accept` to swap the entrypoint on save.
+- The dev mod is aliased to its **source** (not dist) so Vite HMRs edits; point
+  `TSPML_DEV_MOD` at your own mod.
+
+**Headless-verified (`pnpm smoke`):** the transformed game boots → gate clears → a real
+race ("Summer 1", `0/3`, `00:00.000`) → bridge wired → dev mod loaded → `car.control`
+fires (×3) → **editing the mod source hot-swaps it (`modLoadCount++`) with the game
+un-reloaded** (`gameSurvivedHmr: true`). Vite's own log confirms the swap path:
+`[vite] hot updated: .../entrypoint.ts via /src/main.ts`.
+
+**Honest scope:** entrypoint logic (events/keybinds) hot-swaps; a mod-declared **mixin**
+change alters the bundle transform and needs a full reload (documented). The bridge
+patches are an intentional attributed copy of the portal's (extract to `@tspml/shared` so
+portal + harness share one source — [#34](https://github.com/roowus/TSPML/issues/34)).
+**190 tests green** (5 new).
+
+## 2026-08-01 — #12: the custom-tracks registry works ✅ (first content registry)
+
+`api.tracks` lets a mod hand over a PolyTrack import code and get a real entry in the
+player's **Custom tracks** list. It was the last plausible *content* registry (car
+styles and settings are frozen catalogs; audio is [#11](https://github.com/roowus/TSPML/issues/11)),
+so it is what **unblocks M10** — the PML importer needed at least one to exist.
+
+**How it reaches the game.** The registry drives two game objects the module locator
+cannot find, because they live past the **bootstrap wall** (the same wall #11 hits):
+
+- **track store** — captured as a constructor parameter of the track-selection UI
+  (module 8185). You can't locate the class, but you *can* catch the instance being
+  handed to a caller that is a real module.
+- **track codec** — an export of the track-data module (9117), used to parse the
+  import code and to reject a bad one.
+
+Both patches only read a reference out; neither changes game behaviour. Generalized as
+**instance capture** in [hook-system.md](../design/hook-system.md) — the technique is
+the reusable result here, and it is the most promising route for #11.
+
+**Two gotchas worth remembering.**
+
+1. **Anchor uniqueness is not optional.** The codec's first anchor set matched the
+   *wrong* module: `"PolyTrack2"` also appears in 6582 and `"Checkpoint has no
+   checkpoint order"` in 6762, so `fromExportString` was simply not a function. Fixed
+   with four literals at `minHits: 4` (`"Part id is out of range"` /
+   `"Failed to get canvas context"` are unique to 9117). `verify-targets` now passes
+   **5/5** targets, both new ones unambiguous.
+2. **Capture timing differs per target.** The store is captured late (menu build), but
+   the codec's module factory runs during **bundle init** — before the parent frame's
+   `load` handler installs `window.__tspml`. The codec capture was therefore hitting an
+   absent bridge and being dropped silently, and the registry never attached: half the
+   captures worked, which made it look like an anchor problem rather than a timing one.
+   Fixed with a **pre-bridge stub** injected ahead of the game's scripts that records
+   early captures into `window.__tspmlEarly` for `main.ts` to replay. The portal needs
+   the same stub before it can ship this — [#36](https://github.com/roowus/TSPML/issues/36).
+
+**Design calls** (all encoded in tests): a name collision is **refused** by default —
+the colliding track may be the player's own, so clobbering it is data loss; `overwrite`
+must be explicit. `persist` is **opt-in**, because the game's store writes to
+localStorage and a persisted mod track would outlive the mod. Registrations made before
+capture are **queued and drained on attach**, so a mod can register at `init`. Every
+game call is isolated into a typed failure — a bad code is `{ ok: false, reason:
+'invalid-code' }`, never a throw.
+
+**Headlessly verified against the live game** (`pnpm --filter @tspml/dev-harness
+smoke:tracks`, new): registry attached → a real code minted via the game's own codec →
+`api.tracks.register()` → track present in the **game's own** custom-track list →
+invalid code rejected as `invalid-code` → collision refused as `name-exists` →
+`overwrite: true` succeeds → `unregister` removes it from the game's list. The M7-C
+smoke still passes (HMR intact, `gameSurvivedHmr: true`), which matters because the
+tracking-api now also disposes a hot-swapped mod's tracks.
+
+**201 tests green** (11 new).
+
+## Where we stand (2026-08-01)
+
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (25) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **201 tests green**, CI green.
+- **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
+- **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
+- **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
+- **M7 ✅** — `create-tspml-mod` CLI + `@tspml/api` publish-ready + **Vite dev harness with scoped mod HMR**.
+- **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
+- **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
+- **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
+- **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches).
+- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
