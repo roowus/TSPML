@@ -8,6 +8,8 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 
 **Lifecycle:** `loader.preInit(api)` (before any game code; only place for global hooks), `loader.init(api)`, `loader.ready()` (main menu visible), `loader.onUnload()` (cleanup — fixes PML's missing-cleanup bug), `worker.init(api)`/`worker.message` (worker-context mods).
 
+**Cleanup is implemented** (#17) — `LoadResult.unload()` disposes every loaded mod in **reverse** load order, isolated per mod, idempotent, and awaited. A class-form mod implements `onUnload(api)`; a factory-form mod returns a disposer. Note the split: the loader *calls* mod cleanup, but does not *emit* `loader.onUnload` — `ModApi.events` is `on`/`off` only, so emitting is the host's job. See [events-and-registries.md](../api/events-and-registries.md#cleanup-how-a-mod-actually-unloads).
+
 **Events (grounded in real deobfuscated symbols):**
 - `physics.preStep` / `physics.postStep` (wired into the sim-worker tick — **see physics model below**)
 - `render.preRender` / `render.postRender` (Three.js render loop)

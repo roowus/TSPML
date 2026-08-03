@@ -427,3 +427,66 @@ portal.
 - **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
 - **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
 - **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
+
+## 2026-08-03 — #17: `onUnload` was declared, documented, and never called ✅
+
+`TspmlMod.onUnload` was on the base class. `loader.onUnload` was in the published
+event map. Three docs called it *"fixes PML's missing-cleanup bug."* Nothing ever
+called it.
+
+The reason is worth recording, because it is not "we forgot to wire it up." In
+`invokeMod`, the class instance was a **local variable** — constructed, run
+through `preInit`/`init`/`ready`, and then dropped on the floor when the function
+returned. The hook was unreachable *by construction*. No amount of wiring at the
+host level could have reached it; the object holding the method no longer existed.
+
+**A feature can be declared, typed, exported, and documented while being
+structurally impossible to invoke.** Nothing in the type system objects: the
+declaration is well-formed and the method is legitimately optional. The tests
+didn't object either — they asserted load behaviour, and load behaviour was
+correct. This is the third variant of the same failure this week (#25's silence,
+#19's contents-not-behaviour, this one's unreachability), and the shared root is
+that we verified the piece rather than the path through it.
+
+`LoadResult.unload()` now tears down what loaded. Four properties, each chosen
+against a specific way cleanup goes wrong, and each **mutation-checked** — I
+reintroduced the defect and watched the test go red before trusting it:
+
+- **Reverse load order.** A dependent must dispose before its dependency, or it
+  cleans up against state already released. (Un-reversing it also broke the
+  isolation test, which tells me the two are entangled in a way worth knowing.)
+- **Per-mod isolation.** A leaky mod throwing on the way out must not strand the
+  cleanup of every mod after it — the same fail-small rule as loading.
+- **Idempotent.** A page teardown and an explicit disable can race, and running
+  cleanup twice is precisely the double-free that cleanup exists to prevent.
+- **Awaited.** An async `onUnload` finishes before `unload()` resolves, so a host
+  emitting `loader.onUnload` afterwards can trust cleanup actually completed.
+
+Two entrypoint forms, each disposed the way it naturally can be. The class form
+has an instance, so `onUnload(api)` is called on it — and it now *receives* the
+api, so a mod can `events.off(...)` without having stashed a reference at init.
+The factory form has no instance at all, so it opts in by **returning** a
+disposer: the same convention `api.events.on` and `api.keybinds.register` already
+follow, rather than a third mechanism to learn.
+
+A mod that loads but exposes no cleanup reports `no-op`, distinct from
+`unloaded`. "Nothing to clean up" is a different claim from "cleanup ran," and an
+*absent* entry would read as "we lost track of this mod" — the wrong signal for a
+host surfacing results.
+
+**Deliberate split: the loader calls cleanup but does not emit the event.**
+`ModApi.events` is `on`/`off` only, so the loader has no emit capability by
+design, and giving it one to fire a single event would widen the capability
+surface handed to every mod. The host that owns the bus emits `loader.onUnload`
+around the call; `loadMods` exposes `unload()` for exactly that.
+
+demo-hud turned out to be the proof case: it was discarding the disposers that
+`on` and `register` already returned — leaking exactly what #17 describes, in our
+own example mod. It now returns a disposer that detaches both.
+
+61 loader tests green (8 new), build and lint clean. PR off `main`.
+
+**Still open on #17:** the portal has no unload *trigger* wired (`pagehide` /
+iframe reload), because that lives in `page.tsx`, which unmerged #38 and #39 both
+modify. Deferred rather than conflicted — the capability and its host entry point
+are in place, so the trigger is a small follow-up once the stack lands.
