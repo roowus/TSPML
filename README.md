@@ -17,12 +17,19 @@ A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/p
 ## Quick start (create a mod)
 
 ```bash
-npx create-tspml-mod my-cool-mod
+git clone https://github.com/roowus/TSPML.git
+node TSPML/tooling/create-tspml-mod/bin/create-tspml-mod.mjs my-cool-mod
 cd my-cool-mod
 pnpm install && pnpm build
 ```
 
-This scaffolds a working starter mod (mod.json + entrypoint + mixin). See [`tooling/create-tspml-mod/`](./tooling/create-tspml-mod/).
+This scaffolds a working starter mod (mod.json + entrypoint + mixin) that builds
+with nothing but `typescript` — the generated project has no dependency on this
+repo or on any unpublished package. See [`tooling/create-tspml-mod/`](./tooling/create-tspml-mod/).
+
+> **Not `npx create-tspml-mod` yet.** The CLI is not published to npm, so that
+> command 404s — the clone above is the working equivalent (#19). The one-liner
+> lands when the package ships.
 
 ## How it works
 
