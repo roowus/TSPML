@@ -2,9 +2,9 @@
 
 > Each milestone is independently useful. Status is tracked here and in [progress.md](./progress.md).
 
-## Current status (2026-08-01)
+## Current status (2026-08-02)
 
-The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** now works: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)), which unblocks M10. 201 unit tests, CI green.
+The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** now works: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)), which unblocks M10. All of that is now merged to `main` (no open PRs). 203 unit tests, CI green.
 
 | Milestone | Status | Outcome |
 |---|---|---|
@@ -30,7 +30,7 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | [#34](https://github.com/roowus/TSPML/issues/34) | Share the Tier-1 bridge patches | Portal + dev-harness each carry a copy; extract to `@tspml/shared` so they can't drift. |
 
 > Not exhaustive — the full backlog is in [GitHub issues](https://github.com/roowus/TSPML/issues)
-> (~20 open, mostly small docs/API-drift fixes). This table is the subset that gates a
+> (18 open, mostly small docs/API-drift fixes). This table is the subset that gates a
 > milestone.
 
 ## Go/no-go gate (M1) — PASSED
