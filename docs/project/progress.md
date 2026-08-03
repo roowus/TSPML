@@ -472,9 +472,80 @@ fix.
 
 **225 tests green** (22 new, all in the new `source/shared`), `pnpm -r build` clean.
 
-## Where we stand (2026-08-02)
+## 2026-08-03 — #11: the audio registry, and the blocker that wasn't ✅
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · shared (22) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **225 tests green**, CI green.
+`api.audio` overrides the game's real sounds. A mod passes a `key` and a `url`; the game's
+own `getBuffer("click")` then returns the mod's clip, and `unregister` brings the original
+back. Headlessly proven against the live game — the load-bearing number in
+`smoke:audio`'s output is the game's own lookup going **0.032s → 0.37s → 0.032s**.
+
+**The issue's premise was wrong, and finding that out was most of the work.** #11 was
+filed as "the audio manager is a bootstrap-scope local the module locator can't see", and
+the previous session's plan was a locator disambiguator: module 641 has four constructors,
+the locator takes `matched[0]`, so capturing from there needed new machinery. All true —
+and all unnecessary. Reading the bundle again with a different question ("who *receives*
+this object?" instead of "where is it *built*?") found the audio manager sitting at
+**parameter 3 of the track-selection UI's constructor** — parameter 5 of which is the
+TrackManager we already patch for #12. Same module (8185), same constructor, same inject.
+
+So #11 shipped with **no locator change, no new anchor, no mappings edit, and no
+disambiguator** — a background workflow designing that disambiguator was stopped rather
+than allowed to finish solving a problem that had evaporated. Confirmed three independent
+ways before writing code: the constructor's own field assignments (`w ← n`), all three
+`new Sr.A(...)` call sites, and whole-bundle uniqueness of the `getBuffer` / `playUIClick`
+/ `load` definitions. The habit worth keeping: **before building new capture machinery for
+a bootstrap object, read the parameter lists of the constructors already patched.**
+
+**The obvious implementation was a latent crash.** #11 and every doc referencing it said
+"override clips via the game's own `load()`". That would have shipped a guaranteed
+production failure: `load()` starts with `addResource()` on the loading-screen tracker,
+which throws `"Cannot add resources after loading is complete"` once boot finishes — and
+instance capture is late-binding by nature, so *every* mod call lands in exactly that
+window. Unit tests would have passed happily against a mock `load`.
+
+The registry **shadows the read path** instead: an own-property `getBuffer` on the captured
+instance that answers from the mod's map and delegates to the bound prototype method
+otherwise. Better on three counts beyond not crashing — `unregister` restores the original
+exactly (`delete` the own property), the game's resource tracker is untouched, and decoding
+runs through the game's *own* `AudioContext` so the buffer is guaranteed compatible with
+the graph that will play it. Generalized in
+[hook-system.md](../design/hook-system.md): prefer shadowing the accessor the game reads
+through over invoking the loader it read through at boot.
+
+**A mock that would have hidden the bug it was written to catch.** The api-bridge test's
+fake manager puts `getBuffer` on a **class prototype**, not an instance arrow property.
+With an instance property, `dispose()`'s `delete` would appear to restore correctly in
+tests while doing nothing against the real game — the mock's shape *is* the assertion.
+Paired with a test that asserts a throwing `load` spy is **never called**, so the
+`addResource` trap can't be walked back into.
+
+**One existing test failed and was right to be rewritten, not loosened.** The shared-package
+invariant "every payload that touches the bridge guards it" was pinned to the literal string
+`window.__tspml &&`; the combined track+audio capture spells its guard `window.__tspml)` as
+the head of a nested `if`. The assertion now matches the *property check* (`/window\.__tspml\s*(&&|\))/`)
+rather than one spelling of it. The two captures are also guarded **independently**, so an
+audio-side rename in a future game version cannot take the tracks capture down with it —
+enforced by a test.
+
+**HMR discipline matters more for audio than for tracks.** An overridden clip stays in the
+game's buffer lookup until unregistered, so a hot-swap that forgot would leave the previous
+mod's sounds playing with nothing owning them. The harness's tracking wrapper now records
+audio keys alongside track names, with a `res.key ?? a.key` fallback so an upstream shape
+change can't silently drop a disposal record.
+
+**The smoke synthesizes its own clip** — an 8 kHz mono WAV blob built in-page at a chosen
+0.37 s. No committed binary, no network, and a duration we picked, which is what makes
+"did the override land" checkable *by value* rather than by vibe. It needs
+`--autoplay-policy=no-user-gesture-required`: `decodeAudioData` wants a running context and
+a headless page never clicks anything. That browser-policy caveat is now documented on the
+public type — a clip can register successfully and stay inaudible until the player
+interacts, which is the game's suspended `AudioContext`, not a registry failure.
+
+**247 tests green** (22 new: 14 api-bridge · 6 dev-harness · 2 shared), `pnpm -r build` clean.
+
+## Where we stand (2026-08-03)
+
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (11) — **247 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -483,6 +554,6 @@ fix.
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
 - **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
-- **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
-- **Open:** #10 (player-only), #11 (audio — try instance capture next), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
-- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique — now a documented pattern with a shared home for its capture patches.
+- **#11 ✅** — audio registry: a mod's clip replaces a real game sound in **both** surfaces, via the *same* capture as `api.tracks`. Two content registries now work.
+- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
+- **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto.
