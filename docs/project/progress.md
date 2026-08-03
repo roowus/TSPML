@@ -427,3 +427,35 @@ portal.
 - **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
 - **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
 - **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
+
+## 2026-08-03 — #30 (partial) stub packages stop overstating themselves
+
+#30 lists five places where the repo claims more than it has. Took the three that
+are disjoint from the open PR stack; `source/shared` is excluded because #38 is
+actively implementing it (it now has real `bridge-patches` / `early-capture`
+sources), and the root README layout block is owned by #40/#44.
+
+**The root `workspaces` field was inert *and* wrong.** It listed four globs, omitted
+`environments/demo-mods/*` that `pnpm-workspace.yaml` includes, and pnpm never reads
+it — pnpm uses the yaml exclusively. So it was a second, disagreeing source of truth
+that could only ever mislead. Deleted rather than corrected: keeping it in sync buys
+nothing, since nothing consumes it. Verified by enumerating members before and after
+— 15 both times, identical list.
+
+**`tooling/cli` said "scaffolded".** It has no source, no bin, no tests — two
+metadata files. "Scaffolded" implies something to fill in; this is a reserved name.
+Both the README and the `package.json` description now say NOT IMPLEMENTED and point
+at `@tspml/mappings-pipeline` for the workflow people actually want.
+
+**`tests/` and `scripts/`** advertised a "shared test harness", "cross-package
+integration tests", and "repo and build helper scripts". None exist. Both READMEs now
+say empty-on-purpose and table where the real thing lives — plus why co-location is
+deliberate (pipeline scripts sit next to webcrack and `.cache/`; smokes next to the
+app they load), so the next person doesn't "fix" it by centralizing.
+
+No guard test for this one. It would need a new workspace package to hold a single
+assertion about README prose, which is disproportionate and would immediately
+contradict the "empty on purpose" note it lives next to.
+
+Still open on #30: the duplicated `TargetSpec`/`ModuleAnchor` TODOs in
+`source/loader/src/types.ts` and `source/transform/src/types.ts` — both wait on #38.
