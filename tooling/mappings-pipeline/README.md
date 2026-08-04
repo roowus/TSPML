@@ -179,12 +179,12 @@ it still works.
 ## Tests
 
 ```sh
-pnpm test    # 49 unit tests — CI-runnable, no bundle needed
+pnpm test    # 54 unit tests — CI-runnable, no bundle needed
 ```
 
-Covering `diff` (23), `verify-targets` (11), `fetch` (3), the webcrack-library guard
-(2, #5), the isolated-vm ABI branches (5, #2) and `regen`'s Node-invocation helper
-(5, #25). The pure logic is unit-tested with
+Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
+webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2) and `regen`'s
+Node-invocation helper (5, #25). The pure logic is unit-tested with
 fixture maps and temp module directories. The bundle-dependent stages (`fetch`,
 `unpack`, `gen-map`, the full `regen`) are local-only (webcrack + the gitignored
 `.cache/`), like the M1 spike tests in `source/transform`.
