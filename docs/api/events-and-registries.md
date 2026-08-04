@@ -91,8 +91,9 @@ api.blocks.registerBlock(id, categoryId, opts);
 
 api.cars.registerCarStyle(id, style);
 
-api.audio.registerSound(name, urls);           // absolute URLs
-api.audio.playSound(name, volume);
+api.audio.register({ key, url, overwrite? });  // ✅ implemented — see below
+api.audio.unregister(key);
+api.audio.list();
 
 api.tracks.register({ code, name?, author?, overwrite?, persist? }); // ✅ implemented — see below
 api.tracks.unregister(name);
@@ -113,7 +114,11 @@ api.settings.getSetting(id);                   // returns TYPED value (fixes PML
 > throws "model not found"). What IS viable:
 > - **`keybinds`** — bridge-owned parallel listener. ✅ **implemented** (M4-G/H; the one clean, fully-verifiable registry).
 > - **`tracks`** — reuse the import-by-code path. ✅ **implemented** ([#12](https://github.com/roowus/TSPML/issues/12); see below).
-> - **`audio`** — override existing clips via the game's own `load()` (needs an instance-capture transform). [#11](https://github.com/roowus/TSPML/issues/11)
+> - **`audio`** — override existing clips (and add new ones) by shadowing the audio
+>   manager's buffer lookup. ✅ **implemented** ([#11](https://github.com/roowus/TSPML/issues/11); see below).
+>   Note this ships *differently* than originally scoped: calling the game's own `load()`
+>   turned out to be a latent crash, so the registry owns the read path instead — see
+>   [hook-system.md](../design/hook-system.md).
 >
 > The **mixin system (M5, Tier 2)** is the escape hatch for content/behavior the
 > registries can't reach. See [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
@@ -156,11 +161,57 @@ Registrations made **before** the game has built its menu are queued and drained
 capture, so a mod can call `register` at `init` without knowing game lifecycle.
 
 > **How the game objects are reached.** The track store lives in the bundle's
-> *bootstrap*, past the wall the module locator can see (the same wall [#11](https://github.com/roowus/TSPML/issues/11)
-> hits for audio). Its **callers** are real modules, so the bridge captures the live
-> instance from a constructor parameter instead of locating the class — see
-> [hook-system.md](../design/hook-system.md). Both capture patches only read a value
-> out; neither changes game behavior.
+> *bootstrap*, past the wall the module locator can see. Its **callers** are real modules,
+> so the bridge captures the live instance from a constructor parameter instead of locating
+> the class — see [hook-system.md](../design/hook-system.md). Both capture patches only
+> read a value out; neither changes game behavior.
+
+### `api.audio` — sound overrides (implemented)
+
+A mod hands over a `key` and a `url`. The registry fetches the URL, decodes it with the
+**game's own `AudioContext`**, and serves it wherever the game asks its audio manager for
+that key — so overriding a builtin changes a real game sound, and an unknown key simply
+adds a new one.
+
+```ts
+const res = await api.audio.register({
+  key: 'click',                     // a builtin key to override, or any new key of your own
+  url: 'https://example.com/x.wav', // fetched from the game frame; blob:/data: work too
+  overwrite: false,                 // default false: refuse to clobber another mod's key
+});
+if (!res.ok) console.warn(res.reason); // 'fetch-failed' | 'decode-failed' | 'no-audio-context'
+                                       // | 'key-exists' | 'not-ready'
+else console.log(res.key, res.duration, res.replacedBuiltin);
+
+api.audio.unregister('click'); // true if it was ours — the game's ORIGINAL clip comes back
+api.audio.list();              // RegisteredAudio[] — what THIS session registered
+```
+
+The **builtin keys** (v0.6.2, read off the game's own boot sequence):
+`music`, `click`, `engine`, `suspension`, `tires`, `collision`, `skidding`,
+`editor_edit`, `checkpoint`, `record`, `position_tick`.
+
+Four behaviors worth knowing:
+
+- **Failures are typed, never thrown.** A 404 is `'fetch-failed'` with the status in
+  `detail`; undecodable bytes are `'decode-failed'`. Nothing here throws into your mod.
+- **A key collision is refused by default.** Two mods overriding `engine` is a real
+  scenario, and the second silently winning is a support nightmare. Pass `overwrite: true`
+  to mean it.
+- **`unregister` restores the game's original**, it does not leave a hole — the registry
+  shadows the lookup rather than replacing the game's buffer.
+- **Autoplay policy is the browser's, not ours.** A clip can register successfully and
+  still be inaudible until the player interacts with the page. That is the game's
+  `AudioContext` being suspended, not a registry failure — `register` reporting
+  `ok: true` with a real `duration` means the bytes decoded.
+
+Registrations made **before** the game has built its menu are queued and drained on
+capture, so a mod can call `register` at `init` without knowing game lifecycle.
+
+> Proven headlessly against the real game: `scripts/smoke-audio.mjs` in
+> [`@tspml/dev-harness`](../../environments/dev-harness) synthesizes a clip of a chosen
+> length, registers it over `click`, and asserts the **game's own** buffer lookup returns
+> it — then that `unregister` brings the original duration back.
 
 ## Capability scoping
 

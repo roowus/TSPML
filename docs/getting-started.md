@@ -10,8 +10,12 @@
 ## 1. Scaffold a mod
 
 ```bash
-npx create-tspml-mod my-first-mod
+node TSPML/tooling/create-tspml-mod/bin/create-tspml-mod.mjs my-first-mod
 ```
+
+> **Why not `npx create-tspml-mod`?** The CLI is not on npm yet, so `npx` 404s
+> (#19). Run it from the clone you made above; the one-liner lands when the
+> package ships. The mod it generates is fully standalone either way.
 
 This creates `./my-first-mod/` with:
 
@@ -20,14 +24,21 @@ This creates `./my-first-mod/` with:
 | `mod.json` | The manifest (id, version, targets, mixins). The loader parses this. |
 | `src/entrypoint.ts` | Your mod's code — a factory `(api) => {}` that subscribes to events + registers keybinds. |
 | `mixins.json` | A starter Tier-2 mixin targeting the stable name `Car` (mappings-resolved, fail-closed). |
-| `tsconfig.json` | TypeScript config (extends the repo's base). |
+| `types/tspml-api.d.ts` | A local stand-in for `@tspml/api` (also unpublished), covering the members the starter uses. Delete it and import from `@tspml/api` once that ships. |
+| `tsconfig.json` | Self-contained TypeScript config — it does **not** extend the repo's base, so the mod builds at any path outside this repo. |
+
+Then `cd my-first-mod && pnpm install && pnpm build`. The only dependency is
+`typescript`; the build emits `dist/src/entrypoint.js`, which is what `mod.json`'s
+`entrypoint` points at.
 
 ## 2. Write your mod
 
 Open `src/entrypoint.ts`. The default scaffold subscribes to `car.control` + registers a `KeyH` keybind. Let's make it do something visible — log a message on every checkpoint:
 
 ```ts
-import type { TspmlApi } from '@tspml/api';
+// The scaffold imports the local stand-in, not '@tspml/api' — that package is
+// not published yet. Swap the path when it is.
+import type { TspmlApi } from '../types/tspml-api.js';
 
 export default function entrypoint(api: TspmlApi): void {
   // Fire on every checkpoint passed (during a race).
@@ -74,7 +85,10 @@ pnpm install
 pnpm build
 ```
 
-This compiles `src/entrypoint.ts` → `dist/entrypoint.js`.
+This compiles `src/entrypoint.ts` → `dist/src/entrypoint.js` (under `dist/src`,
+not `dist`, because `rootDir` is `.` so that `types/` is inside it). That path is
+exactly what `mod.json`'s `entrypoint` field points at — a test in the scaffold
+package derives one from the other so they cannot drift.
 
 ## 4. Run in the portal
 
