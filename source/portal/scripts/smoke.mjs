@@ -5,11 +5,16 @@
 //   pnpm --filter @tspml/portal smoke                    # this script
 //
 // PASS requires: the transformed bundle ran ([TSPML] marker logged), the
-// "unofficial version" gate cleared (pastGate), the bridge is wired, AND the
+// "unofficial version" gate cleared (pastGate), the bridge is wired, the
 // verifiable Tier-1 events fired during the auto-started race — car.control,
-// car.created, race.started, track.afterLoad. checkpoint.passed / race.finished
-// need the player to actually pass a checkpoint / finish, so they are reported
-// but not asserted (expect 0 in this harness).
+// car.created, race.started, track.afterLoad — AND the portal's own sidebar
+// reflects the load (#41). checkpoint.passed / race.finished need the player to
+// actually pass a checkpoint / finish, so they are reported but not asserted
+// (expect 0 in this harness).
+//
+// TWO FRAMES, and the distinction matters: the game runs in the /api/proxy
+// iframe (`gameFrame`), the portal chrome in the main frame (`page.mainFrame()`).
+// Asserting only on the former is how a broken sidebar stayed green.
 //
 // KEY: events like car.created / track.afterLoad fire at RACE SETUP (early),
 // so we subscribe to ALL events the moment the portal exposes window.__tspml —
@@ -130,6 +135,64 @@ const dom = await gameFrame.evaluate(() => {
     bodyText: text.slice(0, 200),
   };
 });
+// #41: assert the PORTAL'S OWN UI, not just the game frame. Everything above
+// reads `gameFrame`; the sidebar lives in the MAIN frame, which this smoke used
+// to never look at. A dropped `setSafetyStatus` (exactly what the #32/#33
+// collision nearly shipped) compiles fine and leaves every assertion above
+// green — the sidebar just silently stops saying anything.
+//
+// The ids are hardcoded on purpose. "the list is non-empty" is satisfied by the
+// placeholder row too ("loading…" / "waiting for game…"), so a regression to the
+// placeholder would pass. Naming what the portal actually loads is what makes
+// this an assertion rather than a shape check.
+const EXPECTED_MOD_IDS = ["tspml-example-hud", "tspml-checkpoint-counter"];
+
+const sidebar = await page.mainFrame().evaluate((expected) => {
+  const aside = document.querySelector('aside[aria-label="Mods"]');
+  if (!aside) return { present: false, text: "", modIds: [], statuses: [] };
+  const text = aside.innerText || "";
+  // Each mod row renders its id in a <code> and its load status in the last span.
+  const rows = Array.from(aside.querySelectorAll("li"));
+  const modIds = rows
+    .map((li) => li.querySelector("code"))
+    .filter(Boolean)
+    .map((el) => el.textContent.trim());
+  const statuses = rows
+    .map((li) => li.querySelector("code") && li.querySelector("span"))
+    .filter(Boolean)
+    .map((el) => el.textContent.trim());
+  const row = (label) => {
+    const m = text.match(new RegExp(`^${label}:\\s*(.+)$`, "m"));
+    return m ? m[1].trim() : null;
+  };
+  return {
+    present: true,
+    text: text.slice(0, 400),
+    modIds,
+    statuses,
+    missingIds: expected.filter((id) => !modIds.includes(id)),
+    // Placeholder copy from page.tsx's empty branch — if either survives to
+    // here, the list never populated.
+    placeholderVisible: /loading…|waiting for game…/.test(text),
+    modsRow: row("mods"),
+    safetyRow: row("safety"),
+  };
+}, EXPECTED_MOD_IDS);
+
+// The safety row renders only when `safetyStatus` is non-empty, so its presence
+// IS the regression test for the dropped setter. Require a real classification,
+// not merely a non-empty string.
+const sidebarOk =
+  sidebar.present &&
+  !sidebar.placeholderVisible &&
+  (sidebar.missingIds || []).length === 0 &&
+  sidebar.statuses.length > 0 &&
+  sidebar.statuses.every((s) => s === "loaded") &&
+  !!sidebar.modsRow &&
+  sidebar.modsRow.startsWith("✓") &&
+  !!sidebar.safetyRow &&
+  /vanillaSafe/.test(sidebar.safetyRow);
+
 const menuShot = SHOT.replace(/\.png$/, "-menu.png");
 await page.screenshot({ path: menuShot });
 
@@ -218,9 +281,11 @@ try {
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
 const c = (e) => counts[e] || 0;
 // HARD requirements: gate cleared, bundle ran, bridge wired, the four verifiable
-// Tier-1 events fired, AND the keybind registry fired. checkpoint.passed /
-// race.finished are reported only (need real race progress).
+// Tier-1 events fired, the keybind registry fired, AND the portal's own sidebar
+// reflects the load (#41). checkpoint.passed / race.finished are reported only
+// (need real race progress).
 const pass =
+  sidebarOk &&
   dom.pastGate &&
   markerLogs.length > 0 &&
   bridgeWired &&
@@ -255,6 +320,16 @@ console.log(
           "track.afterLoad": c("track.afterLoad"),
           "checkpoint.passed": c("checkpoint.passed"),
           "race.finished": c("race.finished"),
+        },
+        sidebarOk,
+        sidebar: {
+          present: sidebar.present,
+          modIds: sidebar.modIds,
+          statuses: sidebar.statuses,
+          missingIds: sidebar.missingIds,
+          placeholderVisible: sidebar.placeholderVisible,
+          modsRow: sidebar.modsRow,
+          safetyRow: sidebar.safetyRow,
         },
         canvasSize: dom.canvasSize,
         badgePresent: dom.badgePresent,
