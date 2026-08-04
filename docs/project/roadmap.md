@@ -2,9 +2,9 @@
 
 > Each milestone is independently useful. Status is tracked here and in [progress.md](./progress.md).
 
-## Current status (2026-08-02)
+## Current status (2026-08-03)
 
-The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** works on the flagship surface: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)) **in the portal**, not just the harness ([#36](https://github.com/roowus/TSPML/issues/36)) — which unblocks M10. The two surfaces' injections now come from one package, [`@tspml/shared`](../../source/shared) ([#34](https://github.com/roowus/TSPML/issues/34)), so they can no longer drift. All of that is merged to `main` (no open PRs). 225 unit tests, CI green.
+The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). **Two content registries** now work on the flagship surface: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)) **in the portal**, not just the harness ([#36](https://github.com/roowus/TSPML/issues/36)), and `api.audio` replaces the game's real sounds ([#11](https://github.com/roowus/TSPML/issues/11)) — both verified by committed headless smokes against the live game. Together they unblock M10. The two surfaces' injections come from one package, [`@tspml/shared`](../../source/shared) ([#34](https://github.com/roowus/TSPML/issues/34)), so they can no longer drift — and #11 rode the *same* capture patch as #12, needing no new anchor or locator work. 247 unit tests, CI green.
 
 | Milestone | Status | Outcome |
 |---|---|---|
@@ -18,7 +18,7 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | **M7 — Dev harness + scaffold + types** | ✅ Done | `create-tspml-mod` CLI (one-command scaffolding); `@tspml/api` publish-ready (types for modder autocomplete); **`@tspml/dev-harness`** — Vite dev server that proxies + transforms the real game in-process (no service worker) and **hot-swaps the mod entrypoint on save** while the game keeps running. Headlessly verified (game boots, gate clears, Tier-1 events fire, mod hot-reloads, game survives). |
 | **M8 — Online/origin handling** | 🚧 Blocked | Root cause found: `vps.kodub.com` is **bot-protected** (bot/TLS-fingerprint drop, not just origin). The **extension path** (real browser on kodub.com origin) is the resilient fix. |
 | **M9 — Auto-mappings pipeline** | ✅ Done | `regen.mjs` orchestrates **fetch → unpack → gen-map → diff → verify-targets**: a one-command candidate-map regen + human-review report (`*.candidate.json`, never clobbers committed). Pure `diff`/`verify-targets` logic unit-tested (26 tests); validated end-to-end on real 0.6.0/0.6.2 bundles. |
-| **M10 — PML narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry: **`api.tracks` is now it** ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code, verified against the live game). Car-styles/settings remain non-viable (frozen catalogs); audio is [#11](https://github.com/roowus/TSPML/issues/11). |
+| **M10 — PML narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry; it now has **two**: `api.tracks` ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code) and `api.audio` ([#11](https://github.com/roowus/TSPML/issues/11) — sound overrides, superseding PML's `soundManager`), both verified against the live game. Car-styles/settings remain non-viable (frozen catalogs). |
 | **M11 — Physics WASM patching** | 🆕 Planned | **Newly identified capability gap ([#43](https://github.com/roowus/TSPML/issues/43)).** PML `v0.6.2` shipped `registerPhysicsMixin` (byte-offset `PATCH_F32`/`PATCH_I32` into `polytrack_physics.wasm`); TSPML has **no** answer. Physics tuning is a headline mod category and anchor discipline cannot reach WASM constants. See [pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md). |
 
 ## Strategy correction (2026-08-03)
@@ -54,12 +54,15 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 | # | Title | Scope |
 |---|---|---|
 | [#10](https://github.com/roowus/TSPML/issues/10) | Player-only event filtering | race.started/checkpoint/finish fire per-car (player+ghosts); needs an isReplay accessor. |
-| [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform — now a documented pattern (`@tspml/shared`, [hook-system.md](../design/hook-system.md)) rather than a one-off. |
+| [#25](https://github.com/roowus/TSPML/issues/25) | CI doesn't run the headless smokes | Three committed smokes (`smoke`, `smoke:tracks`, `smoke:audio`) prove the registries against the real game, but only run locally. |
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
 
-Closed since the last update: [#36](https://github.com/roowus/TSPML/issues/36) (`api.tracks`
-now attaches in the portal, verified by a committed smoke against the live game) and
-[#34](https://github.com/roowus/TSPML/issues/34) (both injections live in
+Closed since the last update: [#11](https://github.com/roowus/TSPML/issues/11) (`api.audio` —
+sound overrides, shipped **not** via the game's `load()` as the issue proposed: that call
+throws `"Cannot add resources after loading is complete"` post-boot, so the registry shadows
+the manager's buffer lookup instead), [#36](https://github.com/roowus/TSPML/issues/36)
+(`api.tracks` now attaches in the portal, verified by a committed smoke against the live
+game) and [#34](https://github.com/roowus/TSPML/issues/34) (both injections live in
 [`@tspml/shared`](../../source/shared); the extraction also fixed the drift it was about —
 the portal had been missing the two track-capture patches entirely).
 

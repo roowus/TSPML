@@ -14,8 +14,8 @@ import { describe, expect, it } from "vitest";
 import type { Patch } from "@tspml/transform";
 import {
   BRIDGE_PATCHES,
+  REGISTRY_CAPTURE_PATCHES,
   TIER1_BRIDGE_PATCHES,
-  TRACK_CAPTURE_PATCHES,
 } from "../src/bridge-patches.js";
 
 /** Every JS source string a patch carries, labelled for readable failures. */
@@ -38,8 +38,8 @@ function describeSelector(patch: Patch): string {
 }
 
 describe("BRIDGE_PATCHES composition", () => {
-  it("is Tier-1 followed by the track captures, with nothing dropped", () => {
-    expect(BRIDGE_PATCHES).toEqual([...TIER1_BRIDGE_PATCHES, ...TRACK_CAPTURE_PATCHES]);
+  it("is Tier-1 followed by the registry captures, with nothing dropped", () => {
+    expect(BRIDGE_PATCHES).toEqual([...TIER1_BRIDGE_PATCHES, ...REGISTRY_CAPTURE_PATCHES]);
   });
 
   it("ships the badge + the six Tier-1 emits", () => {
@@ -61,11 +61,48 @@ describe("BRIDGE_PATCHES composition", () => {
     }
   });
 
-  it("captures both objects the track registry needs", () => {
-    expect(TRACK_CAPTURE_PATCHES).toHaveLength(2);
-    const all = TRACK_CAPTURE_PATCHES.map((p) => injectSources(p)[0]?.source ?? "").join("\n");
+  /**
+   * Three captures from two patches: the track-selection constructor yields both the
+   * track manager and the audio manager, and the codec comes from its own module
+   * factory. A count of 2 with 3 capture calls is the point, not an oversight.
+   */
+  it("captures all three objects the registries need", () => {
+    expect(REGISTRY_CAPTURE_PATCHES).toHaveLength(2);
+    const all = REGISTRY_CAPTURE_PATCHES.map((p) => injectSources(p)[0]?.source ?? "").join("\n");
     expect(all).toContain("captureTrackManager");
     expect(all).toContain("captureTrackCodec");
+    expect(all).toContain("captureAudioManager");
+  });
+
+  /**
+   * The audio manager (#11) reaches us from the SAME constructor as the track
+   * manager, so it rides that patch rather than adding an anchor. If a future edit
+   * splits them apart, this fails and the split has to be deliberate.
+   */
+  it("captures the audio manager from the track-selection constructor", () => {
+    const uiPatch = REGISTRY_CAPTURE_PATCHES.find((p) =>
+      p.target.anchor.literals.includes("Custom tracks"),
+    );
+    expect(uiPatch).toBeDefined();
+    const source = injectSources(uiPatch as Patch)[0]?.source ?? "";
+    expect(source).toContain("captureAudioManager");
+    // Both captures in one inject, on one constructor.
+    expect(source).toContain("captureTrackManager");
+    expect(uiPatch?.target.selector).toEqual({ kind: "method", name: "constructor" });
+  });
+
+  /**
+   * Each capture is independently guarded. Sharing one inject must not mean that a
+   * missing/renamed `captureAudioManager` takes the TRACK capture down with it —
+   * that would turn an audio-only game update into a tracks regression.
+   */
+  it("guards each capture separately so one missing hook cannot break the other", () => {
+    const uiPatch = REGISTRY_CAPTURE_PATCHES.find((p) =>
+      p.target.anchor.literals.includes("Custom tracks"),
+    );
+    const source = injectSources(uiPatch as Patch)[0]?.source ?? "";
+    expect(source).toContain("window.__tspml.captureTrackManager)");
+    expect(source).toContain("window.__tspml.captureAudioManager)");
   });
 });
 
@@ -114,7 +151,12 @@ describe("inject payloads", () => {
     expect(bridgeUsers).toHaveLength(sources.length - 1);
     for (const { label, source } of bridgeUsers) {
       expect(source, `${label} lacks a typeof window guard`).toContain("typeof window");
-      expect(source, `${label} lacks a __tspml presence check`).toContain("window.__tspml &&");
+      // Match the GUARD, not one spelling of it: `window.__tspml &&` (a flat
+      // condition) and `window.__tspml)` (the head of a nested if, which the
+      // shared track+audio capture uses) are equally valid presence checks.
+      expect(source, `${label} lacks a __tspml presence check`).toMatch(
+        /window\.__tspml\s*(&&|\))/,
+      );
     }
   });
 
@@ -179,7 +221,7 @@ describe("module anchors", () => {
    * required — do not loosen this without re-verifying against a real bundle.
    */
   it("pin the track codec to all four of its literals", () => {
-    const codec = TRACK_CAPTURE_PATCHES.find((p) =>
+    const codec = REGISTRY_CAPTURE_PATCHES.find((p) =>
       p.target.anchor.literals.includes("PolyTrack2"),
     );
     expect(codec).toBeDefined();
