@@ -33,7 +33,18 @@ Source module `1223.js` (identifiers `controlCar`, `carState`, `createCar`, `car
 
 - **The moat is real but partial.** Auto-matching relocates the large majority of game-logic symbols from strings/numbers alone. This justifies the mappings-centric design — **proceed with the auto-pipeline (M9)**.
 - **"Fully automatic within hours" is retired.** The honest model is **semi-automated**: the pipeline proposes ~85% of matches; a human reviews/fixes the residual ~15% via the diff tool. Update the marketing accordingly ("better DX + better diagnostics + **semi-automated** map updates").
-- **The residual ~15% are low-anchor modules** (1–2 string literals). Recovering more needs **AST structural fingerprints** (function arity, call-graph shape, property-access patterns) — a clear M9 work item, not yet built. A projected ceiling with AST is ~90%+; the last ~10% are modules that genuinely changed between versions and will always need human eyes.
+- ~~**The residual ~15% are low-anchor modules** (1–2 string literals).~~ **Corrected
+  2026-08-04 — this diagnosis was wrong.** Measuring the residual directly (see
+  [`structural-fingerprints.md`](structural-fingerprints.md)) shows all 10 unmatched
+  game-logic modules are rejected by the **margin** gate, not by anchor scarcity: two have
+  the *correct* target already in first place and are discarded for leading by 1.15×/1.19×
+  instead of 1.25×, five are exact ties, and one has 67 anchors with 51 shared. So AST
+  structure's job is **adjudicating ties anchors already surfaced**, not reaching modules
+  anchors cannot see. Built and measured: **0.848 → 0.939**, six promotions, zero
+  regressions. Note that simply lowering the margin is *not* the fix — it would admit the
+  exact ties on coin-flip evidence. The four still-unresolved cases are small enum-shaped
+  modules where a shape histogram saturates; separating them needs call-graph edges between
+  already-matched modules, which is the open remainder of #1.
 
 ## Caveats / what was NOT tested
 

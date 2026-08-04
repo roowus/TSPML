@@ -105,14 +105,33 @@ diff targets directly. Instead:
 Both are needed: the diff tells you what to look at; verify-targets tells you whether
 it still works.
 
+## Raising the match rate: structural fingerprints (#1)
+
+`src/fingerprint.mjs` parses a module with `@babel/parser` and scores 34 **rename-invariant**
+shape facts (function arity distribution, control-flow mix, nesting depth, computed-vs-static
+member access), compared by cosine. It is a **tie-breaker for the matcher, not a matcher** —
+it may only promote a candidate the lexical scorer already ranked, and never overrides a
+decisive lexical win.
+
+Measuring the residual retired #1's premise. The 10 unmatched game-logic modules are *all*
+rejected by the **margin** gate, not by anchor scarcity — two have the correct target already
+in first place, discarded for leading by 1.15× instead of 1.25×, and one has 67 anchors with
+51 shared. Structure adjudicates the ties: **game-logic 0.848 → 0.939**, six promotions (all
+hand-verified), zero regressions, ~540 ms for all 421 modules.
+
+Not yet wired into `gen-map.mjs` — doing so changes which targets a candidate map proposes,
+so it wants its own PR with a full regen diff. Full write-up, including the four cases that
+remain unresolved and why:
+[`docs/research/structural-fingerprints.md`](../../docs/research/structural-fingerprints.md).
+
 ## Tests
 
 ```sh
-pnpm test    # 26 unit tests (diff + verify-targets) — CI-runnable, no bundle needed
+pnpm test    # 55 unit tests — CI-runnable, no bundle needed
 ```
 
-The pure `diff` and `verify-targets` logic is fully unit-tested with fixture maps and
-temp module directories. The bundle-dependent stages (`fetch`, `unpack`, `gen-map`,
+The pure `diff` (23), `verify-targets` (11), `fetch` (3) and `fingerprint` (18) logic is
+fully unit-tested with fixture maps and temp module directories. The bundle-dependent stages (`fetch`, `unpack`, `gen-map`,
 the full `regen`) are local-only (webcrack + the gitignored `.cache/`), like the M1
 spike tests in `source/transform`.
 
