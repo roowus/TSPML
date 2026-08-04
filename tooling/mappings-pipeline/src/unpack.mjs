@@ -10,6 +10,7 @@
 import { readFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { webcrack } from "webcrack";
+import { sandboxOptions } from "./sandbox.mjs";
 
 async function countJs(dir) {
   let n = 0;
@@ -39,7 +40,7 @@ const code = await readFile(input, "utf8");
 process.stderr.write(`webcrack: ${input} (${code.length} bytes) -> ${outDir}\n`);
 
 const t0 = Date.now();
-const result = await webcrack(code);
+const result = await webcrack(code, sandboxOptions());
 await mkdir(outDir, { recursive: true });
 await result.save(outDir);
 const { n, bytes } = await countJs(outDir);
