@@ -17,6 +17,7 @@
     "@tspml/demo-hud": "workspace:*",
     "@tspml/loader": "workspace:*",
     "@tspml/mappings": "workspace:*",
+    "@tspml/shared": "workspace:*",
     "@tspml/transform": "workspace:*"
   },
   "devDependencies": {

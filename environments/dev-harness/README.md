@@ -59,13 +59,12 @@ The entrypoint must default-export a factory `(api) => { … }` (see
   (hash-gated via `@tspml/transform` + `@tspml/mappings`). This is the harness
   equivalent of the portal's `/api/proxy` route + service worker — but **simpler: no
   service worker** (Vite intercepts `/game/*` in-process).
-- **`src/bridge-patches.ts`** — the Tier-1 bridge patches (badge + 6 event emits) plus the
-  two **capture** patches that hand the registry the game's track store + codec
-  ([#12](https://github.com/roowus/TSPML/issues/12)). The event patches are an
-  intentional, attributed copy of the portal's `demo-transform.ts` patches (TODO: extract
-  to `@tspml/shared` so portal + harness share one source —
-  [#34](https://github.com/roowus/TSPML/issues/34)); the capture patches are
-  harness-only until [#36](https://github.com/roowus/TSPML/issues/36).
+- **[`@tspml/shared`](../../source/shared)** — *not* in this package: the Tier-1 bridge
+  patches (badge + 6 event emits), the two **capture** patches that hand the registry the
+  game's track store + codec ([#12](https://github.com/roowus/TSPML/issues/12)), and the
+  pre-bridge early-capture stub all live there, so the harness and the portal cannot drift
+  ([#34](https://github.com/roowus/TSPML/issues/34) — they already had). The harness owns
+  only the Vite middleware that applies them.
 - **`src/tracking-api.ts`** — wraps the bridge `api` so every `events.on`/`once` +
   `keybinds.register` the mod makes is recorded; `disposeAll()` tears them down. This is
   what makes scoped mod HMR possible with **no change to the mod API** — the mod uses

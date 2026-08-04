@@ -59,6 +59,31 @@ properties make it safe and worth generalizing:
   another module, so that target needs four literals with `minHits: 4`. See
   [mappings-system.md](./mappings-system.md).
 
+#### The capture window opens before the bridge exists
+
+A capture patch runs whenever *its* module runs, and that can be **earlier than the
+surface's bridge**. The two `api.tracks` captures straddle this: the track store is
+handed over late (when the game builds its menu, comfortably after the host page's
+`load` handler), but the **codec's module factory runs during bundle init** — before
+`window.__tspml` exists.
+
+The consequence is a uniquely misleading failure. The late capture succeeds, the early
+one hits an absent bridge and is dropped by its own `if (window.__tspml && …)` guard,
+and the registry never attaches — so the symptom is "one of two captures silently
+missing", not an error anywhere.
+
+The fix is a **pre-bridge stub** injected ahead of the game's scripts, standing up a
+minimal `window.__tspml` whose capture functions only record; the host replays what it
+recorded when it installs the real bridge. Both live in
+[`@tspml/shared`](../../source/shared) (`EARLY_CAPTURE_SCRIPT_TAG` / `readEarlyCaptures`)
+so no surface can forget one. Generalizing: **any** new instance capture must ask where
+its target module runs relative to the bridge, and if the answer is "possibly earlier",
+it belongs in the stub too.
+
+> The portal's committed smoke reports which captures arrived early
+> (`scripts/smoke-tracks.mjs`); in practice it is the codec, empirically confirming the
+> stub is load-bearing rather than defensive.
+
 ## Tier 2 — mixin surgery (escape hatch)
 
 Declarative function surgery against **stable names**. Operations (most → least surgical — Fabric's guiding rule):
