@@ -676,6 +676,66 @@ that never fails against the bug it describes is decoration.
 - **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
 - **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto.
 
+## 2026-08-03 — #19: the scaffold was unusable outside this monorepo ✅
+
+`create-tspml-mod` printed two commands. The first one died:
+
+```
+ERR_PNPM_WORKSPACE_PKG_NOT_FOUND  "@tspml/api@workspace:*" is in the
+dependencies but no package named "@tspml/api" is present in the workspace
+```
+
+and `mod.json` pointed `entrypoint` at `entrypoint.js`, a path no build has ever
+emitted. So the advertised getting-started path was broken end to end, from the
+first command to the artifact the loader would look for.
+
+**Every scaffold test passed the entire time.** This is the same shape as #25 and
+worth stating as a rule: those four tests assert on the *contents* of generated
+files, and the contents were correct. What was broken was what happened when you
+ran them. **Asserting that generated text is right is not asserting that the
+generated project works** — the only check that would have caught this is one
+that runs the real compiler against a real scaffold on disk, which the suite now
+does.
+
+The fix is broader than the issue title. Dropping `workspace:` is not enough:
+`@tspml/api` is unpublished, so depending on it by **any** range breaks install
+for an external author. The scaffold therefore ships `types/tspml-api.d.ts`, a
+hand-written stand-in covering only the members the starter uses. A stand-in can
+rot silently, which would be worse than no types at all — so a test pins its
+member *names* to the real `TspmlApi`, subset-wise (it may omit `tracks`/`audio`;
+it may never declare something the real API lacks). A rename upstream now fails
+CI here instead of shipping a broken scaffold.
+
+`rootDir` is `"."` rather than `"src"` because `types/` sits beside it. That
+moves emission to `dist/src/entrypoint.js`, and the manifest now says so — with
+the expected path *derived from* the generated tsconfig's `outDir`/`rootDir` in
+the test, so the compiler and the manifest cannot drift apart.
+
+**Five guards, each verified to fail when its defect is reintroduced.** Mutation-
+checking these was not ceremony: two of them were quietly broken. A naive
+`/readonly (\w+):/` over the stand-in also matches `readonly id` in
+`KeybindBinding` and reports a false drift alarm; `\bapi\.` matches inside
+`'../types/tspml-api.js'` (the hyphen is a word boundary) and yields a phantom
+member `js`. Both were found by mutating, not by the tests going green.
+
+**`npx create-tspml-mod` was a false claim in the README.** `npm view
+create-tspml-mod` → E404; the package is `private` and unpublished, so that
+command 404s for every reader. Three docs advertised it. All three now give the
+working invocation (`node .../bin/create-tspml-mod.mjs`) and say why. Two further
+staleness bugs surfaced next to it in `getting-started.md`: the sample imported
+`@tspml/api`, which the scaffold no longer provides, and it documented
+`dist/entrypoint.js`.
+
+I did not publish the package. It is outward-facing and irreversible, so it is
+the owner's call; the package is otherwise publish-ready (scoped `files`,
+repository metadata) and carries a `//publish` note with the remaining steps.
+
+Two of #19's four premises were already fixed and were not re-fixed: the tsconfig
+was already self-contained, and `api.logger` was already on `TspmlApi`. Verifying
+the issue text against the code before acting on it saved doing both twice.
+
+**257 tests green** (252 + 5), build and lint clean. PR #45, branched off `main`.
+
 ## 2026-08-03 — #5 webcrack on Node 25: the claim was half wrong
 
 #5 recorded that `webcrack@2.x` "silently no-ops" on Node 25 because its `engines`
