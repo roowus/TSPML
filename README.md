@@ -2,6 +2,14 @@
 
 A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game — inspired by [Fabric](https://fabricmc.net/) for Minecraft. An incumbent loader ([PolyModLoader](https://polymodloader.com/)) already exists; TSPML aims to be what Fabric is to Minecraft modding.
 
+**What's actually different:** mods target **stable names**, not the minified bundle, and a
+`bundleHash` gate **fails closed** — when the game updates, every surface degrades to vanilla
+rather than silently patching the wrong code. That failure mode is the point. PML is a capable,
+actively-maintained loader with users, mods, and mobile support, and it is **ahead of us on
+physics** ([#43](https://github.com/roowus/TSPML/issues/43)). An honest comparison, verified
+against their source at `v0.6.2-2`, is in
+[`docs/research/pml-api-and-moat-reassessment.md`](./docs/research/pml-api-and-moat-reassessment.md).
+
 > **Status: M5 complete + M6/M7 started — the portal plays a transformed, modded PolyTrack with a real mod loaded.**
 >
 > ✅ 6 Tier-1 events fire inside the running game (`car.control`, `car.created`, `race.started`, `track.afterLoad` + `checkpoint.passed`/`race.finished` wired).
@@ -17,12 +25,19 @@ A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/p
 ## Quick start (create a mod)
 
 ```bash
-npx create-tspml-mod my-cool-mod
+git clone https://github.com/roowus/TSPML.git
+node TSPML/tooling/create-tspml-mod/bin/create-tspml-mod.mjs my-cool-mod
 cd my-cool-mod
 pnpm install && pnpm build
 ```
 
-This scaffolds a working starter mod (mod.json + entrypoint + mixin). See [`tooling/create-tspml-mod/`](./tooling/create-tspml-mod/).
+This scaffolds a working starter mod (mod.json + entrypoint + mixin) that builds
+with nothing but `typescript` — the generated project has no dependency on this
+repo or on any unpublished package. See [`tooling/create-tspml-mod/`](./tooling/create-tspml-mod/).
+
+> **Not `npx create-tspml-mod` yet.** The CLI is not published to npm, so that
+> command 404s — the clone above is the working equivalent (#19). The one-liner
+> lands when the package ships.
 
 ## How it works
 

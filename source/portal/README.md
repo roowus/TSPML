@@ -6,11 +6,12 @@ Vercel-hosted Next.js web app — TSPML's **flagship delivery surface**. It play
 bridge the mods bind to. The architecture is described in
 [`docs/design/injection-and-delivery.md`](../../docs/design/injection-and-delivery.md).
 
-> **Status:** run-validated end to end by two committed headless smokes (below). A real
-> mod loads, six Tier-1 events fire during a real race, a mod-declared mixin applies, and
-> `api.tracks` puts a mod's track in the game's own Custom tracks list. Still open:
-> leaderboard/multiplayer through the proxy ([#7](https://github.com/roowus/TSPML/issues/7)
-> — `vps.kodub.com` is bot-protected, so the **extension** is the resilient path there).
+> **Status:** run-validated end to end by three committed headless smokes (below). A real
+> mod loads, six Tier-1 events fire during a real race, a mod-declared mixin applies,
+> `api.tracks` puts a mod's track in the game's own Custom tracks list, and `api.audio`
+> replaces one of the game's own sounds. Still open: leaderboard/multiplayer through the
+> proxy ([#7](https://github.com/roowus/TSPML/issues/7) — `vps.kodub.com` is bot-protected,
+> so the **extension** is the resilient path there).
 
 ## The proxy + service-worker strategy
 
@@ -62,14 +63,16 @@ they already had, and it cost the portal a whole feature
 
 | From `@tspml/shared` | Injected into |
 | --- | --- |
-| `BRIDGE_PATCHES` | `main.bundle.js`, via `@tspml/transform` — the badge, the 6 Tier-1 event emits, the 2 track-capture patches |
+| `BRIDGE_PATCHES` | `main.bundle.js`, via `@tspml/transform` — the badge, the 6 Tier-1 event emits, the capture patches for the track store + codec and the audio manager |
 | `EARLY_CAPTURE_SCRIPT_TAG` | the game's `<head>`, ahead of its deferred bundles |
 
 The stub is **load-bearing, not defensive**: the track codec's capture fires during bundle
 init, *before* `page.tsx`'s frame-`load` handler installs the real `window.__tspml`. Without
 a recording stub that capture is silently dropped, the late TrackManager capture succeeds,
 and `api.tracks` waits forever on a half-complete pair — with no error anywhere. `page.tsx`
-calls `readEarlyCaptures` to replay what the stub caught. See
+calls `readEarlyCaptures` to replay what the stub caught. The **audio** capture needs no
+stub slot: it rides the same late-running constructor as the track store (a different
+parameter of it), so it can never arrive pre-bridge. See
 [`docs/design/hook-system.md`](../../docs/design/hook-system.md).
 
 What this package *does* own: `lib/demo-transform.ts` — resolving each patch's mappings
@@ -81,7 +84,7 @@ mismatch means nothing applies at all and the portal serves vanilla.
 
 | Path | Role |
 | --- | --- |
-| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks) on the iframe window, loads the demo mods, and renders the live sidebar. |
+| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the demo mods, and renders the live sidebar. |
 | `app/layout.tsx` | Root layout (App Router). |
 | `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/OPTIONS) + the three `<head>` injections + the bundle transform. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
 | `lib/rewrite.ts` | Canonical pure `rewriteGameUrl()` + `isGameHost()` — the only place the rewrite rules live (unit-tested). |
@@ -89,7 +92,7 @@ mismatch means nothing applies at all and the portal serves vanilla.
 | `lib/demo-mods.ts` / `lib/mod-loader.ts` | The bundled demo mods and their load through `@tspml/loader` (per-mod failure isolation — a bad mod never aborts boot). |
 | `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener. |
 | `tests/rewrite.test.ts` | vitest unit tests for the rewrite (the only unit tests here — `demo-transform.ts` is covered indirectly by `@tspml/transform`'s suite plus the smokes). |
-| `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs` | Playwright headless proofs against the live game (see below). |
+| `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs` | Playwright headless proofs against the live game (see below). |
 
 ## Commands
 
@@ -111,6 +114,7 @@ pnpm --filter @tspml/portal test   # vitest run (unit)
 TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev   # terminal 1
 pnpm --filter @tspml/portal smoke                   # terminal 2: boot + mods + Tier-1 events
 pnpm --filter @tspml/portal smoke:tracks            # terminal 2: the api.tracks registry
+pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio registry
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -121,8 +125,21 @@ real import code from the game's own codec → `register` → the track is prese
 a throw → `unregister` → gone. It also reports which captures arrived pre-bridge, which is
 how we know the stub is load-bearing (`earlyCodec: true`).
 
-Neither runs in CI yet — they need the live upstream game
+`smoke-audio.mjs` does the same for `api.audio`, and its central claim is checkable **by
+value**: it synthesizes a WAV blob in the game frame at a deliberately odd 0.37 s, so "did
+the override land" is the **game's own** `getBuffer("click")` reporting 0.37 instead of its
+real ~0.032 — and reporting ~0.032 again after `unregister`. Also covers a typed
+`decode-failed`, an additive new key, a refused collision, and an explicit overwrite.
+It needs Chromium's `--autoplay-policy=no-user-gesture-required` (`decodeAudioData` wants a
+running `AudioContext`; a headless page never clicks), which the script passes itself.
+
+None of the three run in CI yet — they need the live upstream game
 ([#25](https://github.com/roowus/TSPML/issues/25)).
+
+> Both registry smokes read the captured game objects off the registry's TypeScript-`private`
+> `host` field, because the portal deliberately ships **no** dev-only inspection hook (the
+> dev harness has `window.__tspmlDev`; the product should not). That coupling is contained
+> to these two scripts by design — if a `Tracks`/`Audio` refactor breaks it, fix it there.
 
 ### Environment variables (all optional)
 

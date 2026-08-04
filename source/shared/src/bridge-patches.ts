@@ -155,27 +155,33 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
 ];
 
 /**
- * The custom-track registry's capture patches (#12).
+ * The registry capture patches — custom tracks (#12) and audio (#11).
  *
- * The game's TrackManager lives in the BOOTSTRAP, past the wall the module
- * locator cannot reach (the same wall [#11] hits for audio). Its CALLERS are real
- * modules, though — so rather than locating the class, capture the live instance
- * as it is handed to a caller. Generalized as "instance capture" in
- * docs/design/hook-system.md.
+ * (Named for the registries, not for tracks: it began as `TRACK_CAPTURE_PATCHES`,
+ * then #11's audio capture landed in the very same inject. A name that lists one of
+ * two features invites the next reader to add a third copy somewhere else.)
  *
- * Both patches only READ a reference into `window.__tspml`; neither changes game
- * behaviour.
+ * The game's TrackManager and audio manager both live in the BOOTSTRAP, past the
+ * wall the module locator cannot reach. Their CALLERS are real modules, though — so
+ * rather than locating the class, capture the live instance as it is handed to a
+ * caller. Generalized as "instance capture" in docs/design/hook-system.md.
  *
- * TIMING: these two fire at very different points. The manager is captured when
- * the game builds its track-selection menu (late), but the codec's module factory
- * runs during BUNDLE INIT — before a surface's own `load` handler installs the
- * real bridge. A surface must therefore inject {@link EARLY_CAPTURE_STUB} ahead of
- * the game's scripts and replay what it recorded, or the codec capture is silently
- * dropped and the registry never attaches.
+ * Every patch here only READS a reference into `window.__tspml`; none changes game
+ * behaviour, so a mis-target degrades to "the capture never happens" rather than
+ * corrupted state.
+ *
+ * TIMING: these fire at very different points. The track-selection constructor
+ * (which yields BOTH the track manager and the audio manager) runs when the game
+ * builds its menu — late, after a surface's bridge is installed. The codec's module
+ * factory, by contrast, runs during BUNDLE INIT, before that bridge exists. A
+ * surface must therefore inject {@link EARLY_CAPTURE_STUB} ahead of the game's
+ * scripts and replay what it recorded, or the codec capture is silently dropped and
+ * the track registry never attaches. Audio needs no early slot for the same reason
+ * the track manager does not.
  *
  * [#11]: https://github.com/roowus/TSPML/issues/11
  */
-export const TRACK_CAPTURE_PATCHES: readonly Patch[] = [
+export const REGISTRY_CAPTURE_PATCHES: readonly Patch[] = [
   {
     op: "before",
     target: {
@@ -185,10 +191,16 @@ export const TRACK_CAPTURE_PATCHES: readonly Patch[] = [
       },
       selector: { kind: "method", name: "constructor" },
     },
-    // The track-selection UI (module 8185): constructor(e,t,n,r,a,...) — `a` is
-    // the TrackManager. The captured object exposes saveCustomTrack /
-    // deleteCustomTrack / forEachCustomTrack.
-    inject: `try { if (typeof window !== "undefined" && window.__tspml && window.__tspml.captureTrackManager) window.__tspml.captureTrackManager(a); } catch (_e) {}`,
+    // The track-selection UI (module 8185): constructor(e,t,n,r,a,...). `a` is the
+    // TrackManager (saveCustomTrack / deleteCustomTrack / forEachCustomTrack); `n`
+    // is the AUDIO manager (context / getBuffer / playUIClick / load).
+    //
+    // Both captures ride ONE inject because they come from the same constructor —
+    // which is also why #11 needed no new anchor and no locator change: this module
+    // was already a committed, verified target with exactly one constructor in it.
+    // Verified against 0.6.2 at the three `new Sr.A(...)` call sites, where param 3
+    // is the same private field the game's own `playUIClick()` calls go through.
+    inject: `try { if (typeof window !== "undefined" && window.__tspml) { if (window.__tspml.captureTrackManager) window.__tspml.captureTrackManager(a); if (window.__tspml.captureAudioManager) window.__tspml.captureAudioManager(n); } } catch (_e) {}`,
   },
   {
     op: "after",
@@ -215,8 +227,8 @@ export const TRACK_CAPTURE_PATCHES: readonly Patch[] = [
   },
 ];
 
-/** Badge + Tier-1 events + the track-registry captures — what a surface applies. */
+/** Badge + Tier-1 events + the registry captures — what a surface applies. */
 export const BRIDGE_PATCHES: readonly Patch[] = [
   ...TIER1_BRIDGE_PATCHES,
-  ...TRACK_CAPTURE_PATCHES,
+  ...REGISTRY_CAPTURE_PATCHES,
 ];

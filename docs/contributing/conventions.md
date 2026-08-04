@@ -56,8 +56,29 @@
 - **Automate browser/UI checks with a headless browser (Playwright).** If a step would otherwise be "open it in a browser and look," script it FIRST: launch headless Chromium, capture console messages, uncaught `pageerror`s, and failed network requests; assert on the DOM (e.g. an injected marker exists, a `<canvas>` rendered); save a screenshot. Only hand the *subjective* parts to a human ("does it look/play right"). Do not offload automatable verification to the user. (See `source/portal/scripts/smoke.mjs`.)
   - **Assert on every frame the feature touches, not just the interesting one.** The portal is two frames — the game in the `/api/proxy` iframe, our own chrome in the main frame. Every assertion in `smoke.mjs` read the game frame, so the sidebar could break entirely and the smoke stayed green ([#41](https://github.com/roowus/TSPML/issues/41)).
   - **Hardcode what you expect, not just its shape.** "The mod list is non-empty" is satisfied by the *placeholder* row, so a regression to the placeholder passes. Naming the ids the portal actually loads is what makes it an assertion.
-  - **Prove the assertion fails.** Inject the regression it exists to catch, rebuild, watch it go red, then restore. Two injections into `page.tsx` (dropping `setSafetyStatus`, dropping `setLoadedMods`) both compiled cleanly and both were caught — and the second revealed that the `mods:` summary row still read `✓ …` while the list itself was empty, because it is fed by different state. A check on the summary alone would have passed.
   - **Real input is fragile on a runner, and its failure is silent.** Playwright's actionability checks time out against a swiftshader canvas; the click that exists only to hand keyboard focus to the game frame then fails, the arrow keys go nowhere, and the input-driven events never fire while every other assertion stays green. Fall back (force-click → `focus()`), re-assert focus each round, and *report which path won* so a degraded-but-green run is visible.
+- **Verifying the parts is not verifying the whole.** This has now cost us three
+  times (#25's canary, #41's sidebar, #19's scaffold), so treat it as a rule: if
+  the deliverable is a *sequence* — generate then build, read a field then fetch
+  a URL, load the game then render the chrome — one test must run the whole
+  sequence. In every case each individual piece had been checked and worked; the
+  seam between them was what broke. Corollaries:
+  - **Asserting on generated text is not asserting the generated thing works.**
+    #19 shipped a scaffold whose `pnpm install` died on the first command while
+    four tests asserting its file contents stayed green. Run the real compiler
+    against the real output.
+  - **When the failure mode is silence, running the thing never finds it.** Only
+    a checker that reads the code, or a test that asserts the output *exists*,
+    will. Absence throws no error.
+- **Prove a new assertion fails.** Reintroduce the defect it describes and watch
+  it go red before you trust it. This is cheap and it keeps catching things: two
+  of #19's five guards were themselves broken (regexes matching the wrong
+  interface and the import path), and mutation is what surfaced it — they were
+  green either way. Same for UI: two injections into the portal's `page.tsx`
+  (dropping `setSafetyStatus`, dropping `setLoadedMods`) both compiled cleanly
+  and both were caught — and the second revealed that the `mods:` summary row
+  still read `✓ …` while the list itself was empty, because it is fed by
+  different state. A check on the summary alone would have passed.
 - **Tests are first-class.** Every package with logic ships unit tests; `pnpm -r test` must be green before merge. Prefer dependency-injected, headless-runnable tests so CI (and you) can run them anywhere.
 - **CI is mandatory and runs on GitHub Actions** (`.github/workflows/ci.yml`): on every push and pull request it installs deps and runs the full suite. Don't merge with red CI; watch the **Actions** tab and fix flakes immediately.
 - **Make full use of GitHub:** Actions for CI/test/build, Issues for all tracking (no matter how small), and workflow runs for heavier jobs (e.g. the mappings drift experiment) as they're added.
