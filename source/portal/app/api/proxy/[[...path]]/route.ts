@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
+import { EARLY_CAPTURE_SCRIPT_TAG } from '@tspml/shared';
+
 import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
 import { applyDemoTransform } from '@/lib/demo-transform';
 
@@ -170,9 +172,9 @@ async function proxyGet(
     return new NextResponse(code, { status: upstreamRes.status, headers: h });
   }
 
-  // Rewrite the proxied game's HTML. Two <head> injections, both run BEFORE the
-  // game's deferred bundles (an inline script in <head> executes during parse,
-  // ahead of `defer` scripts like main.bundle.js):
+  // Rewrite the proxied game's HTML. Every injection runs BEFORE the game's deferred
+  // bundles (an inline script in <head> executes during parse, ahead of `defer` scripts
+  // like main.bundle.js):
   //   1. <base href="/api/proxy/"> — the document URL /api/proxy (no trailing
   //      slash) makes the browser treat "proxy" as a filename, so the game's
   //      relative <script src="main.bundle.js"> resolves to /api/main.bundle.js
@@ -183,6 +185,11 @@ async function proxyGet(
   //      mod load, which CLEARS its "unofficial version" gameplay gate via the
   //      game's OWN intended path — no bundle surgery (issue #8). See
   //      docs/research/portal-browser-test-findings.md.
+  //   3. In TSPML mode: the pre-bridge early-capture stub (#36). Only meaningful
+  //      alongside the transform, since it exists to catch the capture patches — the
+  //      track codec's fires during BUNDLE INIT, before page.tsx's frame-`load`
+  //      handler installs the real window.__tspml, so without the stub that capture is
+  //      silently dropped and api.tracks never attaches.
   {
     const ct = upstreamRes.headers.get('content-type') ?? '';
     if (ct.includes('text/html')) {
@@ -193,6 +200,7 @@ async function proxyGet(
         unblocked = true;
         injections.push(
           '<script>window.polytrackModConfiguration = Object.assign(window.polytrackModConfiguration || {}, { modName: "TSPML", author: "roowus" });</script>',
+          EARLY_CAPTURE_SCRIPT_TAG,
         );
       }
       const inject = injections.join('\n');
