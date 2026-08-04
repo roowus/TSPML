@@ -2,6 +2,14 @@
 
 A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game — inspired by [Fabric](https://fabricmc.net/) for Minecraft. An incumbent loader ([PolyModLoader](https://polymodloader.com/)) already exists; TSPML aims to be what Fabric is to Minecraft modding.
 
+**What's actually different:** mods target **stable names**, not the minified bundle, and a
+`bundleHash` gate **fails closed** — when the game updates, every surface degrades to vanilla
+rather than silently patching the wrong code. That failure mode is the point. PML is a capable,
+actively-maintained loader with users, mods, and mobile support, and it is **ahead of us on
+physics** ([#43](https://github.com/roowus/TSPML/issues/43)). An honest comparison, verified
+against their source at `v0.6.2-2`, is in
+[`docs/research/pml-api-and-moat-reassessment.md`](./docs/research/pml-api-and-moat-reassessment.md).
+
 > **Status: M5 complete + M6/M7 started — the portal plays a transformed, modded PolyTrack with a real mod loaded.**
 >
 > ✅ 6 Tier-1 events fire inside the running game (`car.control`, `car.created`, `race.started`, `track.afterLoad` + `checkpoint.passed`/`race.finished` wired).
