@@ -1,0 +1,15 @@
+{
+  "name": "@tspml/typecheck",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typechecks the code no package build covers — the headless smoke scripts and the mappings-pipeline .mjs sources (issue #25).",
+  "license": "MIT",
+  "scripts": {
+    "lint": "tsc -p tsconfig.smokes.json && tsc -p tsconfig.pipeline.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

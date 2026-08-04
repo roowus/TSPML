@@ -1,0 +1,181 @@
+name: Smoke (real game)
+
+# The end-to-end proof that a transformed PolyTrack actually BOOTS and that the
+# registries attach in a real browser. Unit tests cannot cover this: the injects
+# reference the bundle's minified parameter names and only ever meet a parser when
+# a surface transforms the real bundle. Regressions in this class (the original
+# `<base href>` bug, the first-visit service-worker track-load failure) are
+# invisible to `pnpm -r test`. See issue #25.
+#
+# WHY THIS IS A SEPARATE WORKFLOW, NOT A JOB IN ci.yml
+# ----------------------------------------------------
+# It fetches the live game from `app-polytrack.kodub.com` at run time, so unlike
+# `ci.yml` it can fail for reasons that are nothing to do with the commit: the CDN
+# is down, or Kodub shipped 0.6.3 and the pinned bundle hash no longer matches. A
+# required check that goes red on someone else's release trains people to ignore
+# red. So this workflow is:
+#
+#   - advisory on pull requests: it runs, it reports, it must NOT gate the merge
+#     queue. Do not add it to the required-checks list without also solving the
+#     upstream-release problem.
+#   - scheduled daily, which is what actually earns its keep — it detects a game
+#     update on the day it lands rather than the next time somebody happens to
+#     open a PR.
+#
+# Legal posture: fetches the developer's own live game copy at run time into a
+# gitignored path. Never commits, caches, or uploads the bundle. Screenshot
+# artifacts DO show game frames, which is why they are failure-only + short-lived.
+
+on:
+  pull_request:
+  schedule:
+    # 07:11 UTC daily. Off the hour: GitHub drops scheduled runs under load at
+    # :00, and the exact minute does not matter for a canary.
+    - cron: "11 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Canary. Runs FIRST and on its own so that a smoke failure is interpretable:
+  # if this job is red, the game shipped a new build and every downstream failure
+  # is expected fallout, not a regression. If this is green and smoke is red, the
+  # commit broke something.
+  #
+  # Deliberately does NOT fail the workflow (`continue-on-error`) — a Kodub
+  # release is news, not a defect in this repo.
+  # ---------------------------------------------------------------------------
+  pinned-bundle:
+    name: pinned bundle still matches live
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      matches: ${{ steps.check.outputs.matches }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - id: check
+        name: compare live main.bundle.js against the map's bundleHash
+        run: |
+          set -uo pipefail
+          MAP=./source/mappings/maps/polytrack-0.6.2.json
+          # `gameVersion`, not `version` — the map has no `version` field, and the
+          # first run of this job read one anyway. `node -p` printed the string
+          # "undefined", the URL 404'd, `curl -f` failed, and the canary reported
+          # "the game shipped a new build" on a day the live bundle hashed EXACTLY
+          # to the pin. A canary that cries wolf is worse than no canary, so the
+          # two guards below make that specific failure impossible to mistake for
+          # drift again.
+          VERSION="$(node -p "require('$MAP').gameVersion")"
+          PINNED="$(node -p "require('$MAP').bundleHash")"
+          echo "pinned: $VERSION $PINNED"
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "undefined" ] || [ -z "$PINNED" ] || [ "$PINNED" = "undefined" ]; then
+            echo "::error title=Canary is broken, not the game::Could not read gameVersion/bundleHash from $MAP (got version='$VERSION' hash='$PINNED'). This is a defect in this workflow or a map schema change — NOT bundle drift."
+            exit 1
+          fi
+
+          # Bare GET — the static asset CDN needs no headers (the anti-bot wall is
+          # on vps.kodub.com, the multiplayer backend, not here).
+          URL="https://app-polytrack.kodub.com/$VERSION/main.bundle.js"
+          # Separate the fetch from the hash so a transport failure is reported as
+          # a transport failure. Piping curl into shasum hashes the empty string on
+          # a 404 and yields a perfectly plausible wrong hash.
+          if ! curl -fsSL --retry 3 --retry-delay 5 -o /tmp/live-bundle.js "$URL"; then
+            echo "::error title=Canary could not fetch the bundle::GET $URL failed. CDN down, or the URL shape changed. Not necessarily drift."
+            exit 1
+          fi
+          LIVE="sha256:$(shasum -a 256 /tmp/live-bundle.js | cut -d' ' -f1)"
+          echo "live:   $LIVE  ($(wc -c < /tmp/live-bundle.js) bytes)"
+
+          if [ "$LIVE" = "$PINNED" ]; then
+            echo "matches=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Pinned bundle current::$VERSION matches the committed map."
+          else
+            echo "matches=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Game bundle drifted::Live $VERSION is $LIVE but the map pins $PINNED. Every transform is now fail-closed (surfaces serve VANILLA), so smoke failures below are expected. Regenerate the map: pnpm --filter @tspml/mappings-pipeline regen."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # The smokes. Each drives only what a mod can drive, and each asserts on the
+  # GAME's own state rather than on our bookkeeping.
+  # ---------------------------------------------------------------------------
+  portal:
+    name: portal smokes (boot + tracks + audio)
+    runs-on: ubuntu-latest
+    needs: pinned-bundle
+    # Run even when the canary is red: a drifted bundle means every surface
+    # fail-closes to vanilla, and it is worth SEEING that happen rather than
+    # skipping and learning nothing.
+    if: always()
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # reads version from package.json `packageManager`
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --ignore-scripts skips webcrack's optional isolated-vm native build (#2).
+      # It also skips playwright's browser download, hence the explicit install.
+      - run: pnpm install --ignore-scripts
+
+      - name: install Chromium
+        run: pnpm --filter @tspml/portal exec playwright install --with-deps chromium
+
+      - run: pnpm -r build
+
+      # `next start`, not `next dev` — CI should exercise the path the product
+      # actually ships. (Verified locally: the production server proxies and
+      # transforms identically, 1791279 B served vs 1782239 B upstream.)
+      - name: start the portal with the transform enabled
+        run: |
+          pnpm --filter @tspml/portal exec next start -p 3000 > /tmp/portal.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:3000 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:3000 >/dev/null
+        env:
+          TSPML_TRANSFORM: "1"
+
+      # Each smoke exits non-zero on failure and prints a JSON verdict. They run
+      # sequentially against one server: they drive real input and the audio one
+      # mutates the game's buffer lookup, so concurrent runs would interfere.
+      - name: smoke — boot, Tier-1 events, keybind registry, declared mixin
+        run: pnpm --filter @tspml/portal smoke
+
+      - name: smoke — api.tracks in the game's own Custom tracks list
+        run: pnpm --filter @tspml/portal smoke:tracks
+
+      - name: smoke — api.audio overrides the game's own getBuffer
+        run: pnpm --filter @tspml/portal smoke:audio
+
+      - name: portal server log
+        if: always()
+        run: tail -50 /tmp/portal.log || true
+
+      # Failure-only and short-lived: these frames are game content, and the repo
+      # never retains game assets longer than a diagnosis needs.
+      - name: upload screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-smoke-screenshots
+          path: /tmp/tspml-*.png
+          retention-days: 3
+          if-no-files-found: ignore

@@ -1,0 +1,38 @@
+// Typecheck the mappings-pipeline sources (issue #25).
+//
+// `@tspml/mappings-pipeline` has a `test` script but no `build`, so nothing ever
+// typechecked its `.mjs`. It is the tool that regenerates the symbol map on a game
+// release — the highest-consequence code in the repo that no compiler was reading.
+// A mistake here does not fail loudly; it produces a *plausible but wrong candidate
+// map*, and the map is the thing every surface hash-gates against.
+//
+// Same non-strict posture as `tsconfig.smokes.json`: these are hand-written `.mjs`
+// with JSDoc where it matters, and `strict` would demand annotations rather than
+// find defects. See that file for the full reasoning.
+//
+// `webcrack` is not resolved here (`noResolve` is off but the import is untyped and
+// `skipLibCheck` swallows its declarations) — the value is in checking OUR logic:
+// property typos on the AST nodes we build, wrong arity on our own exported
+// helpers, a `fs/promises` call misspelled.
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false
+  },
+  "include": [
+    "../../tooling/mappings-pipeline/src/**/*.mjs",
+    "../../tooling/mappings-pipeline/scripts/**/*.mjs"
+  ],
+  // The gitignored analysis cache holds ad-hoc probe scripts (and, transiently,
+  // deobfuscated game source). Never typecheck it — it is not our code, and on a
+  // developer machine it contains the game.
+  "exclude": ["../../tooling/mappings-pipeline/.cache/**"]
+}

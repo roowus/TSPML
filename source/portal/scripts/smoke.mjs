@@ -148,7 +148,9 @@ const dom = await gameFrame.evaluate(() => {
 const EXPECTED_MOD_IDS = ["tspml-example-hud", "tspml-checkpoint-counter"];
 
 const sidebar = await page.mainFrame().evaluate((expected) => {
-  const aside = document.querySelector('aside[aria-label="Mods"]');
+  const aside = /** @type {HTMLElement | null} */ (
+    document.querySelector('aside[aria-label="Mods"]')
+  );
   if (!aside) return { present: false, text: "", modIds: [], statuses: [] };
   const text = aside.innerText || "";
   // Each mod row renders its id in a <code> and its load status in the last span.
