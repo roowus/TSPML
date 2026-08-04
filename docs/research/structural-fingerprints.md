@@ -119,24 +119,67 @@ Separating these needs a signal that survives minification and carries more bits
 shape histogram — call-graph edges between already-matched modules is the obvious next
 step, since a module's *neighbours* are far more distinctive than its shape.
 
-## Status
+## Status: wired in
 
-`fingerprint.mjs` is **standalone and not yet wired into `gen-map.mjs`**. The measurement
-harness that produced the table above drives it directly. Wiring it in changes which
-targets a candidate map proposes, so it wants its own PR with a full regen diff — that is
-the follow-up, tracked on #1.
+**Retraction.** An earlier revision of this section said `fingerprint.mjs` was "standalone
+and not yet wired into `gen-map.mjs`". It is now wired in, through a new
+`src/select.mjs` that both `match.mjs` and `source/mappings/scripts/gen-map.mjs` call.
+
+The scorer had been written twice, verbatim — once in the measurement harness that reports
+the rate and once in the generator that writes the map a mod actually resolves against.
+That was tolerable while both were a frozen copy of the M1 spike; it stopped being
+tolerable the moment the claim became a *delta between two rates*. If the two copies could
+drift, `0.848 → 0.939` would be a statement about `match.mjs` and not about the map, and
+the number in the README would be unfalsifiable. Both now share one decision function, so
+the rate the harness reports is the rate the map was built at by construction.
+
+`match.mjs --structural` turns the tie-break on (default **off**, so the same command
+produces the baseline); `GEN_STRUCTURAL=0` turns it off in the generator (default **on**).
+Reproduced through the wired pipeline: **0.848 → 0.939 game-logic, 0 regressions,
+0 changed targets**, `gen-map` 56 → 62 modules, ~0.585 s total.
+
+### Two findings the integration turned up
+
+**30 promotions, not 6.** The harness reports 30 structural promotions across the whole
+corpus; the six in the table above are the *game-logic* ones. The other 24 were verified
+with `cmp -s` rather than assumed: every one is a byte-identical source→target pair, mostly
+`module.exports = require.p + "images/*.svg"` asset stubs. They raise the overall rate
+(0.82 → 0.966) and are uninteresting individually.
+
+**A real defect in the resolver, which this change would otherwise have shipped.**
+`regen --diff` reported `stableNames: 8 relocated`. Root cause was not in the fingerprints
+at all: `buildIndex` in `source/mappings/src/resolver.ts` was first-wins over
+`Object.values(map.modules)` — i.e. over JSON key order. Structural promotions land earlier
+in the regenerated file, so they took **8 pre-existing stable names** off lexically-matched
+modules purely by file position, inverting the very evidence ordering `adjudicate()`
+enforces inside a single module's decision. The index now ranks collisions by evidence
+(lexical beats structural, then higher `matchWeight`, then `moduleId` for determinism).
+Measured directly: **insertion-order re-points 19 pre-existing names; evidence-ordered
+re-points 0**, and adds 14 newly-resolvable ones. The change is now purely additive, which
+is what adding modules to a map is supposed to be.
+
+`decidedBy` and `structuralSimilarity` are now emitted per module and validated on load —
+an *unrecognised* `decidedBy` is rejected rather than tolerated, because a typo'd value read
+as "not structural" would quietly win a collision it should lose. Absent means lexical, so
+pre-#1 maps keep resolving exactly as before.
+
+Still deliberately out of scope: **promoting the committed `polytrack-0.6.2.json`**. The
+candidate map verifies LOW RISK with 5/5 targets passing, but regenerating it changes what
+shipped mods resolve against and is a separate call.
 
 ## Reproducing
 
 ```bash
 cd tooling/mappings-pipeline
-pnpm test                        # 55 unit tests, no bundle needed (18 cover fingerprints)
-# the measured rate needs the gitignored cached bundles:
-node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw
+pnpm test                        # 106 unit tests, no bundle needed (20 fingerprint, 16 select)
+# the measured rate needs the gitignored cached bundles. Both rates, one command each:
+node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw              # 0.848
+node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw --structural # 0.939
 ```
 
 Every guard in `fingerprint.mjs` was mutation-checked before being trusted — the defect
-each test describes was reintroduced and the test watched go red:
+each test describes was reintroduced and the test watched go red. (Counts are as measured
+at the time, against a 55-test suite; the suite is 106 now.)
 
 | mutation | result |
 |---|---|
@@ -148,3 +191,23 @@ each test describes was reintroduced and the test watched go red:
 | accept a hairline structural gap (`minStructural` removed) | 2 failed / 53 passed |
 | stop distinguishing computed from static member access | 1 failed / 54 passed |
 | restored | 55 passed |
+
+The guards added by the integration were checked the same way — `select.mjs` against its own
+16 tests, `resolver.ts` against `source/mappings`' 28:
+
+| mutation | result |
+|---|---|
+| apply the evidence floor to the lexical leader, not the chosen candidate | 1 failed / 15 passed |
+| default `structural` on without an `fpOf` to get shapes from | red |
+| drop the name tie-break in `topCandidates` (regen stops being reproducible) | red |
+| revert `buildIndex` to first-wins (`if (held === undefined)`) | 3 failed / 25 passed |
+| restored | 16 and 28 passed |
+
+**One of those mutations initially stayed green, and the test was the thing at fault.**
+Rewriting the floor to read the lexical leader did not fail the test meant to catch it: the
+fixture used weights 7 and 6, both *under* the floor (`count >= 2 && w >= 8`), so neither
+reading could accept and the assertion could not distinguish them. The fixture now straddles
+the floor — leader 8 clears it, promoted candidate 7 does not — and asserts the promoted
+candidate's own weight and `accepted: false`. It goes red as intended. A mutation that
+survives is as often a weak test as a redundant guard, and the two are worth telling apart
+before writing either off.

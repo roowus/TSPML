@@ -7,15 +7,22 @@
 //   - a curated GAME-LOGIC metric (modules the rename gave real game names) as the
 //     primary go/no-go signal, since broad buckets catch CSS/utility chaff
 //
-// Usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json]
+// Usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json] [--structural]
+//
+// `--structural` enables the #1 AST tie-breaker. It is OFF by default so this stays the
+// baseline measurement it has always been, and so the two rates are producible from one
+// command with one flag — the delta is the entire claim of #1, and it should not require
+// checking out an older commit to see the other half of it.
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join, basename } from "node:path";
+import { chooseTarget, makeFpCache } from "./select.mjs";
 
-const SRC = process.argv[2];
-const TGT = process.argv[3];
-const OUT = process.argv[4];
+const argv = process.argv.slice(2);
+const STRUCTURAL = argv.includes("--structural");
+const positional = argv.filter((a) => !a.startsWith("--"));
+const [SRC, TGT, OUT] = positional;
 if (!SRC || !TGT) {
-  console.error("usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json]");
+  console.error("usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json] [--structural]");
   process.exit(2);
 }
 
@@ -31,9 +38,11 @@ const TRIVIAL = new Set([
 const MAX_MODULE_BYTES = 1_000_000; // exclude reconstructed whole-bundle entry files
 const isAggregate = (name, size) => size > MAX_MODULE_BYTES || name === "deobfuscated.js";
 
+// Sorted, so a run over the same corpus is reproducible. The old unsorted readdir order
+// is filesystem-dependent, which is invisible until two candidates tie on weight.
 async function listJs(dir) {
   const out = [];
-  for (const e of await readdir(dir, { withFileTypes: true })) {
+  for (const e of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     const p = join(dir, e.name);
     if (e.isDirectory()) out.push(...await listJs(p));
     else if (e.name.endsWith(".js")) out.push(p);
@@ -65,7 +74,9 @@ async function loadDir(dir) {
     if (isAggregate(name, st.size)) continue; // drop the whole-bundle sink
     const code = await readFile(f, "utf8");
     const { anchors, idents } = extract(code);
-    mods.push({ name, size: st.size, anchors, idents });
+    // `code` is retained for fingerprinting. It is never written to a report — the
+    // proprietary bundle must not leave the gitignored cache.
+    mods.push({ name, size: st.size, anchors, idents, code });
   }
   return mods;
 }
@@ -133,25 +144,30 @@ const tgtWins = new Map();
 const examples = [];
 const unmatched = [];
 const margin = 1.25;
+const fpOf = makeFpCache();
+let promotions = 0;
+
+// `sharedWeight` takes the anchor sets; `chooseTarget` passes whole modules (it needs
+// `.code` for shapes), so adapt rather than changing the scorer's signature.
+const weighOf = (a, b) => sharedWeight(a.anchors, b.anchors);
 
 for (const m of srcMods) {
   if (m.anchors.size === 0) continue;
   total += 1;
   const gl = isGameLogic(m);
   if (gl) glTotal += 1;
-  let best = null;
-  let second = null;
-  for (const n of tgtMods) {
-    const { w, count } = sharedWeight(m.anchors, n.anchors);
-    if (!best || w > best.w) { second = best; best = { n, w, count }; }
-    else if (!second || w > second.w) second = { n, w, count };
-  }
-  const hasMargin = !second || best.w >= margin * second.w;
-  const ok = best && hasMargin && ((best.count >= 2 && best.w >= 8) || (best.count === 1 && best.w >= 5));
+  const pick = chooseTarget(m, tgtMods, {
+    sharedWeight: weighOf,
+    fpOf,
+    margin,
+    structural: STRUCTURAL,
+  });
+  const ok = !!pick?.accepted;
   if (ok) {
     matched += 1;
     if (gl) glMatched += 1;
-    tgtWins.set(best.n.name, (tgtWins.get(best.n.name) || 0) + 1);
+    if (pick.decidedBy === "structural") promotions += 1;
+    tgtWins.set(pick.name, (tgtWins.get(pick.name) || 0) + 1);
   }
   const subs = classify(m);
   for (const s of subs) {
@@ -160,9 +176,9 @@ for (const m of srcMods) {
     if (ok) perSub[s].matched += 1;
   }
   if (ok && examples.length < 15 && gl)
-    examples.push({ src: m.name, tgt: best.n.name, shared: best.count, w: Math.round(best.w), subs });
+    examples.push({ src: m.name, tgt: pick.name, shared: pick.count, w: Math.round(pick.w), subs, decidedBy: pick.decidedBy });
   else if (!ok && unmatched.length < 15 && gl)
-    unmatched.push({ src: m.name, subs, anchors: m.anchors.size, bestShared: best ? best.count : 0 });
+    unmatched.push({ src: m.name, subs, anchors: m.anchors.size, bestShared: pick ? pick.count : 0 });
 }
 
 const perSubOut = Object.fromEntries(
@@ -173,6 +189,8 @@ const topSinks = [...tgtWins.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).
 const report = {
   src: SRC,
   tgt: TGT,
+  structural: STRUCTURAL,
+  structuralPromotions: promotions,
   srcModules: srcMods.length,
   tgtModules: tgtMods.length,
   srcWithAnchors: total,
