@@ -1,11 +1,16 @@
 // Unpack a webpack bundle into per-module files using webcrack's programmatic API.
 // Usage: node src/unpack.mjs <bundle.js> <outdir>
 //
-// Why programmatic (not the CLI): webcrack's bin enforces a Node engine range
-// that this machine exceeds, but the library itself runs fine — so we call the API.
+// Why programmatic (not the CLI): webcrack@2.x declares engines
+// `>=22 <23 || >=24 <25`, and TSPML pins Node 25. That range is an npm-packaging
+// constraint, not a runtime one — the library itself runs fine on 25. But
+// `npx webcrack` exits 1 having written nothing, after only an `npm warn
+// EBADENGINE` that never names webcrack, so it reads as a silent no-op with an
+// empty output dir. Calling the API sidesteps npm entirely. See the README (#5).
 import { readFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { webcrack } from "webcrack";
+import { sandboxOptions } from "./sandbox.mjs";
 
 async function countJs(dir) {
   let n = 0;
@@ -35,7 +40,7 @@ const code = await readFile(input, "utf8");
 process.stderr.write(`webcrack: ${input} (${code.length} bytes) -> ${outDir}\n`);
 
 const t0 = Date.now();
-const result = await webcrack(code);
+const result = await webcrack(code, sandboxOptions());
 await mkdir(outDir, { recursive: true });
 await result.save(outDir);
 const { n, bytes } = await countJs(outDir);
