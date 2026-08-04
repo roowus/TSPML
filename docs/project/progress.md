@@ -660,9 +660,9 @@ that never fails against the bug it describes is decoration.
 
 **252 tests green** (5 new), `pnpm -r build` + `pnpm -r lint` clean.
 
-## Where we stand (2026-08-03)
+## Where we stand (2026-08-04)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (42) · dev-harness (11) — **252 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (88) · dev-harness (11) — **315 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -673,8 +673,11 @@ that never fails against the bug it describes is decoration.
 - **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
 - **#11 ✅** — audio registry: a mod's clip replaces a real game sound in **both** surfaces, via the *same* capture as `api.tracks`. Two content registries now work.
 - **#25 ✅** — CI runs the three portal smokes (advisory per-PR + daily, with a bundle-hash canary so a red smoke is interpretable), and `pnpm -r lint` is real: [`@tspml/typecheck`](../../tooling/typecheck) checks the `.mjs` no build reads. Found a live defect in `regen.mjs`.
+- **#16 / #17 / #30 ✅** — `includes` warns instead of silently ignoring; `onUnload` is actually called (idempotent, reverse order); the stub packages stopped overstating themselves.
+- **#43 / #1 / #3 spikes ✅** — WASM constants are locatable *structurally* (fail-closed on ambiguity, 97.4% of 0.6.2's functions unique), AST fingerprints break match ties (**0.848 → 0.939**), and split chunks are *discovered from the webpack runtime* rather than probed. All three are measurement + mechanism; none patches or is wired into `gen-map` yet.
 - **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
-- **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto.
+- **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto. Then wire `fingerprint.mjs` into `gen-map.mjs` (the 0.939 is measured offline, not yet in the pipeline).
+- **Known paper cut:** `fingerprint.mjs` resolves `@babel/parser` through a **hardcoded `webcrack@2.16.0` path**, so a webcrack bump breaks it (legibly — `getParser` throws a named error, but one that misreads as a missing install). `tooling/mappings-pipeline/node_modules/webcrack/package.json` is the version-agnostic symlink.
 
 ## 2026-08-03 — #19: the scaffold was unusable outside this monorepo ✅
 
