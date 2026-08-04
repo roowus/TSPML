@@ -17,23 +17,27 @@ interface DemoCounters {
   control: number;
   key: number;
   loaded: boolean;
+  /** Set by the returned disposer, so the smoke can prove cleanup ran (#17). */
+  unloaded?: boolean;
 }
 /** Extends the published API with smoke-test counters hung off the runtime object. */
 interface DemoApi extends TspmlApi {
   __demoHud?: DemoCounters;
 }
 
-export default function exampleHud(api: DemoApi, _game: unknown): void {
+export default function exampleHud(api: DemoApi, _game: unknown): (() => void) {
   const counters: DemoCounters = { control: 0, key: 0, loaded: true };
   api.__demoHud = counters;
 
   // Subscribe to a Tier-1 event (a real mod updates a HUD here).
-  api.events.on('car.control', () => {
+  // `on` returns an unsubscribe; this mod used to throw it away, which is
+  // exactly the leak #17 is about — keep it and hand it back below.
+  const offControl = api.events.on('car.control', () => {
     counters.control++;
   });
 
-  // Register a keybind through the Tier-1 registry.
-  api.keybinds.register({
+  // Register a keybind through the Tier-1 registry (also returns a disposer).
+  const unregister = api.keybinds.register({
     id: 'demo-hud.toggle',
     key: 'KeyG',
     description: 'Example HUD: toggle',
@@ -43,4 +47,12 @@ export default function exampleHud(api: DemoApi, _game: unknown): void {
   });
 
   api.logger.log('[demo-hud] loaded — subscribed to car.control, bound KeyG');
+
+  // Factory-form cleanup: return a disposer and the loader calls it on unload.
+  return () => {
+    offControl();
+    unregister();
+    counters.unloaded = true;
+    api.logger.log('[demo-hud] unloaded — detached car.control, released KeyG');
+  };
 }

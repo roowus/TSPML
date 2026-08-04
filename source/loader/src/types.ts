@@ -103,7 +103,9 @@ export type WarningKind =
   | 'conflict'
   | 'missing-recommendation'
   | 'missing-suggests'
-  | 'incompatible-target';
+  | 'incompatible-target'
+  /** `includes` is validated but not implemented — the nested mod won't load (#16). */
+  | 'unsupported-includes';
 
 export interface Warning {
   kind: WarningKind;
@@ -126,6 +128,18 @@ export interface ResolveResult {
   warnings: Warning[];
 }
 
+/** What happened to one mod's cleanup during {@link LoadResult.unload}. */
+export type ModUnloadStatus =
+  | { status: 'unloaded' }
+  /** The mod exposed no cleanup (no `onUnload`, no returned disposer). */
+  | { status: 'no-op' }
+  | { status: 'failed'; reason: string };
+
+export interface UnloadResult {
+  /** Per-mod cleanup outcome, keyed by id. */
+  status: Record<string, ModUnloadStatus>;
+}
+
 export interface LoadResult {
   /** Resolved mods in load order (excludes mods that failed before invocation). */
   order: Mod[];
@@ -133,6 +147,21 @@ export interface LoadResult {
   status: Record<string, ModLoadStatus>;
   /** Dependency warnings (conflicts, missing recommendations, ...). */
   warnings: Warning[];
+  /**
+   * Tear down every mod that loaded, in **reverse** load order — a dependent is
+   * disposed before the mod it depends on, mirroring how `init` ran.
+   *
+   * Cleanup is isolated per mod exactly like loading: one mod throwing in
+   * `onUnload` does not prevent the rest from being torn down (#17).
+   *
+   * Idempotent — calling it twice does not run cleanup twice, because a page
+   * teardown and an explicit disable can race.
+   *
+   * The loader does **not** emit `loader.onUnload`: {@link ModApi}'s `events` is
+   * `on`/`off` only, so the loader has no emit capability by design. The host
+   * that owns the bus (portal / dev harness) emits it around this call.
+   */
+  unload(): Promise<UnloadResult>;
 }
 
 /**
@@ -158,7 +187,12 @@ export abstract class TspmlMod {
   preInit?(api: ModApi): void | Promise<void>;
   init?(api: ModApi): void | Promise<void>;
   ready?(api: ModApi): void | Promise<void>;
-  onUnload?(): void | Promise<void>;
+  /**
+   * Cleanup. Called by {@link LoadResult.unload} in reverse load order, and
+   * handed the same `api` as the other hooks so a mod can `api.events.off(...)`
+   * without having stashed a reference at init time (#17).
+   */
+  onUnload?(api: ModApi): void | Promise<void>;
 }
 
 /** Default no-op stub API used when the caller does not provide one. */

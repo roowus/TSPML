@@ -14,7 +14,8 @@ Thanks for your interest! TSPML is a Fabric-like mod loader for PolyTrack — pl
 - **Docs are living.** Every non-trivial decision gets an ADR; update progress.md per milestone. Stale docs are a bug.
 - **Run it yourself.** If a check is executable, run it. Automate browser checks with Playwright. Don't claim "untested" if you can test it.
 - **TypeScript**, strict, ESM. Conventional Commits. CI mandatory.
-- `pnpm install --ignore-scripts && pnpm -r build && pnpm -r test` should pass before pushing.
+- `pnpm install --ignore-scripts && pnpm -r build && pnpm -r test && pnpm -r lint` should pass before pushing. (`lint` is [`@tspml/typecheck`](./tooling/typecheck) — it typechecks the `.mjs` no package build reads: the headless smokes and the mappings pipeline. Run it **after** `build`, since it checks scripts importing workspace declarations.)
+- **The smokes are not optional proof.** Unit tests cannot see whether a transformed game boots — the injects reference the bundle's minified parameter names and only meet a parser when a real bundle is transformed. `pnpm --filter @tspml/portal smoke{,:tracks,:audio}` runs against the live game; the [Smoke workflow](./.github/workflows/smoke.yml) runs them per-PR (advisory) and daily.
 
 ## Writing a mod
 
