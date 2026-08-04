@@ -3,6 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The tspml CLI: publish to the registry, and mappings regen/diff.",
+  "description": "NOT IMPLEMENTED — reserved name for a future `tspml publish` (mod-registry) command. Mappings regen/diff lives in @tspml/mappings-pipeline. See ./README.md (#30).",
   "license": "MIT"
 }
