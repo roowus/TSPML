@@ -1,8 +1,13 @@
 # @tspml/cli
 
-The `tspml` CLI for maintainer operations.
+> **Status: NOT IMPLEMENTED — this package is a reserved name and nothing else (#30).**
+> It contains no source, no bin, no tests. There is no `tspml` command to install or
+> run. "Scaffolded" overstated it: a scaffold implies something to fill in, and this
+> is two metadata files.
 
-> **Status: scaffolded.** The mappings regen/diff/verify workflow is implemented in
+The `tspml` CLI for maintainer operations, when it exists.
+
+> The mappings regen/diff/verify workflow is implemented in
 > [`@tspml/mappings-pipeline`](../mappings-pipeline/) (`regen.mjs`) — it is co-located
 > with webcrack and the gitignored `.cache/` it drives, rather than in a
 > globally-installable CLI. Run it via `node tooling/mappings-pipeline/scripts/regen.mjs`.

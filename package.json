@@ -14,11 +14,5 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "docs:check": "echo \"docs site lands in a later milestone\""
-  },
-  "workspaces": [
-    "source/*",
-    "tooling/*",
-    "environments/*",
-    "packages/*"
-  ]
+  }
 }
