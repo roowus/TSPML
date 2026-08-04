@@ -427,3 +427,38 @@ portal.
 - **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
 - **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
 - **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
+
+## 2026-08-03 — #5 webcrack on Node 25: the claim was half wrong
+
+#5 recorded that `webcrack@2.x` "silently no-ops" on Node 25 because its `engines`
+range is `>=22 <23 || >=24 <25`. Measured it before documenting it, and the premise
+is only partly right:
+
+| Invocation | Node 25 |
+|---|---|
+| `npx webcrack` | ❌ exits 1, writes nothing, after only `npm warn EBADENGINE` |
+| `pnpm exec webcrack` (workspace copy) | ✅ works |
+| library API (`src/unpack.mjs`) | ✅ works |
+
+So it is an **npm-packaging constraint, not a runtime incompatibility** — the
+webcrack library itself is fine on 25, and even its CLI is fine when pnpm installs
+it. Only npm's engine enforcement blocks the install/bin step, and it does so in the
+worst way: no error names webcrack, so you get an empty output directory that reads
+like "the bundle had no modules".
+
+`source/mappings/README.md` had inherited the wrong version of this ("webcrack's
+unpack step required Node 22/24") — corrected.
+
+**Kept a guard rather than only prose.** The README's claim is true of webcrack 2.16
+today and is exactly the kind of thing that silently stops being true on a bump. Two
+tests: one unpacks a two-line string and asserts *files were written* (the #5 symptom
+is silence, so asserting "didn't throw" would miss it); one pins `src/unpack.mjs` to
+the library import so nobody "simplifies" it back to spawning npx. No `.cache/`, no
+network, no proprietary input, ~15ms — CI-runnable.
+
+The second guard initially failed against a *correct* file: `unpack.mjs`'s own header
+explains the npx hazard by name, and the regex matched the prose. Same false-alarm
+class as #19's stand-in drift test — strip comments before scanning code. Both guards
+mutation-checked.
+
+Also corrected a stale count in the pipeline README (26 → 39 tests).
