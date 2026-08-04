@@ -3,7 +3,9 @@ import type {
   Mod,
   ModApi,
   ModLoadStatus,
+  ModUnloadStatus,
   ResolveContext,
+  UnloadResult,
   VersionManifest,
   Warning,
 } from './types.js';
@@ -42,6 +44,22 @@ export interface LoadOptions {
 interface PreparedMod {
   mod: Mod;
   entrySpecifier: string;
+}
+
+/**
+ * What a successfully-invoked mod left behind for cleanup (#17).
+ *
+ * Two shapes, because the two entrypoint forms cleanly dispose differently:
+ * the class form owns an `onUnload` method on its instance, and the factory
+ * form has no instance — so it disposes by *returning* a function, the same
+ * convention `api.events.on` / `api.keybinds.register` already use.
+ */
+interface Disposable {
+  modId: string;
+  /** Class/object form: the instance whose `onUnload` we call. */
+  instance?: unknown;
+  /** Factory form: the disposer the factory returned, if it returned one. */
+  disposer?: () => unknown;
 }
 
 const CLASS_PREFIX = /^\s*class\b/;
@@ -97,13 +115,56 @@ export async function load(
 
   // 3. Invoke entrypoints in dependency order, isolated per mod.
   const entryByMod = new Map(prepared.map((p) => [p.mod.id, p.entrySpecifier]));
+  const disposables: Disposable[] = [];
   for (const mod of order) {
     const specifier = entryByMod.get(mod.id);
-    const result = await invokeMod(mod, specifier, importEntry, api, game);
+    const result = await invokeMod(mod, specifier, importEntry, api, game, disposables);
     status[mod.id] = result;
   }
 
-  return { order, status, warnings };
+  return { order, status, warnings, unload: makeUnload(disposables, api) };
+}
+
+/**
+ * Build the one-shot {@link LoadResult.unload} closure.
+ *
+ * Reverse order so a dependent tears down before its dependency — the mirror of
+ * load order. Isolated per mod, because a leaky mod throwing on the way out must
+ * not strand every mod after it (the same fail-small rule as loading).
+ */
+function makeUnload(disposables: Disposable[], api: ModApi) {
+  let done: Promise<UnloadResult> | undefined;
+  return function unload(): Promise<UnloadResult> {
+    // Idempotent: a page-teardown and an explicit disable can both fire, and
+    // running a mod's cleanup twice is exactly the double-free class of bug
+    // cleanup is supposed to prevent.
+    done ??= (async () => {
+      const status: Record<string, ModUnloadStatus> = {};
+      for (const d of [...disposables].reverse()) {
+        status[d.modId] = await disposeOne(d, api);
+      }
+      return { status };
+    })();
+    return done;
+  };
+}
+
+async function disposeOne(d: Disposable, api: ModApi): Promise<ModUnloadStatus> {
+  try {
+    let ran = false;
+    if (d.disposer) {
+      await d.disposer();
+      ran = true;
+    }
+    if (d.instance !== undefined && (await runHook(d.instance, 'onUnload', api))) {
+      ran = true;
+    }
+    return ran ? { status: 'unloaded' } : { status: 'no-op' };
+  } catch (err) {
+    const reason = describeError(err);
+    api.logger.error({ mod: d.modId, phase: 'unload', reason });
+    return { status: 'failed', reason };
+  }
 }
 
 async function invokeMod(
@@ -112,6 +173,7 @@ async function invokeMod(
   importEntry: (specifier: string) => Promise<unknown>,
   api: ModApi,
   game: unknown,
+  disposables: Disposable[],
 ): Promise<ModLoadStatus> {
   try {
     const module = await importEntry(specifier ?? '');
@@ -121,15 +183,30 @@ async function invokeMod(
       if (isClass(defaultExport)) {
         // Class form: instantiate, then run whatever lifecycle hooks exist.
         const instance = new (defaultExport as new () => unknown)();
+        // Retain it: `onUnload` lives on the instance, and this local used to
+        // be dropped on the floor — which is why the hook was unreachable (#17).
+        disposables.push({ modId: mod.id, instance });
         await runHook(instance, 'preInit', api);
         await runHook(instance, 'init', api);
         await runHook(instance, 'ready', api);
       } else {
-        // Factory form: default(api, game) => {}
-        await defaultExport(api, game);
+        // Factory form: default(api, game) => {} | (() => void)
+        // A factory has no instance, so it opts into cleanup by returning a
+        // disposer — the same convention api.events.on/keybinds.register use.
+        const returned = await defaultExport(api, game);
+        // Recorded even when it returns nothing, so every mod that LOADED shows
+        // up in the unload report (as `no-op`). A silently absent entry reads
+        // like "we forgot about this mod", which is the wrong signal for a host
+        // surfacing cleanup results.
+        disposables.push(
+          typeof returned === 'function'
+            ? { modId: mod.id, disposer: returned as () => unknown }
+            : { modId: mod.id },
+        );
       }
     } else if (defaultExport !== undefined && defaultExport !== null) {
       // Non-function default: treat as a pre-instantiated instance with hooks.
+      disposables.push({ modId: mod.id, instance: defaultExport });
       await runHook(defaultExport, 'preInit', api);
       await runHook(defaultExport, 'init', api);
       await runHook(defaultExport, 'ready', api);
@@ -155,17 +232,20 @@ function readDefaultExport(module: unknown, modId: string): unknown {
   );
 }
 
+/** @returns whether the hook existed and ran (lets unload report `no-op`). */
 async function runHook(
   instance: unknown,
-  hook: 'preInit' | 'init' | 'ready',
+  hook: 'preInit' | 'init' | 'ready' | 'onUnload',
   api: ModApi,
-): Promise<void> {
+): Promise<boolean> {
   if (instance !== null && typeof instance === 'object') {
     const fn = (instance as Record<string, unknown>)[hook];
     if (typeof fn === 'function') {
       await (fn as (api: ModApi) => unknown | Promise<unknown>).call(instance, api);
+      return true;
     }
   }
+  return false;
 }
 
 function defaultImportEntry(specifier: string): Promise<unknown> {

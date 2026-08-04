@@ -207,3 +207,136 @@ describe('load — entrypoint contract', () => {
     expect(result.status['roundtrip']).toEqual({ status: 'loaded' });
   });
 });
+
+// #17: `onUnload` was declared on TspmlMod and `loader.onUnload` was documented
+// as "fixes PML's missing-cleanup bug" — but nothing ever called it. The class
+// instance was a local inside invokeMod and was dropped on the floor, so the
+// hook was unreachable BY CONSTRUCTION, not merely unwired. Mods could not
+// detach listeners, keybinds, or DOM.
+describe('load — unload (#17)', () => {
+  it('calls onUnload on a class-form mod, with the api', async () => {
+    const seen: string[] = [];
+    let gotApi: unknown;
+    class Mod extends TspmlMod {
+      override init(): void {
+        seen.push('init');
+      }
+      override onUnload(api: ModApi): void {
+        seen.push('onUnload');
+        gotApi = api;
+      }
+    }
+    const result = await load([descriptor('m')], {
+      importEntry: fakeImportEntry({ m: Mod }),
+      api: noopApi,
+    });
+    expect(seen).toEqual(['init']); // not yet — unload is explicit
+
+    const un = await result.unload();
+    expect(seen).toEqual(['init', 'onUnload']);
+    expect(un.status['m']).toEqual({ status: 'unloaded' });
+    // Handed the api, so a mod can events.off(...) without stashing it at init.
+    expect(gotApi).toBe(noopApi);
+  });
+
+  it('calls the disposer a factory-form mod returns', async () => {
+    let disposed = 0;
+    const result = await load([descriptor('f')], {
+      importEntry: fakeImportEntry({ f: () => () => { disposed++; } }),
+      api: noopApi,
+    });
+    expect(disposed).toBe(0);
+    const un = await result.unload();
+    expect(disposed).toBe(1);
+    expect(un.status['f']).toEqual({ status: 'unloaded' });
+  });
+
+  it('reports no-op for a mod that exposes no cleanup', async () => {
+    const result = await load([descriptor('bare')], {
+      importEntry: fakeImportEntry({ bare: () => {} }),
+      api: noopApi,
+    });
+    const un = await result.unload();
+    // Distinguishable from 'unloaded': "nothing to clean up" is not the same
+    // claim as "cleanup ran", and a host surfacing this should not conflate them.
+    expect(un.status['bare']).toEqual({ status: 'no-op' });
+  });
+
+  it('unloads in REVERSE load order', async () => {
+    const calls: string[] = [];
+    const mod = (id: string) => () => () => { calls.push(id); };
+    const result = await load(
+      [descriptor('feature', { depends: { core: '*' } }), descriptor('core')],
+      { importEntry: fakeImportEntry({ core: mod('core'), feature: mod('feature') }), api: noopApi },
+    );
+    expect(result.order.map((m) => m.id)).toEqual(['core', 'feature']);
+    await result.unload();
+    // A dependent must tear down before the mod it depends on — otherwise
+    // 'feature' cleans up against a 'core' that has already released its state.
+    expect(calls).toEqual(['feature', 'core']);
+  });
+
+  it('isolates a throwing onUnload — the other mods still tear down', async () => {
+    const calls: string[] = [];
+    const good = (id: string) => () => () => { calls.push(id); };
+    const result = await load(
+      [descriptor('a'), descriptor('boom'), descriptor('c')],
+      {
+        importEntry: fakeImportEntry({
+          a: good('a'),
+          boom: () => () => { throw new Error('leaky mod'); },
+          c: good('c'),
+        }),
+        api: noopApi,
+      },
+    );
+    const un = await result.unload();
+    // Fail small, exactly as loading does: one leaky mod must not strand the
+    // cleanup of every mod ordered before it.
+    expect(calls).toEqual(['c', 'a']);
+    expect(un.status['boom']).toEqual({ status: 'failed', reason: 'leaky mod' });
+    expect(un.status['a']).toEqual({ status: 'unloaded' });
+    expect(un.status['c']).toEqual({ status: 'unloaded' });
+  });
+
+  it('is idempotent — a page teardown racing an explicit disable is safe', async () => {
+    let disposed = 0;
+    const result = await load([descriptor('once')], {
+      importEntry: fakeImportEntry({ once: () => () => { disposed++; } }),
+      api: noopApi,
+    });
+    await Promise.all([result.unload(), result.unload()]);
+    await result.unload();
+    // Running cleanup twice is the double-free bug cleanup exists to prevent.
+    expect(disposed).toBe(1);
+  });
+
+  it('does not unload a mod that failed to load', async () => {
+    const result = await load([descriptor('ok'), descriptor('bad')], {
+      importEntry: fakeImportEntry({ ok: () => () => {} }),
+      api: noopApi,
+    });
+    expect(result.status['bad']?.status).toBe('failed');
+    const un = await result.unload();
+    expect(un.status['bad']).toBeUndefined();
+    expect(un.status['ok']).toEqual({ status: 'unloaded' });
+  });
+
+  it('awaits an async onUnload before resolving', async () => {
+    let finished = false;
+    class Slow extends TspmlMod {
+      override async onUnload(): Promise<void> {
+        await new Promise((r) => setTimeout(r, 10));
+        finished = true;
+      }
+    }
+    const result = await load([descriptor('slow')], {
+      importEntry: fakeImportEntry({ slow: Slow }),
+      api: noopApi,
+    });
+    await result.unload();
+    // A host emitting loader.onUnload after this must be able to trust that
+    // cleanup has actually completed, not merely started.
+    expect(finished).toBe(true);
+  });
+});

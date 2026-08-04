@@ -28,6 +28,12 @@ export interface ModLoadSummary {
   readonly loaded: readonly string[];
   readonly failed: ReadonlyArray<{ id: string; reason: string }>;
   readonly safety: readonly ModSafetyEntry[];
+  /**
+   * Tear down every loaded mod, in reverse load order (#17). Idempotent.
+   * The caller emits `loader.onUnload` around this — the loader itself has no
+   * emit capability (`ModApi.events` is `on`/`off` only).
+   */
+  readonly unload: () => Promise<void>;
 }
 
 /**
@@ -65,5 +71,17 @@ export async function loadMods(api: ModApi): Promise<ModLoadSummary> {
     }
   }
 
-  return { loaded, failed, safety };
+  return {
+    loaded,
+    failed,
+    safety,
+    unload: async () => {
+      const un = await result.unload();
+      for (const [id, s] of Object.entries(un.status)) {
+        // A mod that throws on the way out is isolated by the loader, but it is
+        // still a leak the author needs to see — don't swallow it.
+        if (s.status === 'failed') api.logger.error(`[tspml] mod '${id}' failed to unload: ${s.reason}`);
+      }
+    },
+  };
 }
