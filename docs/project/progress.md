@@ -472,9 +472,80 @@ fix.
 
 **225 tests green** (22 new, all in the new `source/shared`), `pnpm -r build` clean.
 
-## Where we stand (2026-08-02)
+## 2026-08-03 — #11: the audio registry, and the blocker that wasn't ✅
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · shared (22) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **225 tests green**, CI green.
+`api.audio` overrides the game's real sounds. A mod passes a `key` and a `url`; the game's
+own `getBuffer("click")` then returns the mod's clip, and `unregister` brings the original
+back. Headlessly proven against the live game — the load-bearing number in
+`smoke:audio`'s output is the game's own lookup going **0.032s → 0.37s → 0.032s**.
+
+**The issue's premise was wrong, and finding that out was most of the work.** #11 was
+filed as "the audio manager is a bootstrap-scope local the module locator can't see", and
+the previous session's plan was a locator disambiguator: module 641 has four constructors,
+the locator takes `matched[0]`, so capturing from there needed new machinery. All true —
+and all unnecessary. Reading the bundle again with a different question ("who *receives*
+this object?" instead of "where is it *built*?") found the audio manager sitting at
+**parameter 3 of the track-selection UI's constructor** — parameter 5 of which is the
+TrackManager we already patch for #12. Same module (8185), same constructor, same inject.
+
+So #11 shipped with **no locator change, no new anchor, no mappings edit, and no
+disambiguator** — a background workflow designing that disambiguator was stopped rather
+than allowed to finish solving a problem that had evaporated. Confirmed three independent
+ways before writing code: the constructor's own field assignments (`w ← n`), all three
+`new Sr.A(...)` call sites, and whole-bundle uniqueness of the `getBuffer` / `playUIClick`
+/ `load` definitions. The habit worth keeping: **before building new capture machinery for
+a bootstrap object, read the parameter lists of the constructors already patched.**
+
+**The obvious implementation was a latent crash.** #11 and every doc referencing it said
+"override clips via the game's own `load()`". That would have shipped a guaranteed
+production failure: `load()` starts with `addResource()` on the loading-screen tracker,
+which throws `"Cannot add resources after loading is complete"` once boot finishes — and
+instance capture is late-binding by nature, so *every* mod call lands in exactly that
+window. Unit tests would have passed happily against a mock `load`.
+
+The registry **shadows the read path** instead: an own-property `getBuffer` on the captured
+instance that answers from the mod's map and delegates to the bound prototype method
+otherwise. Better on three counts beyond not crashing — `unregister` restores the original
+exactly (`delete` the own property), the game's resource tracker is untouched, and decoding
+runs through the game's *own* `AudioContext` so the buffer is guaranteed compatible with
+the graph that will play it. Generalized in
+[hook-system.md](../design/hook-system.md): prefer shadowing the accessor the game reads
+through over invoking the loader it read through at boot.
+
+**A mock that would have hidden the bug it was written to catch.** The api-bridge test's
+fake manager puts `getBuffer` on a **class prototype**, not an instance arrow property.
+With an instance property, `dispose()`'s `delete` would appear to restore correctly in
+tests while doing nothing against the real game — the mock's shape *is* the assertion.
+Paired with a test that asserts a throwing `load` spy is **never called**, so the
+`addResource` trap can't be walked back into.
+
+**One existing test failed and was right to be rewritten, not loosened.** The shared-package
+invariant "every payload that touches the bridge guards it" was pinned to the literal string
+`window.__tspml &&`; the combined track+audio capture spells its guard `window.__tspml)` as
+the head of a nested `if`. The assertion now matches the *property check* (`/window\.__tspml\s*(&&|\))/`)
+rather than one spelling of it. The two captures are also guarded **independently**, so an
+audio-side rename in a future game version cannot take the tracks capture down with it —
+enforced by a test.
+
+**HMR discipline matters more for audio than for tracks.** An overridden clip stays in the
+game's buffer lookup until unregistered, so a hot-swap that forgot would leave the previous
+mod's sounds playing with nothing owning them. The harness's tracking wrapper now records
+audio keys alongside track names, with a `res.key ?? a.key` fallback so an upstream shape
+change can't silently drop a disposal record.
+
+**The smoke synthesizes its own clip** — an 8 kHz mono WAV blob built in-page at a chosen
+0.37 s. No committed binary, no network, and a duration we picked, which is what makes
+"did the override land" checkable *by value* rather than by vibe. It needs
+`--autoplay-policy=no-user-gesture-required`: `decodeAudioData` wants a running context and
+a headless page never clicks anything. That browser-policy caveat is now documented on the
+public type — a clip can register successfully and stay inaudible until the player
+interacts, which is the game's suspended `AudioContext`, not a registry failure.
+
+**247 tests green** (22 new: 14 api-bridge · 6 dev-harness · 2 shared), `pnpm -r build` clean.
+
+## Where we stand (2026-08-03)
+
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (11) — **247 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -483,9 +554,69 @@ fix.
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
 - **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
-- **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
-- **Open:** #10 (player-only), #11 (audio — try instance capture next), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
-- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique — now a documented pattern with a shared home for its capture patches.
+- **#11 ✅** — audio registry: a mod's clip replaces a real game sound in **both** surfaces, via the *same* capture as `api.tracks`. Two content registries now work.
+- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
+- **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto.
+
+## 2026-08-03 — #19: the scaffold was unusable outside this monorepo ✅
+
+`create-tspml-mod` printed two commands. The first one died:
+
+```
+ERR_PNPM_WORKSPACE_PKG_NOT_FOUND  "@tspml/api@workspace:*" is in the
+dependencies but no package named "@tspml/api" is present in the workspace
+```
+
+and `mod.json` pointed `entrypoint` at `entrypoint.js`, a path no build has ever
+emitted. So the advertised getting-started path was broken end to end, from the
+first command to the artifact the loader would look for.
+
+**Every scaffold test passed the entire time.** This is the same shape as #25 and
+worth stating as a rule: those four tests assert on the *contents* of generated
+files, and the contents were correct. What was broken was what happened when you
+ran them. **Asserting that generated text is right is not asserting that the
+generated project works** — the only check that would have caught this is one
+that runs the real compiler against a real scaffold on disk, which the suite now
+does.
+
+The fix is broader than the issue title. Dropping `workspace:` is not enough:
+`@tspml/api` is unpublished, so depending on it by **any** range breaks install
+for an external author. The scaffold therefore ships `types/tspml-api.d.ts`, a
+hand-written stand-in covering only the members the starter uses. A stand-in can
+rot silently, which would be worse than no types at all — so a test pins its
+member *names* to the real `TspmlApi`, subset-wise (it may omit `tracks`/`audio`;
+it may never declare something the real API lacks). A rename upstream now fails
+CI here instead of shipping a broken scaffold.
+
+`rootDir` is `"."` rather than `"src"` because `types/` sits beside it. That
+moves emission to `dist/src/entrypoint.js`, and the manifest now says so — with
+the expected path *derived from* the generated tsconfig's `outDir`/`rootDir` in
+the test, so the compiler and the manifest cannot drift apart.
+
+**Five guards, each verified to fail when its defect is reintroduced.** Mutation-
+checking these was not ceremony: two of them were quietly broken. A naive
+`/readonly (\w+):/` over the stand-in also matches `readonly id` in
+`KeybindBinding` and reports a false drift alarm; `\bapi\.` matches inside
+`'../types/tspml-api.js'` (the hyphen is a word boundary) and yields a phantom
+member `js`. Both were found by mutating, not by the tests going green.
+
+**`npx create-tspml-mod` was a false claim in the README.** `npm view
+create-tspml-mod` → E404; the package is `private` and unpublished, so that
+command 404s for every reader. Three docs advertised it. All three now give the
+working invocation (`node .../bin/create-tspml-mod.mjs`) and say why. Two further
+staleness bugs surfaced next to it in `getting-started.md`: the sample imported
+`@tspml/api`, which the scaffold no longer provides, and it documented
+`dist/entrypoint.js`.
+
+I did not publish the package. It is outward-facing and irreversible, so it is
+the owner's call; the package is otherwise publish-ready (scoped `files`,
+repository metadata) and carries a `//publish` note with the remaining steps.
+
+Two of #19's four premises were already fixed and were not re-fixed: the tsconfig
+was already self-contained, and `api.logger` was already on `TspmlApi`. Verifying
+the issue text against the code before acting on it saved doing both twice.
+
+**257 tests green** (252 + 5), build and lint clean. PR #45, branched off `main`.
 
 ## 2026-08-03 — #43 spike: WASM constants can be located structurally
 
