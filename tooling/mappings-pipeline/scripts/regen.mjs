@@ -27,7 +27,7 @@
 // Local-only: needs webcrack + the cached 0.6.0 renamed source (gitignored). Not run
 // in CI (the bundle is not committed). The pure diff/verify logic IS unit-tested.
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, stat, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, resolve } from "node:path";
@@ -75,11 +75,27 @@ function compareSemver(a, b) {
 }
 
 /** Spawn a node script, inherit stdio (so gen-map's report + the candidate path show
- *  through), reject on non-zero exit. Array args only — never shell=True. */
-function runNode(script, args, env = {}) {
+ *  through), reject on non-zero exit. Array args only — never shell=True.
+ *
+ *  Uses `spawn`, not `execFile`: `execFile` has no `stdio` option, so the
+ *  `stdio: "inherit"` this function was passing was silently dropped and gen-map's
+ *  report — the thing a maintainer reads to decide whether to promote a candidate
+ *  map — was buffered into a discarded string instead of being printed. `execFile`
+ *  would also have truncated it at the 1 MB default `maxBuffer`. Found by the #25
+ *  typecheck, not by a run: the failure looks like "gen-map is quiet", which reads
+ *  as normal.
+ *
+ *  Exported so a test can drive the REAL function. A test that re-declared this
+ *  shape would have passed against the broken `execFile` version too. */
+export function runNode(script, args, env = {}) {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: "inherit" }, (err) =>
-      err ? reject(err) : resolve(),
+    const child = spawn(process.execPath, [script, ...args], {
+      env: { ...process.env, ...env },
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`${script} exited ${code}`)),
     );
   });
 }
@@ -136,7 +152,20 @@ async function modeRegen(version, flags) {
   // 1. fetch
   if (!flags.noFetch) {
     process.stderr.write(`[1/5] fetch ${version} from CDN\n`);
-    await fetchVersion(version, CACHE, { only: "main" });
+    const fetched = await fetchVersion(version, CACHE, { only: "main", chunks: flags.chunks });
+    // Chunk coverage is a review signal, not a pipeline input (#3): in 0.6.2 the four
+    // split chunks are UI-only (editor/verifier/profile/settings panels) and hold zero
+    // mod-facing target anchors, so gen-map still matches main alone. Report what was
+    // downloaded so a release that moves game logic into a chunk is visible here
+    // rather than discovered as a mystery drop in match rate.
+    const chunks = fetched.filter((r) => r.kind.startsWith("chunk-"));
+    if (flags.chunks) {
+      process.stderr.write(
+        chunks.length
+          ? `      chunks: ${chunks.map((c) => c.kind.slice(6)).join(", ")} (fetched for review; not matched)\n`
+          : `      chunks: none — this build declares no split chunks\n`,
+      );
+    }
   } else {
     process.stderr.write(`[1/5] fetch skipped (--no-fetch)\n`);
   }
@@ -195,6 +224,7 @@ async function main() {
     console.error(`usage:
   regen.mjs <version> [options]        full regen + review
     --no-fetch        use an already-cached bundle (skip CDN download)
+    --chunks          also fetch the build's split chunks (review only; see #3)
     --reunpack        re-webcrack even if the unpacked dir exists
     --src <dir>       source unpacked dir (default .cache/webcrack/v060-renamed)
     --tgt <dir>       target unpacked dir (default .cache/webcrack/v<ver>-raw)
@@ -208,10 +238,15 @@ async function main() {
   const flag = (k) => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : undefined; };
   return modeRegen(version, {
     noFetch: process.argv.includes("--no-fetch"),
+    chunks: process.argv.includes("--chunks"),
     reunpack: process.argv.includes("--reunpack"),
     src: flag("--src"), tgt: flag("--tgt"), bundle: flag("--bundle"),
     prev: flag("--prev"), out: flag("--out"),
   });
 }
 
-main().catch((e) => { console.error(`\nregen failed: ${e.message}`); process.exit(1); });
+// Run the CLI only when executed directly, so a test can import `runNode` without
+// kicking off a regen. Mirrors the same guard in src/fetch.mjs.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((e) => { console.error(`\nregen failed: ${e.message}`); process.exit(1); });
+}

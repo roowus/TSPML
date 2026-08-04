@@ -1,0 +1,50 @@
+// Typecheck the headless smoke scripts (issue #25).
+//
+// The smokes are the only end-to-end proof the transformed game boots, and they
+// were the one body of code nothing checked: they are `.mjs`, so `pnpm -r build`
+// (which is `tsc -p` per package plus `next build` / `vite build`) never looked at
+// them, and vitest never imports them. A typo in a smoke surfaces as a confusing
+// runtime failure during a release check — or worse, as a smoke that silently stops
+// asserting what its name claims.
+//
+// The five smokes span two packages (`@tspml/portal`, `@tspml/dev-harness`) and are
+// the same kind of artifact, so one checker covers them all rather than two
+// half-configs bolted onto packages whose own builds have a different remit.
+//
+// `checkJs` on plain `.mjs` needs two things the scripts cannot declare themselves:
+//   1. Node globals + `node:*` module types — hence `types: ["node"]`.
+//   2. The bridge globals the smokes read INSIDE `page.evaluate()`. Those callbacks
+//      run in the GAME's realm, where `window.__tspml` is installed at runtime, so
+//      no static type exists. `smoke-globals.d.ts` declares them, deliberately as
+//      `any` — see the rationale in that file.
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022", "dom"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    // NOT strict, deliberately. Under `strict` these five scripts produce 231
+    // diagnostics, ~all of them `noImplicitAny` on inline callback params and
+    // shape complaints about result objects that are built up field by field.
+    // Annotating all of that would be a large diff that makes the smokes harder
+    // to read in exchange for no defect caught.
+    //
+    // What non-strict `checkJs` still catches is exactly what a smoke gets wrong
+    // in practice: a misspelled property on a typed value (`page.waitForTimeut`),
+    // wrong arity on a Playwright call, a typo'd import, a `const` reassignment,
+    // an await forgotten on a call whose result is then indexed. Those are the
+    // failures that otherwise show up as a baffling runtime error thirty seconds
+    // into a browser run.
+    "strict": false
+  },
+  "include": [
+    "smoke-globals.d.ts",
+    "../../source/portal/scripts/**/*.mjs",
+    "../../environments/dev-harness/scripts/**/*.mjs"
+  ]
+}

@@ -543,9 +543,126 @@ interacts, which is the game's suspended `AudioContext`, not a registry failure.
 
 **247 tests green** (22 new: 14 api-bridge · 6 dev-harness · 2 shared), `pnpm -r build` clean.
 
+
+
+## 2026-08-03 — #25: CI runs the smokes, and the first typecheck of the unchecked ✅
+
+Two gaps, both of the same shape: **code nothing was reading.**
+
+**The smokes never ran in CI.** They are the only end-to-end proof a transformed game
+boots — the injects reference the bundle's minified parameter names and only ever meet
+a parser when a real bundle is transformed, so this whole failure class is invisible to
+`pnpm -r test`. Now `.github/workflows/smoke.yml` runs all three portal smokes per-PR
+and daily.
+
+**It is deliberately advisory, not a required check.** The job fetches the live game at
+run time, so it can go red for reasons that have nothing to do with the commit: the CDN
+is down, or Kodub shipped 0.6.3 and the pinned hash no longer matches. A required check
+that goes red on someone else's release teaches people to ignore red. What earns its
+keep is the **daily** schedule — it finds a game update the day it lands, not the next
+time somebody opens a PR.
+
+**A canary job makes a red smoke interpretable.** It compares the live
+`main.bundle.js` against the map's `bundleHash` *before* the smokes run. Canary red
+means the game shipped a new build, every surface has fail-closed to vanilla, and the
+downstream failures are expected fallout. Canary green + smoke red means the commit
+broke something. Without that split, "smoke is red" is two very different messages
+wearing the same colour.
+
+Verified the CI-critical unknown first, rather than writing the workflow and hoping:
+**does the smoke pass against `next start`?** CI should exercise the path the product
+ships, and nobody had ever run the smoke against a production build. It does —
+1,791,279 B served vs 1,782,239 B upstream, all Tier-1 events, `PASS: true`.
+
+**The canary's first real run failed — and it was the canary that was broken.** It read
+`version` from the map; the field is `gameVersion`. `node -p` printed the string
+`"undefined"`, the URL 404'd, `curl -f` failed, and the job reported *"the game shipped a
+new build"* on a day the live bundle hashed **exactly** to the pin.
+
+That is the worst failure available to a job whose entire purpose is telling you which
+kind of red you are looking at. A canary that cries wolf is worse than no canary: it
+launders a defect in our own CI into "not our problem, Kodub shipped something." Two
+guards now make the confusion impossible — an explicit check that the map fields
+actually read, and a fetch separated from the hash. The second matters more than it
+looks: piping `curl` straight into `shasum` **hashes the empty string on a 404** and
+produces a perfectly plausible wrong hash. Both paths now say *"canary is broken, not
+the game."*
+
+It took a live CI run to find, because locally every piece had been verified
+individually — the hash matched, the URL worked — just never through the script that
+would run them. **Verifying the parts is not verifying the whole.**
+
+### The lint half found a real bug in the highest-consequence code
+
+`pnpm lint` existed at the root and matched **no package at all**. Rather than adding a
+linter for style, [`@tspml/typecheck`](../../tooling/typecheck) typechecks the two
+bodies of `.mjs` that nothing read: the five headless smokes, and the mappings
+pipeline. Neither is covered by `pnpm -r build` (per-package `tsc -p` plus
+next/vite build — none of which see a loose `.mjs`) and neither is imported by vitest.
+
+The pipeline is the code that regenerates the symbol map on a game release. A mistake
+there does not fail loudly; it produces a *plausible but wrong candidate map*, and the
+map is what every surface hash-gates against. First run, four findings, one real:
+
+**`regen.mjs` passed `stdio: "inherit"` to `execFile`, which has no `stdio` option.**
+Node ignored it, so gen-map's report — the thing a maintainer reads to decide whether
+to promote a candidate map — was buffered into a string the callback discarded instead
+of being printed. `execFile` would also have truncated it at the 1 MB default
+`maxBuffer` had anything read it. Fixed to `spawn`.
+
+**Why that survived every run and every test:** the symptom is *"the regen is oddly
+quiet."* Silence reads as normal. There is no error, no crash, no wrong value — just an
+absent report, and absence is exactly what a human does not notice. This is the second
+time in two days that a bug hid in something that *looks like nothing happening* (the
+first was the early-capture stub, where a dropped capture left the registry waiting
+forever with no error anywhere). Worth naming as a class: **when a failure mode is
+silence, no amount of running the thing will find it — only a checker that reads the
+code, or a test that asserts the output exists.**
+
+The other three were type hygiene: a `readonly` array passed to a mutable parameter, a
+`let status` widened to `string` where a three-value union was meant, and a mixed-element
+array needing a tuple annotation before `re.test()` typechecked.
+
+### Two decisions worth recording
+
+**Non-strict, deliberately.** Under `strict` the smokes alone produce **231**
+diagnostics — nearly all `noImplicitAny` on inline callback params, plus complaints
+about result objects built up field by field. That is a large diff that makes the
+smokes harder to read and catches no defect. Non-strict `checkJs` still catches what
+these scripts actually get wrong, which I verified by injecting each kind and
+confirming a non-zero exit: `page.waitForTimeut` → *"Did you mean 'waitForTimeout'?"*,
+`page.frames().nope()`, `browser.closeNow()`. A checker earns `strict` by letting a
+real defect through, not by being available.
+
+**The bridge globals are typed `any` on purpose.** The smokes read `window.__tspml`
+inside `page.evaluate()`, whose callbacks run in the *game frame's realm* — the value
+does not exist in the Node process doing the checking, so there is nothing to import.
+Typing it properly would make five smokes compile-time consumers of the bridge's
+internals, so refactoring `__tspml` would break the typecheck of scripts that do not
+care about it. `api.audio`/`api.tracks` already have real types in `@tspml/api`.
+
+### The test had to spawn real processes
+
+`tests/regen-runnode.test.mjs` (5 tests) guards the fix, and both obvious shortcuts
+would have been worthless:
+
+- **Mocking `child_process` would have passed against the broken code.** The bug was
+  that Node *ignored an option we correctly passed*. A mock asserting "we passed
+  `stdio: "inherit"`" is true of both versions. Only real inherited stdio distinguishes
+  them — the assertion has to be that the parent's own fd receives the child's bytes.
+- **Re-declaring `runNode` in the test would also have passed.** So `regen.mjs` now
+  *exports* it, behind a `process.argv[1] === fileURLToPath(import.meta.url)` guard so
+  importing the module does not kick off a regen (mirroring `fetch.mjs`). The test
+  drives the real function.
+
+Confirmed by reverting to the `execFile` form: **4 of the 5 fail.** A regression test
+that never fails against the bug it describes is decoration.
+
+**252 tests green** (5 new), `pnpm -r build` + `pnpm -r lint` clean.
+
 ## Where we stand (2026-08-03)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (11) — **247 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (4) · mappings-pipeline (42) · dev-harness (11) — **252 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -555,7 +672,8 @@ interacts, which is the game's suspended `AudioContext`, not a registry failure.
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
 - **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
 - **#11 ✅** — audio registry: a mod's clip replaces a real game sound in **both** surfaces, via the *same* capture as `api.tracks`. Two content registries now work.
-- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
+- **#25 ✅** — CI runs the three portal smokes (advisory per-PR + daily, with a bundle-hash canary so a red smoke is interpretable), and `pnpm -r lint` is real: [`@tspml/typecheck`](../../tooling/typecheck) checks the `.mjs` no build reads. Found a live defect in `regen.mjs`.
+- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
 - **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto.
 
 ## 2026-08-03 — #19: the scaffold was unusable outside this monorepo ✅
@@ -617,6 +735,8 @@ was already self-contained, and `api.logger` was already on `TspmlApi`. Verifyin
 the issue text against the code before acting on it saved doing both twice.
 
 **257 tests green** (252 + 5), build and lint clean. PR #45, branched off `main`.
+
+
 
 ## 2026-08-04 — #1 (structural fingerprints: 0.848 -> 0.939)
 
@@ -680,6 +800,214 @@ so it wants its own PR with a full regen diff.
 | accept a hairline structural gap (`minStructural` removed) | 2 failed / 53 passed |
 | stop distinguishing computed from static member access | 1 failed / 54 passed |
 | restored | 55 passed |
+
+## 2026-08-03 — #43 spike: WASM constants can be located structurally
+
+#43 is the one capability gap in PML's favour (they ship `registerPhysicsMixin`,
+byte-offset patching of `polytrack_physics.wasm`) and it gates M11. It poses an open
+question: can we locate constants *structurally*, so the map stays re-derivable,
+rather than copying their offset table? Spiked it. **Answer: yes, 97.4%.**
+
+**Finding 1 — the physics binary is byte-identical across 0.6.0/0.6.1/0.6.2.**
+396,005 B, sha256 `d4ef0267…4c180e`, all three. The JS bundle re-minifies every
+release; this artifact has not moved once. So offset patching works *today* and
+breaks *silently* on the next recompile — and a wasm-specific hash pin is cheap right
+now because there is exactly one hash to pin. (It lives at
+`<ver>/polytrack_physics.wasm`, not under `lib/` as the glue's `importScripts` hints.)
+
+**Finding 2 — no name section.** 14 exports, all single letters. Structural matching
+isn't the better option, it's the only one.
+
+**Finding 3 — constants alone don't locate.** 36 f64 constants (all math-library: π,
+trig coefficients) and 98 f32 (physics runs in f32 — a patcher must compare through
+`Math.fround` or find nothing). No gravity constant exists in the 9–10.5 range, so
+that knob is probably a runtime parameter, not a baked-in value. And a symmetric-clamp
+idiom for ±10 matches 3 sites — the same ambiguity as the `"PolyTrack2"` anchor.
+
+**Finding 4 — fingerprint the containing function, then index within it.** Sorted
+multiset of float constants + opcode-byte histogram, no offsets or indices:
+**535/549 functions (97.4%) uniquely identified**; constants alone got 151/188. Four
+residual collision groups are near-certainly byte-identical template instantiations.
+
+Relocation was tested for real rather than asserted: inserting 4,096 bytes before the
+code section leaves the stale offset pointing at garbage while the signature
+re-derives the exact new address, uniquely.
+
+`locateBySignature` **fails closed on ambiguity as well as absence**. For JS a
+mis-target is a patch that does nothing; here it would write a float into an
+unidentified function, so anything short of a unique match must refuse.
+
+Shipped as `tooling/mappings-pipeline/src/wasm-locate.mjs` + 14 tests that build
+synthetic wasm byte by byte, so CI never needs the proprietary binary. Three guards
+mutation-checked (ambiguity→pick-first, dropped tiling check, offset in fingerprint).
+Write-up: `docs/research/wasm-structural-location.md`.
+
+**Locating only — no patcher, deliberately.** That is a separate decision gated on the
+hash pin, and physics mods must feed the warn-only `classifySafety` labelling.
+Cross-version validation is impossible until PolyTrack ships a *different* binary;
+that release is the first real test.
+
+## 2026-08-04 — #3 (webpack split chunks: discovered, not probed)
+
+[#3](https://github.com/roowus/TSPML/issues/3) asked for chunk fetching because "0.6.2
+splits more game code into webpack chunks" and full symbol coverage needs them. Measuring
+first retired the premise and changed the shape of the fix.
+
+**The size drop was pretty-printing, not chunking.** The cached `pt-0.6.0-raw-main.js` is
+3.76 MB across 71,457 lines (59.4% whitespace); 0.6.2 is 1.78 MB across 25 lines (3.3%).
+Whitespace-collapsed: 1,762,889 B vs 1,727,783 B — the same code volume. The four real
+chunks total 202,074 B, nowhere near the ~2 MB the issue's reasoning implied.
+
+**The chunks are UI-only.** 112 (108,037 B), 535 (13,182 B), 604 (74,464 B), 657 (6,391 B)
+hold the editor toolbar, track verifier, profile selection and settings panels. Of the 11
+distinct mod-facing target literals, only `PolyTrack2` appears in a chunk at all, plus 1 of
+TrackCodec's 4 — which `minHits: 4` correctly rejects. So `gen-map` matching `main` alone
+is *complete*, and `--chunks` ships **off by default** as a review signal: it makes a future
+release that moves game logic into a chunk visible at regen time instead of showing up as an
+unexplained drop in match rate.
+
+**Discovery, not probing.** `parseChunkIds` reads webpack's own `i.e(<id>)` call sites out
+of the runtime. A probe loop is wrong twice over: the CDN 404s with a 355-byte HTML page (a
+naive "did it download" check banks the error page as a chunk), and it still serves stale
+chunks from earlier builds — `0.6.2/57.bundle.js` returns 200 with real code that 0.6.2
+never loads. Anything the runtime does not reference is not part of the build, whatever the
+CDN says.
+
+Verified end-to-end: `parseChunkIds` yields `["112","535","604","657"]` for 0.6.2 and `[]`
+for 0.6.0 (unchunked — a legitimate no-op, not a throw); `fetch --chunks` downloaded all six
+files with per-file sha256; `regen.mjs 0.6.2 --chunks` printed
+`chunks: 112, 535, 604, 657 (fetched for review; not matched)` then `risk : NONE`.
+
+Guards mutation-checked before being trusted:
+
+| mutation | result |
+|---|---|
+| lexical sort instead of numeric | 1 failed / 41 passed |
+| no dedupe (array not Set) | 1 failed / 41 passed |
+| chunk-id validation removed | 1 failed / 41 passed |
+| chunk `cacheName` collides with `main` | 1 failed / 41 passed |
+| restored | 42 passed |
+
+That last collision case is the one worth keeping: a chunk overwriting
+`pt-<ver>-raw-main.js` would silently replace the bundle `gen-map` matches against.
+
+## 2026-08-03 — #30 (partial) stub packages stop overstating themselves
+
+#30 lists five places where the repo claims more than it has. Took the three that
+are disjoint from the open PR stack; `source/shared` is excluded because #38 is
+actively implementing it (it now has real `bridge-patches` / `early-capture`
+sources), and the root README layout block is owned by #40/#44.
+
+**The root `workspaces` field was inert *and* wrong.** It listed four globs, omitted
+`environments/demo-mods/*` that `pnpm-workspace.yaml` includes, and pnpm never reads
+it — pnpm uses the yaml exclusively. So it was a second, disagreeing source of truth
+that could only ever mislead. Deleted rather than corrected: keeping it in sync buys
+nothing, since nothing consumes it. Verified by enumerating members before and after
+— 15 both times, identical list.
+
+**`tooling/cli` said "scaffolded".** It has no source, no bin, no tests — two
+metadata files. "Scaffolded" implies something to fill in; this is a reserved name.
+Both the README and the `package.json` description now say NOT IMPLEMENTED and point
+at `@tspml/mappings-pipeline` for the workflow people actually want.
+
+**`tests/` and `scripts/`** advertised a "shared test harness", "cross-package
+integration tests", and "repo and build helper scripts". None exist. Both READMEs now
+say empty-on-purpose and table where the real thing lives — plus why co-location is
+deliberate (pipeline scripts sit next to webcrack and `.cache/`; smokes next to the
+app they load), so the next person doesn't "fix" it by centralizing.
+
+No guard test for this one. It would need a new workspace package to hold a single
+assertion about README prose, which is disproportionate and would immediately
+contradict the "empty on purpose" note it lives next to.
+
+Still open on #30: the duplicated `TargetSpec`/`ModuleAnchor` TODOs in
+`source/loader/src/types.ts` and `source/transform/src/types.ts` — both wait on #38.
+
+## 2026-08-03 — #16 `includes` is now honest
+
+`includes` was parsed, typed, validated, stored on `Mod` — and then never read by
+the resolver. A manifest declaring it loaded cleanly and the nested mod simply was
+not there. Same shape as #17: a field can be complete on every surface an author
+touches and still be structurally inert.
+
+**Decision: warn loudly, don't implement.** `includes` is Fabric's JAR-in-JAR
+analog, and TSPML has no delivery mechanism for it — we cannot install a mod from
+a directory *at all*, let alone one nested inside another package. Implementing it
+would mean inventing that mechanism first. Rejecting the field instead was also
+wrong: it is valid per the published spec, so rejecting would break conforming
+manifests, and the field may be honoured later.
+
+So `resolveDependencies` emits one `unsupported-includes` warning per included id,
+saying plainly that **the nested mod will NOT be loaded** and pointing at `depends`
+as the working alternative. The failure moves from silent-at-runtime to loud-at-
+authoring-time. `docs/api/mod-json-spec.md` says the same thing in both the
+semantics list and a ⚠️ callout.
+
+4 new tests (57 loader tests green). The guard was mutation-checked — neutering the
+loop turns 2 of them red.
+
+## 2026-08-03 — #17: `onUnload` was declared, documented, and never called ✅
+
+`TspmlMod.onUnload` was on the base class. `loader.onUnload` was in the published
+event map. Three docs called it *"fixes PML's missing-cleanup bug."* Nothing ever
+called it.
+
+The reason is worth recording, because it is not "we forgot to wire it up." In
+`invokeMod`, the class instance was a **local variable** — constructed, run
+through `preInit`/`init`/`ready`, and then dropped on the floor when the function
+returned. The hook was unreachable *by construction*. No amount of wiring at the
+host level could have reached it; the object holding the method no longer existed.
+
+**A feature can be declared, typed, exported, and documented while being
+structurally impossible to invoke.** Nothing in the type system objects: the
+declaration is well-formed and the method is legitimately optional. The tests
+didn't object either — they asserted load behaviour, and load behaviour was
+correct. This is the third variant of the same failure this week (#25's silence,
+#19's contents-not-behaviour, this one's unreachability), and the shared root is
+that we verified the piece rather than the path through it.
+
+`LoadResult.unload()` now tears down what loaded. Four properties, each chosen
+against a specific way cleanup goes wrong, and each **mutation-checked** — I
+reintroduced the defect and watched the test go red before trusting it:
+
+- **Reverse load order.** A dependent must dispose before its dependency, or it
+  cleans up against state already released. (Un-reversing it also broke the
+  isolation test, which tells me the two are entangled in a way worth knowing.)
+- **Per-mod isolation.** A leaky mod throwing on the way out must not strand the
+  cleanup of every mod after it — the same fail-small rule as loading.
+- **Idempotent.** A page teardown and an explicit disable can race, and running
+  cleanup twice is precisely the double-free that cleanup exists to prevent.
+- **Awaited.** An async `onUnload` finishes before `unload()` resolves, so a host
+  emitting `loader.onUnload` afterwards can trust cleanup actually completed.
+
+Two entrypoint forms, each disposed the way it naturally can be. The class form
+has an instance, so `onUnload(api)` is called on it — and it now *receives* the
+api, so a mod can `events.off(...)` without having stashed a reference at init.
+The factory form has no instance at all, so it opts in by **returning** a
+disposer: the same convention `api.events.on` and `api.keybinds.register` already
+follow, rather than a third mechanism to learn.
+
+A mod that loads but exposes no cleanup reports `no-op`, distinct from
+`unloaded`. "Nothing to clean up" is a different claim from "cleanup ran," and an
+*absent* entry would read as "we lost track of this mod" — the wrong signal for a
+host surfacing results.
+
+**Deliberate split: the loader calls cleanup but does not emit the event.**
+`ModApi.events` is `on`/`off` only, so the loader has no emit capability by
+design, and giving it one to fire a single event would widen the capability
+surface handed to every mod. The host that owns the bus emits `loader.onUnload`
+around the call; `loadMods` exposes `unload()` for exactly that.
+
+demo-hud turned out to be the proof case: it was discarding the disposers that
+`on` and `register` already returned — leaking exactly what #17 describes, in our
+own example mod. It now returns a disposer that detaches both.
+
+61 loader tests green (8 new), build and lint clean. PR off `main`.
+
+**Still open on #17:** the portal has no unload *trigger* wired (`pagehide` /
+iframe reload), because that lives in `page.tsx`, which unmerged #38 and #39 both
+modify. Deferred rather than conflicted — the capability and its host entry point
+are in place, so the trigger is a small follow-up once the stack lands.
 
 ## 2026-08-03 — #5 webcrack on Node 25: the claim was half wrong
 

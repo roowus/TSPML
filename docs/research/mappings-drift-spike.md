@@ -49,14 +49,27 @@ Source module `1223.js` (identifiers `controlCar`, `carState`, `createCar`, `car
 ## Caveats / what was NOT tested
 
 - **AST/structural matching not implemented** — the ~85% is from lexical anchors only. The improvement from structural fingerprints is projected, not measured.
-- **Chunk coverage.** The 0.6.2 main bundle is ~1.78 MB vs 0.6.0's ~3.4–3.7 MB — 0.6.2 splits more code into numbered chunks. Some game logic lives in chunks, not `main.bundle.js`; full coverage requires fetching + unpacking the chunks too (see issue).
+- **Chunk coverage — measured, and the original worry does not hold (#3).** The 0.6.2 main
+  bundle is ~1.78 MB vs the cached 0.6.0's ~3.76 MB, but that gap is **formatting, not
+  chunking**: the cached 0.6.0 file is pretty-printed (71,457 lines, 59.4% whitespace)
+  while 0.6.2 is minified (25 lines, 3.3%). Whitespace-collapsed they are 1,762,889 B vs
+  1,727,783 B — essentially the same code volume. The four real 0.6.2 chunks
+  (112/535/604/657) total only 202,074 B and are **UI-only** (editor toolbar, track
+  verifier, profile selection, settings panels). Of the 11 distinct mod-facing target
+  literals, only `PolyTrack2` appears in a chunk, and only 1 of TrackCodec's 4 literals —
+  which `minHits: 4` correctly rejects. So chunks hold **zero** mod-facing target anchors
+  today and `gen-map` matching main alone is complete. `fetch --chunks` exists as a
+  **review signal** (off by default) so a future release that moves game logic into a
+  chunk is visible at regen time rather than showing up as a mystery drop in match rate.
 - **No clean same-version control.** The polytrackmods "raw 0.6.0" build unpacked to only 120 modules (vs 211) — a structurally different build, so it's not a valid control. The matcher's precision (false-positive rate) is therefore eyeball-verified on samples, not measured against ground truth.
 - **One version pair.** 0.6.0→0.6.2 is a 2-point-release gap. A larger gap (e.g., 0.5.x→0.6.2) or a 0.7.0 with a re-chunk would stress the matcher more.
 
 ## Bonus discoveries (recorded as issues)
 
 1. **Game origin:** PolyTrack is served from `https://app-polytrack.kodub.com/<version>/`, **iframed** by `kodub.com/apps/polytrack`. The portal proxy must fetch from `app-polytrack.kodub.com`, not `kodub.com`. Confirms the portal can't iframe (CSP `frame-ancestors`).
-2. **0.6.2 is more chunked** (smaller `main.bundle.js`) — chunk fetching is required for full symbol coverage.
+2. **0.6.2 ships four split chunks** — but they are UI-only, and the apparent `main.bundle.js`
+   size drop was pretty-printing, not chunking (measured under #3; see the caveat above).
+   Chunk fetching is a review signal, not a coverage requirement.
 3. **webcrack Node engine** requires 22/24 (not 25); use the programmatic API, not the CLI.
 4. **`isolated-vm`** (webcrack dep, for sandboxed eval) has no working build on Node 25 — no prebuild for abi141, and a source build segfaults. Two corrections to how this was first recorded: it is a **required** dependency of webcrack, not an optional one, and it does **not** block install (pnpm 10 skips dependency build scripts, so the lockfile is committed). It only disables webcrack's obfuscator.io deobfuscation, which the minified PolyTrack bundle never triggers — unpacking on Node 25 is byte-identical to Node 22. See #2 and `tooling/mappings-pipeline/README.md`.
 5. **Partial webpack module-ID stability** across versions — a cheap secondary matching signal.

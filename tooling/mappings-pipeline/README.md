@@ -33,7 +33,7 @@ review this tooling surfaces. See `docs/research/mappings-drift-spike.md` and AD
 
 | Stage | Script | What it does |
 |---|---|---|
-| **fetch** | `src/fetch.mjs` | Download the new build's `main.bundle.js` (+ sim worker) from `app-polytrack.kodub.com/<ver>/` into `.cache/`. Byte-exact + optional `--expect-hash` pin. |
+| **fetch** | `src/fetch.mjs` | Download the new build's `main.bundle.js` (+ sim worker) from `app-polytrack.kodub.com/<ver>/` into `.cache/`. Optional `--chunks` discovers the build's split chunks from the webpack runtime and fetches them for review (#3). Byte-exact + optional `--expect-hash` pin. |
 | **unpack** | `src/unpack.mjs` | webcrack the bundle into per-module files (`.cache/webcrack/v<ver>-raw/`). |
 | **gen-map** | `source/mappings/scripts/gen-map.mjs` | Re-match the **fixed** 0.6.0 renamed source → new target (IDF-weighted shared anchors), extract stable names, compute `bundleHash`, carry the `targets` section forward, write a candidate map. Env-var parameterized (M9-A). |
 | **diff** | `src/diff.mjs` | Pure map-vs-map diff: what modules relocated, which stable names moved, which **mod-facing targets are at risk**, and a risk level. The human-review core. |
@@ -155,6 +155,27 @@ node scripts/regen.mjs --verify <map.json> <unpacked-dir> # verify targets vs un
 Convenience scripts (`package.json`): `pnpm fetch 0.7.0`, `pnpm gen`, `pnpm diff -- …`,
 `pnpm verify -- …`, `pnpm regen 0.7.0`.
 
+## `wasm-locate.mjs` — structural location inside the physics WASM (#43 spike)
+
+Not part of the five-stage pipeline; it answers a separate question. PML patches
+`polytrack_physics.wasm` by **raw byte offset**, whose failure mode is the bad one — a
+stale offset doesn't miss, it writes a float into whatever now lives at that address.
+
+`src/wasm-locate.mjs` tests whether a constant can be located **structurally**
+instead, by fingerprinting the function that contains it (sorted multiset of float
+constants + opcode-byte histogram — no offsets, no indices). Measured against the real
+0.6.2 binary: **535 of 549 functions (97.4%) uniquely identified**, and a real
+4,096-byte shift re-derives the correct new address where a hardcoded offset points at
+garbage.
+
+`locateBySignature` **fails closed on ambiguity as well as absence** — same posture as
+the `bundleHash` gate. It locates only; there is no patcher, deliberately.
+
+Also found: the physics binary is **byte-identical across 0.6.0/0.6.1/0.6.2**, so
+there is no second version to cross-validate against yet — the first real test is the
+next PolyTrack release. Full write-up:
+[`docs/research/wasm-structural-location.md`](../../docs/research/wasm-structural-location.md).
+
 ## Cross-version identity (why the diff keys by `sourceModuleId`)
 
 A regen always matches the **same source** (the fixed `v060-renamed` 0.6.0 bundle)
@@ -198,15 +219,15 @@ remain unresolved and why:
 ## Tests
 
 ```sh
-pnpm test    # 62 unit tests — CI-runnable, no bundle needed
+pnpm test    # 88 unit tests — CI-runnable, no bundle needed
 ```
 
-Covering `diff` (23), `verify-targets` (11), `fetch` (3), the webcrack-library guard
-(2, #5), the isolated-vm ABI branches (5, #2) and `fingerprint` (18, #1). The pure
-logic is unit-tested with fixture maps and temp module directories. The
-bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are
-local-only (webcrack + the gitignored `.cache/`), like the M1 spike tests in
-`source/transform`.
+Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
+webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
+Node-invocation helper (5, #25), `wasm-locate` (16, #43) and `fingerprint` (18, #1).
+The pure logic is unit-tested with fixture maps and temp module directories. The
+bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
+(webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.
 
 ## Legal posture
 
