@@ -11,6 +11,35 @@ api.events.on('loader.ready',    () => {});       // main menu visible
 api.events.on('loader.onUnload', () => {});       // cleanup (fixes PML's missing-cleanup bug)
 ```
 
+### Cleanup: how a mod actually unloads
+
+Subscribing to `loader.onUnload` is for mods that want to *observe* teardown.
+For your own cleanup, use the form matching your entrypoint — the loader calls
+it directly, in **reverse load order**, isolated per mod (#17):
+
+```ts
+// Factory form — return a disposer. Same convention as on()/register().
+export default function myMod(api: TspmlApi) {
+  const off = api.events.on('car.control', handler);   // returns unsubscribe
+  const unbind = api.keybinds.register({ /* ... */ }); // returns unregister
+  return () => { off(); unbind(); };                   // ← called on unload
+}
+
+// Class form — implement onUnload. It receives the api, so you don't have to
+// stash a reference at init time.
+export default class MyMod extends TspmlMod {
+  override onUnload(api: TspmlApi) { /* detach */ }
+}
+```
+
+Returning nothing is fine — the mod is reported as `no-op` rather than
+`unloaded`. Throwing is contained: your mod's failure is reported and every
+other mod still tears down.
+
+The **host** (portal / dev harness) drives this: it calls `LoadResult.unload()`
+and emits `loader.onUnload` around it. The loader cannot emit — `ModApi.events`
+is `on`/`off` only, deliberately.
+
 ## Game events
 
 ```ts
