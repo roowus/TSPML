@@ -41,6 +41,30 @@ review this tooling surfaces. See `docs/research/mappings-drift-spike.md` and AD
 
 `scripts/regen.mjs` runs all five and prints a combined review report.
 
+## Node version — do not use `npx webcrack` (#5)
+
+`webcrack@2.x` declares `engines: { node: ">=22 <23 || >=24 <25" }`. TSPML's local pin
+is Node 25, which is outside that range. What this does and does *not* break was
+measured rather than assumed:
+
+| How you invoke it | Node 25 result |
+|---|---|
+| `npx webcrack …` | ❌ **exits 1, writes nothing**, after only an `npm warn EBADENGINE`. npm refuses to run the install/bin step; there is no error naming webcrack, so it reads like a silent no-op. |
+| `pnpm exec webcrack …` (workspace-installed) | ✅ works — pnpm does not hard-fail on `engines`. |
+| `node src/unpack.mjs <bundle> <outdir>` (library API) | ✅ works — **the supported path**. |
+
+So the engine range is an **npm-packaging constraint, not a real runtime
+incompatibility**: the webcrack *library* runs fine on Node 25. Only the npx route
+fails, and it fails in the worst possible way — quietly, with an empty output
+directory, which is easy to misread as "the bundle had no modules".
+
+`src/unpack.mjs` therefore calls the programmatic API directly and is the entry point
+the pipeline and `regen.mjs` use. **There is no reason to reach for the CLI**; if you
+want it anyway, run the workspace copy via `pnpm exec`, never `npx`.
+
+Contributors who prefer to stay in webcrack's declared range can pin Node 22 or 24
+(`nvm use 22`); nothing in the pipeline requires it, and CI does not.
+
 ## Regenerating on a new PolyTrack release
 
 ```sh
@@ -108,11 +132,11 @@ it still works.
 ## Tests
 
 ```sh
-pnpm test    # 26 unit tests (diff + verify-targets) — CI-runnable, no bundle needed
+pnpm test    # 37 unit tests (diff + verify-targets + fetch) — CI-runnable, no bundle needed
 ```
 
-The pure `diff` and `verify-targets` logic is fully unit-tested with fixture maps and
-temp module directories. The bundle-dependent stages (`fetch`, `unpack`, `gen-map`,
+The pure `diff`, `verify-targets` and `fetch` logic is fully unit-tested with fixture
+maps and temp module directories. The bundle-dependent stages (`fetch`, `unpack`, `gen-map`,
 the full `regen`) are local-only (webcrack + the gitignored `.cache/`), like the M1
 spike tests in `source/transform`.
 
