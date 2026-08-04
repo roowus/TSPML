@@ -18,7 +18,7 @@
 //          (default --out is the package .cache dir)
 
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +41,42 @@ export function assertVersion(version) {
     throw new Error(`invalid version ${JSON.stringify(version)} (expected x.y.z); refusing to build a cache path from it`);
   }
   return version;
+}
+
+/**
+ * Split-out chunks: `i.e(<id>)` call sites in the webpack runtime (#3).
+ *
+ * Webpack's chunk loader builds each URL as `i.u = e => e + ".bundle.js"` against the
+ * document base, so every dynamically-imported chunk is `<version>/<id>.bundle.js` on
+ * the same CDN. Reading the ids out of the runtime is exact: it is the same list the
+ * game itself will request.
+ *
+ * DELIBERATELY NOT a probe loop. Guessing ids and keeping the 200s is wrong twice
+ * over: the CDN 404s with a 355-byte HTML page (so a naive "did it download" check
+ * banks an error page as a chunk), and stale chunks from earlier builds are still
+ * served — `0.6.2/57.bundle.js` returns 200 with real code that 0.6.2 never loads.
+ * Anything the runtime does not reference is not part of this build, whatever the CDN
+ * says.
+ *
+ * @param {string} mainBundleSource contents of the build's `main.bundle.js`
+ * @returns {string[]} chunk ids, ascending, deduped
+ */
+export function parseChunkIds(mainBundleSource) {
+  const ids = new Set();
+  for (const m of mainBundleSource.matchAll(/\.e\(\s*(\d{1,6})\s*\)/g)) ids.add(m[1]);
+  return [...ids].sort((a, b) => Number(a) - Number(b));
+}
+
+/** A fetchable descriptor for one chunk id. Same shape as a BUNDLES entry. */
+export function chunkBundle(id) {
+  if (!/^\d{1,6}$/.test(String(id))) {
+    throw new Error(`invalid chunk id ${JSON.stringify(id)} (expected digits); refusing to build a URL from it`);
+  }
+  return {
+    kind: `chunk-${id}`,
+    file: `${id}.bundle.js`,
+    cacheName: (v) => `pt-${v}-raw-chunk-${id}.js`,
+  };
 }
 
 /**
@@ -75,7 +111,7 @@ export async function fetchBundle(version, bundle, outDir, expectHash) {
 /**
  * @param {string} version
  * @param {string} outDir
- * @param {{only?:string, expectHash?:string}} [opts]
+ * @param {{only?:string, expectHash?:string, chunks?:boolean}} [opts]
  */
 export async function fetchVersion(version, outDir, opts = {}) {
   assertVersion(version);
@@ -84,6 +120,22 @@ export async function fetchVersion(version, outDir, opts = {}) {
   for (const bundle of want) {
     results.push(await fetchBundle(version, bundle, outDir, opts.expectHash));
   }
+
+  // Chunks are discovered from the main bundle we just wrote, not guessed (#3). Off
+  // by default: the 0.6.2 chunks are UI-only, so paying four extra requests on every
+  // regen buys nothing today — but a future release could move game logic into one,
+  // which is exactly what `--chunks` is for checking.
+  if (opts.chunks) {
+    const mainResult = results.find((r) => r.kind === "main");
+    if (!mainResult) {
+      throw new Error("--chunks needs the main bundle (it holds the chunk list); drop --only, or use --only main");
+    }
+    const source = await readFile(mainResult.outFile, "utf8");
+    const ids = parseChunkIds(source);
+    // `--expect-hash` pins one specific bundle; passing it to every chunk as well
+    // would fail all of them. Chunks are unpinned by design.
+    for (const id of ids) results.push(await fetchBundle(version, chunkBundle(id), outDir));
+  }
   return results;
 }
 
@@ -91,7 +143,7 @@ export async function fetchVersion(version, outDir, opts = {}) {
 async function main() {
   const version = process.argv[2];
   if (!version) {
-    console.error("usage: node src/fetch.mjs <version> [--out dir] [--only main|simworker] [--expect-hash sha256:...]");
+    console.error("usage: node src/fetch.mjs <version> [--out dir] [--only main|simworker] [--chunks] [--expect-hash sha256:...]");
     process.exit(2);
   }
   const args = process.argv.slice(3);
@@ -101,8 +153,9 @@ async function main() {
   const only = onlyIdx >= 0 ? args[onlyIdx + 1] : undefined;
   const hashIdx = args.indexOf("--expect-hash");
   const expectHash = hashIdx >= 0 ? args[hashIdx + 1] : undefined;
+  const chunks = args.includes("--chunks");
 
-  const results = await fetchVersion(version, out, { only, expectHash });
+  const results = await fetchVersion(version, out, { only, expectHash, chunks });
   for (const r of results) console.log(JSON.stringify(r));
 
   // Report skip when the file already exists with the same hash (cache hit).

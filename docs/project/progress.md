@@ -738,6 +738,50 @@ the issue text against the code before acting on it saved doing both twice.
 
 
 
+## 2026-08-04 — #3 (webpack split chunks: discovered, not probed)
+
+[#3](https://github.com/roowus/TSPML/issues/3) asked for chunk fetching because "0.6.2
+splits more game code into webpack chunks" and full symbol coverage needs them. Measuring
+first retired the premise and changed the shape of the fix.
+
+**The size drop was pretty-printing, not chunking.** The cached `pt-0.6.0-raw-main.js` is
+3.76 MB across 71,457 lines (59.4% whitespace); 0.6.2 is 1.78 MB across 25 lines (3.3%).
+Whitespace-collapsed: 1,762,889 B vs 1,727,783 B — the same code volume. The four real
+chunks total 202,074 B, nowhere near the ~2 MB the issue's reasoning implied.
+
+**The chunks are UI-only.** 112 (108,037 B), 535 (13,182 B), 604 (74,464 B), 657 (6,391 B)
+hold the editor toolbar, track verifier, profile selection and settings panels. Of the 11
+distinct mod-facing target literals, only `PolyTrack2` appears in a chunk at all, plus 1 of
+TrackCodec's 4 — which `minHits: 4` correctly rejects. So `gen-map` matching `main` alone
+is *complete*, and `--chunks` ships **off by default** as a review signal: it makes a future
+release that moves game logic into a chunk visible at regen time instead of showing up as an
+unexplained drop in match rate.
+
+**Discovery, not probing.** `parseChunkIds` reads webpack's own `i.e(<id>)` call sites out
+of the runtime. A probe loop is wrong twice over: the CDN 404s with a 355-byte HTML page (a
+naive "did it download" check banks the error page as a chunk), and it still serves stale
+chunks from earlier builds — `0.6.2/57.bundle.js` returns 200 with real code that 0.6.2
+never loads. Anything the runtime does not reference is not part of the build, whatever the
+CDN says.
+
+Verified end-to-end: `parseChunkIds` yields `["112","535","604","657"]` for 0.6.2 and `[]`
+for 0.6.0 (unchunked — a legitimate no-op, not a throw); `fetch --chunks` downloaded all six
+files with per-file sha256; `regen.mjs 0.6.2 --chunks` printed
+`chunks: 112, 535, 604, 657 (fetched for review; not matched)` then `risk : NONE`.
+
+Guards mutation-checked before being trusted:
+
+| mutation | result |
+|---|---|
+| lexical sort instead of numeric | 1 failed / 41 passed |
+| no dedupe (array not Set) | 1 failed / 41 passed |
+| chunk-id validation removed | 1 failed / 41 passed |
+| chunk `cacheName` collides with `main` | 1 failed / 41 passed |
+| restored | 42 passed |
+
+That last collision case is the one worth keeping: a chunk overwriting
+`pt-<ver>-raw-main.js` would silently replace the bundle `gen-map` matches against.
+
 ## 2026-08-03 — #30 (partial) stub packages stop overstating themselves
 
 #30 lists five places where the repo claims more than it has. Took the three that
