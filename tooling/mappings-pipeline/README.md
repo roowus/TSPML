@@ -41,6 +41,77 @@ review this tooling surfaces. See `docs/research/mappings-drift-spike.md` and AD
 
 `scripts/regen.mjs` runs all five and prints a combined review report.
 
+## Node version — do not use `npx webcrack` (#5)
+
+`webcrack@2.x` declares `engines: { node: ">=22 <23 || >=24 <25" }`. TSPML's local pin
+is Node 25, which is outside that range. What this does and does *not* break was
+measured rather than assumed:
+
+| How you invoke it | Node 25 result |
+|---|---|
+| `npx webcrack …` | ❌ **exits 1, writes nothing**, after only an `npm warn EBADENGINE`. npm refuses to run the install/bin step; there is no error naming webcrack, so it reads like a silent no-op. |
+| `pnpm exec webcrack …` (workspace-installed) | ✅ works — pnpm does not hard-fail on `engines`. |
+| `node src/unpack.mjs <bundle> <outdir>` (library API) | ✅ works — **the supported path**. |
+
+So the engine range is an **npm-packaging constraint, not a real runtime
+incompatibility**: the webcrack *library* runs fine on Node 25. Only the npx route
+fails, and it fails in the worst possible way — quietly, with an empty output
+directory, which is easy to misread as "the bundle had no modules".
+
+`src/unpack.mjs` therefore calls the programmatic API directly and is the entry point
+the pipeline and `regen.mjs` use. **There is no reason to reach for the CLI**; if you
+want it anyway, run the workspace copy via `pnpm exec`, never `npx`.
+
+Contributors who prefer to stay in webcrack's declared range can pin Node 22 or 24
+(`nvm use 22`); nothing in the pipeline requires it, and CI does not.
+
+### The one real Node-25 incompatibility: `isolated-vm` (#2)
+
+The claim above ("packaging constraint, not runtime") has exactly one exception, and
+it is worth stating precisely because the rest of the section is so permissive.
+
+webcrack's **deobfuscate** stage evaluates an obfuscator.io string-array decoder to
+recover the literals it hides, and it runs that code inside `isolated-vm` — a native
+addon. On Node 25 there is **no working build of isolated-vm by any route**, measured
+on darwin-arm64:
+
+| Route | Node 25 result |
+|---|---|
+| shipped prebuild | ❌ isolated-vm@6.1.2 ships **abi127/abi137** only (Node 22/24). Node 25 is **abi141** → `No native build was found for … abi=141`. |
+| build from source | ❌ compiles and links cleanly (with a working python — brew python 3.14's `pyexpat` is broken, so `npm_config_python=/usr/bin/python3`), then **segfaults on `new ivm.Isolate()`**. Worse than absent: no JS error to catch. |
+| newer isolated-vm | ❌ v7 ships **abi137/abi147** (Node 24/26) and declares `engines: >=26`. Node 25 falls in the gap on both sides. |
+
+**This does not affect us, and that is a measured claim, not an assumption.** The
+PolyTrack bundle is *minified*, not obfuscator.io-obfuscated, so webcrack never
+reaches the decoder — and webcrack imports isolated-vm lazily, inside the sandbox
+call, so the missing addon is never loaded. Unpacking the real 0.6.2 bundle on Node
+25 yields **212 modules, byte-identical (`diff -rq`, no differences) to the same
+unpack on Node 22**.
+
+What `src/sandbox.mjs` adds is **legibility, not capability**. On an ABI with a
+prebuild it passes no `sandbox` and webcrack uses its own. On any other ABI it
+substitutes one that throws a named, catchable error instead of a raw
+`No native build was found` — or, if a stale source build is sitting in the tree, a
+bare `SIGSEGV` with no output whatsoever. If you ever see that error, the input is
+genuinely obfuscated: re-run under Node 22 or 24.
+
+It keys on the **ABI** (`process.versions.modules`), not the Node major, because the
+ABI is what has to match — prebuilds are literally named `isolated-vm.abi<N>.node`.
+Node 25 is excluded for being abi141, not for being 25.
+
+Two consequences worth knowing:
+
+- **`pnpm install` succeeds and the lockfile is committed.** #2 originally reported
+  install exiting 1 with no lockfile; that is no longer true. pnpm 10 does not run
+  dependency build scripts by default, so isolated-vm's failing `node-gyp` never
+  runs at install time — it sits in `pendingBuilds` and install exits 0.
+  **Do not `pnpm approve-builds` isolated-vm**: approving it buys nothing (the
+  resulting addon segfaults) and reintroduces the install failure.
+- **CI pins Node 22** (`.github/workflows/ci.yml`), which is inside every relevant
+  range, so CI exercises the prebuilt-ABI branch. Both branches are unit-tested on
+  either Node — the ABI is injected in `tests/sandbox.test.mjs` rather than read from
+  the runtime, so neither branch depends on which Node happens to run the suite.
+
 ## Regenerating on a new PolyTrack release
 
 ```sh
@@ -127,13 +198,15 @@ remain unresolved and why:
 ## Tests
 
 ```sh
-pnpm test    # 55 unit tests — CI-runnable, no bundle needed
+pnpm test    # 62 unit tests — CI-runnable, no bundle needed
 ```
 
-The pure `diff` (23), `verify-targets` (11), `fetch` (3) and `fingerprint` (18) logic is
-fully unit-tested with fixture maps and temp module directories. The bundle-dependent stages (`fetch`, `unpack`, `gen-map`,
-the full `regen`) are local-only (webcrack + the gitignored `.cache/`), like the M1
-spike tests in `source/transform`.
+Covering `diff` (23), `verify-targets` (11), `fetch` (3), the webcrack-library guard
+(2, #5), the isolated-vm ABI branches (5, #2) and `fingerprint` (18, #1). The pure
+logic is unit-tested with fixture maps and temp module directories. The
+bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are
+local-only (webcrack + the gitignored `.cache/`), like the M1 spike tests in
+`source/transform`.
 
 ## Legal posture
 
