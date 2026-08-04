@@ -3,6 +3,27 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared TypeScript types: the mod.json manifest schema, ResolutionFailure, capability and lifecycle types.",
-  "license": "MIT"
+  "description": "Code shared by every delivery surface (portal, dev harness, extension): the loader-owned Tier-1 bridge patches and the pre-bridge early-capture stub. The single source of truth for what gets injected into the game.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tspml/transform": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
 }

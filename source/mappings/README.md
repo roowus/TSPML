@@ -67,4 +67,6 @@ Tests do not require a build — vitest runs the TS sources directly.
 webcrack cache under `tooling/mappings-pipeline/.cache/`, extracts representative
 stable names from each renamed 0.6.0 module, and writes
 `maps/polytrack-0.6.2.json`. The matcher is pure Node built-ins (no install
-needed); only webcrack's unpack step (already cached) required Node 22/24.
+needed). webcrack's unpack step (already cached) does *not* require Node 22/24
+either: only `npx webcrack` fails outside that range — the library API that
+`tooling/mappings-pipeline/src/unpack.mjs` calls runs fine on Node 25 (#5).
