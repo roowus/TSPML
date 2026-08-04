@@ -33,11 +33,23 @@ export interface TrackRegistrable {
   unregister(name: string): boolean;
 }
 
+/**
+ * Minimal audio registry surface (#11). Same shape of problem as tracks — async
+ * `register`, no unsubscriber — but keyed by `key`, and disposal matters more: an
+ * overridden clip keeps playing in the game until it is unregistered, so a
+ * hot-swap that skipped this would leave the previous mod's sounds audible.
+ */
+export interface AudioRegistrable {
+  register(audio: { key: string; url: string }): Promise<{ ok: boolean; key?: string }>;
+  unregister(key: string): boolean;
+}
+
 /** The api handed to a mod. */
 export interface ModLikeApi {
   events: Subscribable;
   keybinds: Registrable;
   tracks?: TrackRegistrable;
+  audio?: AudioRegistrable;
   readonly logger?: unknown;
   readonly version?: string;
 }
@@ -47,6 +59,7 @@ export interface TrackedModApi {
   events: Subscribable;
   keybinds: Registrable;
   tracks?: TrackRegistrable | undefined;
+  audio?: AudioRegistrable | undefined;
   readonly logger?: unknown;
   readonly version?: string | undefined;
   /** Tear down every subscription the mod made through this tracked api. */
@@ -98,10 +111,31 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
       }
     : undefined;
 
+  // Same for audio clips (#11): an override the previous mod installed stays in the
+  // game's buffer lookup until unregistered, so HMR must drop it.
+  const registeredAudio = new Set<string>();
+  const innerAudio = api.audio;
+  const audio: AudioRegistrable | undefined = innerAudio
+    ? {
+        register: async (a) => {
+          const res = await innerAudio.register(a);
+          // Fall back to the requested key: `register` echoes it on success, but a
+          // shape change upstream must not silently drop the disposal record.
+          if (res.ok) registeredAudio.add(res.key ?? a.key);
+          return res;
+        },
+        unregister: (key) => {
+          registeredAudio.delete(key);
+          return innerAudio.unregister(key);
+        },
+      }
+    : undefined;
+
   return {
     events,
     keybinds,
     tracks,
+    audio,
     logger: api.logger,
     version: api.version,
     disposeAll: () => {
@@ -122,6 +156,14 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
         }
       }
       registeredTracks.clear();
+      for (const key of [...registeredAudio]) {
+        try {
+          innerAudio?.unregister(key);
+        } catch {
+          /* keep going */
+        }
+      }
+      registeredAudio.clear();
     },
   };
 }

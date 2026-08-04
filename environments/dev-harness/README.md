@@ -28,7 +28,12 @@ pnpm --filter @tspml/dev-harness dev    # → http://localhost:5173
 # 3. headless smokes (in another terminal, while dev is running):
 pnpm --filter @tspml/dev-harness smoke          # game boots + mod hot-swaps
 pnpm --filter @tspml/dev-harness smoke:tracks   # api.tracks lands a track in the game's list
+pnpm --filter @tspml/dev-harness smoke:audio    # api.audio replaces one of the game's sounds
 ```
+
+> Already have a dev server on :5173 (another session, say)? Start a private one and point
+> the smokes at it: `TSPML_DEV_PORT=5199 pnpm … dev` +
+> `SMOKE_URL=http://localhost:5199 pnpm … smoke:audio`.
 
 Then open http://localhost:5173 — the game runs transformed (green `TSPML ✔ LIVE`
 badge), the dev mod is loaded, and the status line shows the `car.control` event count.
@@ -60,15 +65,19 @@ The entrypoint must default-export a factory `(api) => { … }` (see
   equivalent of the portal's `/api/proxy` route + service worker — but **simpler: no
   service worker** (Vite intercepts `/game/*` in-process).
 - **[`@tspml/shared`](../../source/shared)** — *not* in this package: the Tier-1 bridge
-  patches (badge + 6 event emits), the two **capture** patches that hand the registry the
-  game's track store + codec ([#12](https://github.com/roowus/TSPML/issues/12)), and the
-  pre-bridge early-capture stub all live there, so the harness and the portal cannot drift
-  ([#34](https://github.com/roowus/TSPML/issues/34) — they already had). The harness owns
-  only the Vite middleware that applies them.
+  patches (badge + 6 event emits), the **capture** patches that hand the registries the
+  game's track store + codec ([#12](https://github.com/roowus/TSPML/issues/12)) and its
+  audio manager ([#11](https://github.com/roowus/TSPML/issues/11) — the same constructor,
+  a different parameter), and the pre-bridge early-capture stub all live there, so the
+  harness and the portal cannot drift ([#34](https://github.com/roowus/TSPML/issues/34) —
+  they already had). The harness owns only the Vite middleware that applies them.
 - **`src/tracking-api.ts`** — wraps the bridge `api` so every `events.on`/`once` +
   `keybinds.register` the mod makes is recorded; `disposeAll()` tears them down. This is
   what makes scoped mod HMR possible with **no change to the mod API** — the mod uses
-  `api` normally; the harness can clean up after it. Unit-tested.
+  `api` normally; the harness can clean up after it. Registered **tracks and audio clips**
+  are recorded too: those outlive their subscription, so a hot-swap that skipped them would
+  leave the previous mod's track in the player's list and its sounds still playing.
+  Unit-tested.
 - **`src/main.ts`** — boots the game iframe, exposes `window.__tspml` (the bridge) to it,
   runs the mod against a tracked api, and wires `import.meta.hot.accept` to hot-swap the
   mod entrypoint on save.
@@ -79,6 +88,7 @@ The entrypoint must default-export a factory `(api) => { … }` (see
 pnpm --filter @tspml/dev-harness test          # tracking-api unit tests (CI-runnable)
 pnpm --filter @tspml/dev-harness smoke         # headless: game boots + mod HMR (needs the dev server up)
 pnpm --filter @tspml/dev-harness smoke:tracks  # headless: the custom-tracks registry (needs the dev server up)
+pnpm --filter @tspml/dev-harness smoke:audio   # headless: the audio registry (needs the dev server up)
 ```
 
 The `smoke` script edits the dev mod's source to prove the hot-swap (restoring it in a
@@ -89,6 +99,20 @@ checks the result in the **game's own** custom-track list rather than our mirror
 register → present in the game's list → invalid code rejected → collision refused →
 explicit overwrite accepted → unregister → gone. Every step is time-boxed and named, so
 a failure says *which* stage stalled instead of hanging.
+
+`smoke:audio` follows the same discipline for `api.audio`, and its central assertion is
+checkable **by value**: it synthesizes a WAV blob in-page at a deliberately odd 0.37 s, so
+"did the override land" is `getBuffer("click")` reporting 0.37 rather than the game's own
+~0.032, and `unregister` putting ~0.032 back. Also covers a typed `decode-failed` for
+garbage bytes, an additive new key, a refused collision, and an explicit overwrite.
+
+> Two of its readings come from `window.__tspmlDev` rather than `api.audio`, deliberately:
+> the **game's** buffer lookup (checking our own mirror would prove nothing) and the
+> attached flag. Everything a mod does goes through `api.audio`.
+>
+> It also needs `--autoplay-policy=no-user-gesture-required` on Chromium —
+> `decodeAudioData` wants a running `AudioContext` and a headless page never clicks
+> anything. That is a browser policy, not a registry behaviour.
 
 ## Investigating a new target
 

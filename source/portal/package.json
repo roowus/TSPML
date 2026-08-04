@@ -10,7 +10,8 @@
     "build": "next build",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
-    "smoke:tracks": "node scripts/smoke-tracks.mjs"
+    "smoke:tracks": "node scripts/smoke-tracks.mjs",
+    "smoke:audio": "node scripts/smoke-audio.mjs"
   },
   "dependencies": {
     "@tspml/api-bridge": "workspace:*",

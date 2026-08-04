@@ -9,7 +9,7 @@ they live here where they cannot drift ([#34]):
 | Export | What it is |
 |---|---|
 | `TIER1_BRIDGE_PATCHES` | The live badge + the 6 Tier-1 event emits (`car.control`, `car.created`, `race.started`, `track.afterLoad`, `checkpoint.passed`, `race.finished`). |
-| `TRACK_CAPTURE_PATCHES` | The two instance-capture patches the custom-track registry needs ([#12]) — the game's TrackManager and its track codec. |
+| `REGISTRY_CAPTURE_PATCHES` | The instance-capture patches the content registries need: the game's TrackManager and track codec ([#12]) and its audio manager ([#11]). Two patches, three captures — the track-selection constructor hands over the track manager *and* the audio manager, so both ride one inject. |
 | `BRIDGE_PATCHES` | Both of the above, in order. What a surface normally applies. |
 | `EARLY_CAPTURE_STUB` / `EARLY_CAPTURE_SCRIPT_TAG` | A pre-bridge shim, injected ahead of the game's own scripts. |
 | `readEarlyCaptures(frameWindow)` | Reads back whatever the stub recorded, for the host to replay. |
@@ -21,14 +21,19 @@ they live here where they cannot drift ([#34]):
 ## Why the early-capture stub is not optional
 
 The capture patches fire at very different points in the game's lifecycle. The
-TrackManager is handed over when the game builds its track-selection menu (late,
-comfortably after the host page's `load` handler). The **codec's module factory runs
-during bundle init** — before the host has installed the real `window.__tspml`.
+TrackManager and the audio manager are handed over when the game builds its
+track-selection menu (late, comfortably after the host page's `load` handler). The
+**codec's module factory runs during bundle init** — before the host has installed the
+real `window.__tspml`.
 
 Skip the stub and that capture hits an absent bridge and is silently dropped, so the
 registry never attaches even though the manager arrived fine. Inject
 `EARLY_CAPTURE_SCRIPT_TAG` into the game's `<head>`, then call `readEarlyCaptures` in
 your frame-`load` handler and fold the result into your capture state.
+
+Adding a capture? Ask where its module runs *relative to the bridge* first. Audio needed
+no stub slot only because it shares the track manager's late constructor — that is a
+property of where it was captured from, not a general licence to skip the stub.
 
 ## What does *not* belong here
 
@@ -55,6 +60,7 @@ several narrow literals with a matching `minHits` — the codec patch's comment
 records a real instance of this biting.
 
 [#8]: https://github.com/roowus/TSPML/issues/8
+[#11]: https://github.com/roowus/TSPML/issues/11
 [#12]: https://github.com/roowus/TSPML/issues/12
 [#24]: https://github.com/roowus/TSPML/issues/24
 [#34]: https://github.com/roowus/TSPML/issues/34

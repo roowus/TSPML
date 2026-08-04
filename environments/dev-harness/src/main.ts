@@ -10,8 +10,8 @@
  * HMR scope: entrypoint logic (events/keybinds) hot-swaps. A mod-declared MIXIN
  * change alters the bundle transform — that needs a full reload (documented).
  */
-import { EventBus, Keybinds, Tracks } from "@tspml/api-bridge";
-import type { GameTrackCodec, GameTrackManager } from "@tspml/api-bridge";
+import { Audio, EventBus, Keybinds, Tracks } from "@tspml/api-bridge";
+import type { GameAudioManager, GameTrackCodec, GameTrackManager } from "@tspml/api-bridge";
 import type { ModApi } from "@tspml/loader";
 import { readEarlyCaptures } from "@tspml/shared";
 import { trackModApi } from "./tracking-api";
@@ -27,6 +27,7 @@ type FrameWindow = Window & { __tspml?: unknown };
 
 const bus = new EventBus();
 const tracks = new Tracks();
+const audio = new Audio();
 const frame = document.getElementById("game") as HTMLIFrameElement;
 const statusEl = document.getElementById("status") as HTMLElement;
 
@@ -37,11 +38,24 @@ const statusEl = document.getElementById("status") as HTMLElement;
  */
 let capturedManager: GameTrackManager | null = null;
 let capturedCodec: GameTrackCodec | null = null;
+let capturedAudio: GameAudioManager | null = null;
 function attachTracksIfReady(): void {
   if (!capturedManager || !capturedCodec || tracks.ready) return;
   tracks.attach({ manager: capturedManager, codec: capturedCodec });
   dev.tracksReady = true;
   console.log("[tspml] custom-track registry attached");
+}
+
+/**
+ * The audio registry needs only ONE object, and it arrives from the same
+ * constructor as the track manager (#11) — so unlike tracks there is nothing to
+ * wait for a second capture on.
+ */
+function attachAudio(manager: GameAudioManager): void {
+  if (audio.ready) return;
+  audio.attach({ manager });
+  dev.audioReady = true;
+  console.log("[tspml] audio registry attached");
 }
 
 let currentFactory: ModFactory = initialFactory as ModFactory;
@@ -55,8 +69,10 @@ const dev = {
   controlCount: 0,
   keybindCount: 0,
   tracksReady: false,
+  audioReady: false,
   gameCustomTrackNames,
   sampleTrackCode,
+  gameBufferDuration,
 };
 Object.defineProperty(window, "__tspmlDev", { value: dev, writable: true });
 
@@ -108,6 +124,18 @@ async function sampleTrackCode(name: string, author: string): Promise<string | n
   });
 }
 
+/**
+ * Read a clip's length straight out of the GAME's own lookup — the check that
+ * proves an override actually landed where the game will find it, rather than only
+ * in our registry's mirror. Null when the game has no such clip.
+ *
+ * Harness-only, like the track helpers above: a mod never needs this.
+ */
+function gameBufferDuration(key: string): number | null {
+  const buffer = capturedAudio?.getBuffer(key);
+  return buffer ? buffer.duration : null;
+}
+
 /** A no-op registry used until the iframe exists (Keybinds needs the frame window). */
 function stubKeybinds() {
   return {
@@ -129,6 +157,7 @@ function runMod(): void {
     events: bus as unknown as Subscribable,
     keybinds,
     tracks,
+    audio,
     logger: console,
     version: TSPML_VERSION,
   });
@@ -155,6 +184,7 @@ frame.addEventListener("load", () => {
     events: bus,
     keybinds,
     tracks,
+    audio,
     logger: console,
     version: TSPML_VERSION,
     captureTrackManager: (m: GameTrackManager) => {
@@ -164,6 +194,10 @@ frame.addEventListener("load", () => {
     captureTrackCodec: (c: GameTrackCodec) => {
       capturedCodec = c;
       attachTracksIfReady();
+    },
+    captureAudioManager: (m: GameAudioManager) => {
+      capturedAudio = m;
+      attachAudio(m);
     },
   };
   // Anything captured before this handler ran. The codec's module factory executes

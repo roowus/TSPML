@@ -4,7 +4,8 @@
  * Two halves, both loader-owned and deliberately surface-agnostic:
  *
  * 1. {@link BRIDGE_PATCHES} — the Tier-1 bridge patches (badge + 6 events) plus the
- *    custom-track capture patches. A surface feeds these to `@tspml/transform`.
+ *    registry capture patches (custom tracks + audio). A surface feeds these to
+ *    `@tspml/transform`.
  * 2. {@link EARLY_CAPTURE_STUB} — the pre-bridge shim a surface injects into the
  *    game's HTML, without which the codec capture is silently dropped.
  *
@@ -15,8 +16,8 @@
  */
 export {
   BRIDGE_PATCHES,
+  REGISTRY_CAPTURE_PATCHES,
   TIER1_BRIDGE_PATCHES,
-  TRACK_CAPTURE_PATCHES,
 } from "./bridge-patches.js";
 export {
   EARLY_CAPTURE_KEY,

@@ -17,6 +17,15 @@ export type {
 export type { KeybindBinding, KeybindsRegistry } from './keybinds.js';
 
 export type {
+  AudioRegisterFailure,
+  AudioRegisterResult,
+  AudioRegistration,
+  AudioRegistry,
+  BuiltinAudioKey,
+  RegisteredAudio,
+} from './audio.js';
+
+export type {
   RegisteredTrack,
   TrackRegisterFailure,
   TrackRegisterResult,

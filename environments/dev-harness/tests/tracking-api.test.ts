@@ -75,3 +75,86 @@ describe("trackModApi — subscription recording", () => {
     expect(onOff).toHaveBeenCalledTimes(1); // not called again
   });
 });
+
+/**
+ * Audio clips (#11) need the same HMR discipline as tracks, and for a louder
+ * reason: an override the old mod installed stays in the GAME's buffer lookup, so
+ * a hot-swap that forgot to unregister would leave the previous mod's sounds
+ * playing with no mod owning them.
+ */
+describe("trackModApi — audio registrations", () => {
+  function mockAudioApi() {
+    const unregister = vi.fn(() => true);
+    const register = vi.fn((a: { key: string; url: string }) =>
+      Promise.resolve({ ok: true, key: a.key }),
+    );
+    const { api } = mockApi();
+    return { api: { ...api, audio: { register, unregister } }, register, unregister };
+  }
+
+  it("delegates register and echoes the result through", async () => {
+    const { api, register } = mockAudioApi();
+    const tracked = trackModApi(api);
+
+    const res = await tracked.audio?.register({ key: "engine", url: "blob:x" });
+
+    expect(register).toHaveBeenCalledWith({ key: "engine", url: "blob:x" });
+    expect(res).toEqual({ ok: true, key: "engine" });
+  });
+
+  it("disposeAll unregisters every clip the mod registered", async () => {
+    const { api, unregister } = mockAudioApi();
+    const tracked = trackModApi(api);
+    await tracked.audio?.register({ key: "engine", url: "blob:a" });
+    await tracked.audio?.register({ key: "click", url: "blob:b" });
+
+    expect(unregister).not.toHaveBeenCalled();
+    tracked.disposeAll();
+    expect(unregister).toHaveBeenCalledTimes(2);
+    expect(unregister).toHaveBeenCalledWith("engine");
+    expect(unregister).toHaveBeenCalledWith("click");
+  });
+
+  it("does not record a clip that failed to register", async () => {
+    const { api, unregister } = mockAudioApi();
+    api.audio.register = vi.fn(() => Promise.resolve({ ok: false }));
+    const tracked = trackModApi(api);
+
+    await tracked.audio?.register({ key: "engine", url: "blob:bad" });
+    tracked.disposeAll();
+
+    expect(unregister).not.toHaveBeenCalled();
+  });
+
+  it("a mod's own unregister removes it from the disposal set", async () => {
+    const { api, unregister } = mockAudioApi();
+    const tracked = trackModApi(api);
+    await tracked.audio?.register({ key: "engine", url: "blob:a" });
+
+    tracked.audio?.unregister("engine");
+    expect(unregister).toHaveBeenCalledTimes(1);
+    tracked.disposeAll();
+    expect(unregister).toHaveBeenCalledTimes(1); // not disposed twice
+  });
+
+  it("a throwing unregister does not skip the remaining clips", async () => {
+    const { api } = mockAudioApi();
+    const seen: string[] = [];
+    api.audio.unregister = vi.fn((key: string) => {
+      seen.push(key);
+      if (key === "engine") throw new Error("boom");
+      return true;
+    });
+    const tracked = trackModApi(api);
+    await tracked.audio?.register({ key: "engine", url: "blob:a" });
+    await tracked.audio?.register({ key: "click", url: "blob:b" });
+
+    expect(() => tracked.disposeAll()).not.toThrow();
+    expect(seen).toEqual(["engine", "click"]);
+  });
+
+  it("omits the audio surface when the harness has no registry", () => {
+    const { api } = mockApi();
+    expect(trackModApi(api).audio).toBeUndefined();
+  });
+});
