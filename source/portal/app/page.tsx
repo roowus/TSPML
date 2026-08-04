@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
-import { EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
-import type { GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
+import { Audio, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
+import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
 import type { ModApi } from '@tspml/loader';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
@@ -28,6 +28,10 @@ import { loadMods } from '@/lib/mod-loader';
  * another api member: it needs two objects out of the running game, handed over by
  * the shared capture patches at two very different moments — see
  * {@link attachTracksIfReady} and @tspml/shared's early-capture.ts.
+ *
+ * The audio registry (`api.audio`, #11) rides the SAME capture as the track manager
+ * — it is constructor param 3 of the track-selection UI where the manager is param 5
+ * — so it needs no early-capture slot and attaches from a single object.
  */
 
 type SwState = 'idle' | 'registering' | 'active' | 'error';
@@ -51,6 +55,7 @@ export default function PlayPage(): ReactElement {
   const [modsStatus, setModsStatus] = useState('…');
   const [safetyStatus, setSafetyStatus] = useState('');
   const [tracksStatus, setTracksStatus] = useState('waiting for the game…');
+  const [audioStatus, setAudioStatus] = useState('waiting for the game…');
   const [loadedMods, setLoadedMods] = useState<LoadedModRow[]>([]);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
@@ -61,6 +66,9 @@ export default function PlayPage(): ReactElement {
   // capture patches hand over the game's objects, so a mod can call it at load time
   // without caring that the game's menu does not exist yet.
   const [tracks] = useState<Tracks>(() => new Tracks());
+  // Same deal for audio (#11): unattached at first, `register` queues until the
+  // game's audio manager is captured.
+  const [audio] = useState<Audio>(() => new Audio());
   const frameRef = useRef<HTMLIFrameElement>(null);
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
@@ -133,6 +141,7 @@ export default function PlayPage(): ReactElement {
       events: bus,
       keybinds: keybindsRef.current,
       tracks,
+      audio,
       logger: console,
       version: TSPML_VERSION,
       captureTrackManager: (m: GameTrackManager) => {
@@ -142,6 +151,13 @@ export default function PlayPage(): ReactElement {
       captureTrackCodec: (c: GameTrackCodec) => {
         trackCodecRef.current = c;
         attachTracksIfReady();
+      },
+      // One object is all the audio registry needs, so it attaches right here
+      // rather than waiting on a second capture the way tracks must.
+      captureAudioManager: (m: GameAudioManager) => {
+        if (audio.ready) return;
+        audio.attach({ manager: m });
+        setAudioStatus('✓ attached');
       },
     };
     w.__tspml = api;
@@ -333,12 +349,20 @@ export default function PlayPage(): ReactElement {
             />
             tracks: {tracksStatus}
           </div>
+          <div style={bridgeRowStyle}>
+            <span
+              style={{ ...bridgeDotStyle, background: audioStatus.startsWith('✓') ? '#3fb950' : '#9aa4b2' }}
+              aria-hidden="true"
+            />
+            audio: {audioStatus}
+          </div>
           <p style={noteStyle}>
             The transform pipeline is built (M3); the <code>car.control</code>{' '}
             event is wired end-to-end (M4-B) — its count ticks up while you race.
             The list above is driven by <code>@tspml/loader</code> results. Once{' '}
             <code>tracks</code> reads attached, a mod can put its own track in the
-            game’s Custom tracks list via <code>api.tracks</code>.
+            game’s Custom tracks list via <code>api.tracks</code>, and{' '}
+            <code>api.audio</code> can override any of the game’s sounds by URL.
           </p>
         </aside>
       </div>
