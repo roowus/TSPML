@@ -414,9 +414,67 @@ unspecified. `mixin-reference.md` now says exactly that.
 **203 tests green** (2 new: keybind auto-repeat), `pnpm -r build` clean including the
 portal.
 
+## 2026-08-02 — #34 + #36: one copy of the injections, and `api.tracks` in the portal ✅
+
+These two were done together on purpose. `api.tracks` worked only in the **dev harness** —
+a tool for mod authors — and not in the **portal**, which is the product. Porting it meant
+copying the bridge patches a third time, which is exactly the drift
+[#34](https://github.com/roowus/TSPML/issues/34) existed to stop. So #34 first, then #36
+fell out of it.
+
+**The duplication had already caused the bug.** The two copies were not merely at risk of
+diverging; they had diverged. The portal's copy had **no track-capture patches at all**, so
+`api.tracks` could not have worked there even with the host wiring in place. Extracting to
+[`@tspml/shared`](../../source/shared) fixed the defect as a side effect of removing the
+duplication — the strongest argument for doing it.
+
+The package owns **both** injections, because a surface can forget either one:
+
+| Export | Injected into | Forgetting it costs |
+|---|---|---|
+| `BRIDGE_PATCHES` | `main.bundle.js`, via `@tspml/transform` | a silently missing feature (what happened) |
+| `EARLY_CAPTURE_SCRIPT_TAG` / `readEarlyCaptures` | the game's `<head>`, ahead of its bundles | `api.tracks` never attaches, with no error anywhere |
+
+**The stub is load-bearing, and now we have evidence rather than an argument.** The portal
+smoke reports which captures arrived pre-bridge: `earlyCodec: true, earlyManager: false`.
+The codec really is handed over during bundle init, before the frame-`load` handler installs
+`window.__tspml` — so without the recording stub it is dropped, the late TrackManager
+capture succeeds, and the registry waits forever on a half-complete pair. Generalized in
+[hook-system.md](../design/hook-system.md): any new instance capture must ask where its
+target module runs *relative to the bridge*.
+
+**Tests that could not previously exist.** While the payloads were duplicated inline in two
+surfaces, a broken inject only surfaced when someone ran the transform against the real
+(gitignored, machine-local) bundle in a browser. 22 tests now hold them to their contracts:
+every inject/wrap **parses** (`new Function`, wraps evaluated as expressions since the
+engine emits `return (wrap)(X)`), every payload is try/catch-wrapped so a throw cannot
+escape into game code, every payload that *touches* the bridge guards it, `minHits` never
+exceeds `literals.length` (a typo there would silently disable a hook), and the codec's
+four-literal anchor is pinned against the regression that made it resolve to the wrong
+module.
+
+One of those tests failed first and was right to: the badge inject touches no bridge (it
+guards `typeof document`), so an "every payload guards `window.__tspml`" invariant was
+over-broad. Split into three narrower tests instead of loosened.
+
+**Verified against the live game, not just typechecked.** The portal now has its own
+committed `smoke:tracks` — the harness twin, minus the harness's dev-only `window.__tspmlDev`
+inspection hook, which the portal deliberately does not ship (it reads the captured objects
+off `api.tracks`'s own host instead; documented in the script). It drives only what a mod
+can: register a real code → the track appears in the **game's own** Custom tracks list → an
+invalid code is a typed `invalid-code` failure, not a throw → unregister → gone. `PASS`.
+Both pre-existing smokes still pass, so the extraction changed no behaviour.
+
+**A trap worth writing down:** `curl` of `/api/proxy/?version=…` **308-redirects** to the
+slashless form, so without `-L` you get an empty body and can wrongly conclude the `<head>`
+injections never landed. Same trailing-slash asymmetry the `<base href>` rewrite exists to
+fix.
+
+**225 tests green** (22 new, all in the new `source/shared`), `pnpm -r build` clean.
+
 ## Where we stand (2026-08-02)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **203 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (53) · mappings (25) · transform (35) · portal (17) · api-bridge (27) · shared (22) · create-tspml-mod (4) · mappings-pipeline (37) · dev-harness (5) — **225 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -424,9 +482,10 @@ portal.
 - **M8 first slice ✅** — MV3 browser extension (gate fix on kodub.com — the resilient online path).
 - **M9 ✅** — full regen/diff/verify pipeline (fetch + unpack + gen-map + diff + verify-targets; `regen.mjs` orchestrator).
 - **#12 ✅** — custom-tracks registry, the first working content registry (**M10 unblocked**). **#13/#14 closed.**
+- **#34 + #36 ✅** — both injections live in one package (`@tspml/shared`), and `api.tracks` now works **in the portal**, not just the harness. Verified by a committed portal smoke against the live game.
 - **All merged to `main`** — no open PRs; M9 + M7-C + `api.tracks` + the review-bugs fixes are all on the default branch.
-- **Open:** #10 (player-only), #11 (audio — try instance capture next), #36 (port `api.tracks` to the portal), #34 (share the bridge patches), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
-- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique.
+- **Open:** #10 (player-only), #11 (audio — try instance capture next), #18 (`ModApi` drift, partially fixed), #25 (CI doesn't run the headless smokes).
+- **Next:** **M10** (PML narrow importer, now unblocked), or #11 with the instance-capture technique — now a documented pattern with a shared home for its capture patches.
 
 ## 2026-08-03 — #17: `onUnload` was declared, documented, and never called ✅
 
@@ -490,3 +549,92 @@ own example mod. It now returns a disposer that detaches both.
 iframe reload), because that lives in `page.tsx`, which unmerged #38 and #39 both
 modify. Deferred rather than conflicted — the capability and its host entry point
 are in place, so the trigger is a small follow-up once the stack lands.
+
+## 2026-08-03 — #5 webcrack on Node 25: the claim was half wrong
+
+#5 recorded that `webcrack@2.x` "silently no-ops" on Node 25 because its `engines`
+range is `>=22 <23 || >=24 <25`. Measured it before documenting it, and the premise
+is only partly right:
+
+| Invocation | Node 25 |
+|---|---|
+| `npx webcrack` | ❌ exits 1, writes nothing, after only `npm warn EBADENGINE` |
+| `pnpm exec webcrack` (workspace copy) | ✅ works |
+| library API (`src/unpack.mjs`) | ✅ works |
+
+So it is an **npm-packaging constraint, not a runtime incompatibility** — the
+webcrack library itself is fine on 25, and even its CLI is fine when pnpm installs
+it. Only npm's engine enforcement blocks the install/bin step, and it does so in the
+worst way: no error names webcrack, so you get an empty output directory that reads
+like "the bundle had no modules".
+
+`source/mappings/README.md` had inherited the wrong version of this ("webcrack's
+unpack step required Node 22/24") — corrected.
+
+**Kept a guard rather than only prose.** The README's claim is true of webcrack 2.16
+today and is exactly the kind of thing that silently stops being true on a bump. Two
+tests: one unpacks a two-line string and asserts *files were written* (the #5 symptom
+is silence, so asserting "didn't throw" would miss it); one pins `src/unpack.mjs` to
+the library import so nobody "simplifies" it back to spawning npx. No `.cache/`, no
+network, no proprietary input, ~15ms — CI-runnable.
+
+The second guard initially failed against a *correct* file: `unpack.mjs`'s own header
+explains the npx hazard by name, and the regex matched the prose. Same false-alarm
+class as #19's stand-in drift test — strip comments before scanning code. Both guards
+mutation-checked.
+
+Also corrected a stale count in the pipeline README (26 → 39 tests).
+
+## 2026-08-03 — #2 (isolated-vm on Node 25)
+
+Closed #2. The issue's diagnosis was right about the symptom and wrong about the
+consequences, so both got corrected.
+
+**What is true:** `isolated-vm` has no working build on Node 25 (darwin-arm64), by
+any route. No prebuild — 6.1.2 ships abi127/abi137 (Node 22/24), Node 25 is abi141.
+No source build — with a working python (brew python 3.14's `pyexpat` is broken;
+`npm_config_python=/usr/bin/python3` gets past it) node-gyp compiles and links, and
+the addon then **segfaults on `new ivm.Isolate()`**, reproducibly. No newer version —
+isolated-vm@7 ships abi137/abi147 and declares `engines: >=26`; Node 25 sits in the
+gap on both sides.
+
+**What is no longer true:** the issue said install exits 1 and no lockfile is
+generated. pnpm 10 does not run dependency build scripts by default, so the failing
+`node-gyp` never runs at install time. Verified in a fresh clone: plain `pnpm install`
+exits 0, `pnpm install --frozen-lockfile` exits 0, and `pnpm-lock.yaml` is committed
+and unchanged. Also: isolated-vm is a **required** webcrack dependency, not an
+optional one — that misreading is what made "optional dep fails to build" sound
+harmless.
+
+**What it actually costs:** only webcrack's obfuscator.io deobfuscation, which the
+*minified* PolyTrack bundle never triggers. webcrack imports isolated-vm lazily
+inside the sandbox call, so the missing addon is never loaded. Measured: unpacking
+the real 0.6.2 bundle on Node 25 yields 212 modules, **byte-identical (`diff -rq`) to
+the same unpack on Node 22**. So M3 is not blocked, which was the open worry.
+
+**The fix is legibility, not capability.** New `src/sandbox.mjs`: on an ABI with a
+prebuild it passes no `sandbox` and webcrack uses its own; on any other ABI it
+substitutes one throwing a named, catchable error. Without it the failure is a raw
+`No native build was found`, or — if a stale source build is in the tree — a bare
+SIGSEGV with no output at all. Keyed on the **ABI**, not the Node major: prebuilds are
+named `isolated-vm.abi<N>.node`, and Node 25 is excluded for being abi141, not 25.
+
+5 tests, ABI injected rather than read from the runtime so both branches are covered
+whichever Node runs the suite (CI is 22, local is 25 — a test that only exercises its
+own runtime's branch is half a test). Suite green on **both** Node 22 and Node 25.
+
+Mutations verified before trusting the guards:
+
+```
+M1 always substitute (ignore prebuilt ABIs)  -> 1 failed | 43 passed
+M2 generic error message                     -> 1 failed | 43 passed
+M3 key on node major instead of ABI          -> 2 failed | 42 passed
+restored                                     -> 44 passed
+```
+
+Docs corrected where they had inherited the wrong story: `TESTING.md` no longer tells
+contributors to `pnpm install --ignore-scripts`, and the drift-spike's "optional dep
+fails to build" bullet now says what it does and does not block.
+
+Stacked on `docs/webcrack-node-25` (#5/PR #48) rather than branched off `main` — the
+fix lands in `unpack.mjs` and the pipeline README, which that PR already owns.

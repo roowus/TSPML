@@ -13,6 +13,7 @@
 import { EventBus, Keybinds, Tracks } from "@tspml/api-bridge";
 import type { GameTrackCodec, GameTrackManager } from "@tspml/api-bridge";
 import type { ModApi } from "@tspml/loader";
+import { readEarlyCaptures } from "@tspml/shared";
 import { trackModApi } from "./tracking-api";
 import type { Subscribable } from "./tracking-api";
 // The dev mod, aliased to its SOURCE so edits hot-reload (see vite.config.ts).
@@ -22,11 +23,7 @@ const GAME_VERSION = "0.6.2";
 const TSPML_VERSION = "0.0.0-dev";
 
 type ModFactory = (api: ModApi) => unknown;
-type FrameWindow = Window & {
-  __tspml?: unknown;
-  /** Captures made before the real bridge existed — see game-proxy.ts. */
-  __tspmlEarly?: { manager: GameTrackManager | null; codec: GameTrackCodec | null };
-};
+type FrameWindow = Window & { __tspml?: unknown };
 
 const bus = new EventBus();
 const tracks = new Tracks();
@@ -171,10 +168,10 @@ frame.addEventListener("load", () => {
   };
   // Anything captured before this handler ran. The codec's module factory executes
   // during bundle init — i.e. BEFORE `load` — so without this replay its capture is
-  // lost and the registry never attaches (game-proxy.ts EARLY_CAPTURE_STUB).
-  const early = w.__tspmlEarly;
-  if (early?.manager) capturedManager = early.manager;
-  if (early?.codec) capturedCodec = early.codec;
+  // lost and the registry never attaches (@tspml/shared's EARLY_CAPTURE_STUB).
+  const early = readEarlyCaptures<GameTrackManager, GameTrackCodec>(w);
+  if (early.manager) capturedManager = early.manager;
+  if (early.codec) capturedCodec = early.codec;
   attachTracksIfReady();
   runMod();
 });

@@ -6,7 +6,7 @@ This guide covers what's testable today and exactly how — especially the **one
 
 ```bash
 cd /Users/rewis/projects/TSPML          # or: git clone https://github.com/roowus/TSPML.git && cd TSPML
-pnpm install --ignore-scripts           # the "isolated-vm" warning is harmless — ignore it
+pnpm install                            # plain install; --ignore-scripts is no longer needed (#2)
 pnpm --filter @tspml/transform build    # build the transform package (the portal demo imports it)
 ```
 
