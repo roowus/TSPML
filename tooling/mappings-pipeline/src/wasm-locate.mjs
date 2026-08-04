@@ -23,7 +23,7 @@ const CODE_SECTION = 10;
 const F32_CONST = 0x43;
 const F64_CONST = 0x44;
 
-/** Read an unsigned LEB128 at `off`. @returns {[value, nextOffset]} */
+/** Read an unsigned LEB128 at `off`. @returns {[number, number]} `[value, nextOffset]` */
 export function readULEB(buf, off) {
   let result = 0;
   let shift = 0;
