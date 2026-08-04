@@ -47,7 +47,7 @@ Source module `1223.js` (identifiers `controlCar`, `carState`, `createCar`, `car
 1. **Game origin:** PolyTrack is served from `https://app-polytrack.kodub.com/<version>/`, **iframed** by `kodub.com/apps/polytrack`. The portal proxy must fetch from `app-polytrack.kodub.com`, not `kodub.com`. Confirms the portal can't iframe (CSP `frame-ancestors`).
 2. **0.6.2 is more chunked** (smaller `main.bundle.js`) — chunk fetching is required for full symbol coverage.
 3. **webcrack Node engine** requires 22/24 (not 25); use the programmatic API, not the CLI.
-4. **`isolated-vm`** (webcrack optional dep, for sandboxed eval) fails to build on this machine — relevant to the M3 transform pipeline.
+4. **`isolated-vm`** (webcrack dep, for sandboxed eval) has no working build on Node 25 — no prebuild for abi141, and a source build segfaults. Two corrections to how this was first recorded: it is a **required** dependency of webcrack, not an optional one, and it does **not** block install (pnpm 10 skips dependency build scripts, so the lockfile is committed). It only disables webcrack's obfuscator.io deobfuscation, which the minified PolyTrack bundle never triggers — unpacking on Node 25 is byte-identical to Node 22. See #2 and `tooling/mappings-pipeline/README.md`.
 5. **Partial webpack module-ID stability** across versions — a cheap secondary matching signal.
 
 ## Reproducibility

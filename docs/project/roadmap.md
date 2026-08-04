@@ -4,7 +4,7 @@
 
 ## Current status (2026-08-02)
 
-The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** now works: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)), which unblocks M10. All of that is now merged to `main` (no open PRs). 203 unit tests, CI green.
+The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod loads, subscribes to 6 Tier-1 events, registers a keybind, declares a mappings-resolved mixin, and is safety-classified. All headlessly verified. The **M9 regen/diff/verify pipeline** turns a version bump into a one-command human-in-the-loop review, and the **M7 dev harness** turns mod iteration into edit → instant (scoped HMR against the live game). The **first content registry** works on the flagship surface: `api.tracks` puts a mod's track in the player's real Custom tracks list ([#12](https://github.com/roowus/TSPML/issues/12)) **in the portal**, not just the harness ([#36](https://github.com/roowus/TSPML/issues/36)) — which unblocks M10. The two surfaces' injections now come from one package, [`@tspml/shared`](../../source/shared) ([#34](https://github.com/roowus/TSPML/issues/34)), so they can no longer drift. All of that is merged to `main` (no open PRs). 225 unit tests, CI green.
 
 | Milestone | Status | Outcome |
 |---|---|---|
@@ -54,10 +54,14 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 | # | Title | Scope |
 |---|---|---|
 | [#10](https://github.com/roowus/TSPML/issues/10) | Player-only event filtering | race.started/checkpoint/finish fire per-car (player+ghosts); needs an isReplay accessor. |
-| [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform. |
-| [#36](https://github.com/roowus/TSPML/issues/36) | Port `api.tracks` to the portal | Implemented + verified in the harness; the portal needs the pre-bridge early-capture stub too. |
-| [#34](https://github.com/roowus/TSPML/issues/34) | Share the Tier-1 bridge patches | Portal + dev-harness each carry a copy; extract to `@tspml/shared` so they can't drift. |
+| [#11](https://github.com/roowus/TSPML/issues/11) | Audio registry | Override clips via the game's `load()`; needs an instance-capture transform — now a documented pattern (`@tspml/shared`, [hook-system.md](../design/hook-system.md)) rather than a one-off. |
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
+
+Closed since the last update: [#36](https://github.com/roowus/TSPML/issues/36) (`api.tracks`
+now attaches in the portal, verified by a committed smoke against the live game) and
+[#34](https://github.com/roowus/TSPML/issues/34) (both injections live in
+[`@tspml/shared`](../../source/shared); the extraction also fixed the drift it was about —
+the portal had been missing the two track-capture patches entirely).
 
 > Not exhaustive — the full backlog is in [GitHub issues](https://github.com/roowus/TSPML/issues)
 > (18 open, mostly small docs/API-drift fixes). This table is the subset that gates a
