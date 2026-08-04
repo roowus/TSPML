@@ -33,7 +33,7 @@ review this tooling surfaces. See `docs/research/mappings-drift-spike.md` and AD
 
 | Stage | Script | What it does |
 |---|---|---|
-| **fetch** | `src/fetch.mjs` | Download the new build's `main.bundle.js` (+ sim worker) from `app-polytrack.kodub.com/<ver>/` into `.cache/`. Byte-exact + optional `--expect-hash` pin. |
+| **fetch** | `src/fetch.mjs` | Download the new build's `main.bundle.js` (+ sim worker) from `app-polytrack.kodub.com/<ver>/` into `.cache/`. Optional `--chunks` discovers the build's split chunks from the webpack runtime and fetches them for review (#3). Byte-exact + optional `--expect-hash` pin. |
 | **unpack** | `src/unpack.mjs` | webcrack the bundle into per-module files (`.cache/webcrack/v<ver>-raw/`). |
 | **gen-map** | `source/mappings/scripts/gen-map.mjs` | Re-match the **fixed** 0.6.0 renamed source → new target (IDF-weighted shared anchors), extract stable names, compute `bundleHash`, carry the `targets` section forward, write a candidate map. Env-var parameterized (M9-A). |
 | **diff** | `src/diff.mjs` | Pure map-vs-map diff: what modules relocated, which stable names moved, which **mod-facing targets are at risk**, and a risk level. The human-review core. |
