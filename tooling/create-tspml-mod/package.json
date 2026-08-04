@@ -3,10 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Scaffold CLI: `npx create-tspml-mod <name>` generates a new TSPML mod project (mod.json + entrypoint + mixin + tsconfig).",
+  "description": "Scaffold CLI: generates a new TSPML mod project (mod.json + entrypoint + mixin + tsconfig).",
   "license": "MIT",
   "bin": {
     "create-tspml-mod": "bin/create-tspml-mod.mjs"
+  },
+  "//publish": "Still `private` — publishing to npm is the owner's call, not CI's. Everything else here is publish-ready: `files` is scoped, the bin runs standalone, and the generated project has no workspace: deps (#19). To ship: drop `private`, `npm publish --access public`, then update the three docs that currently say `npx create-tspml-mod` (README.md, docs/getting-started.md, tooling/create-tspml-mod/README.md) to stop hedging.",
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "polytrack",
+    "tspml",
+    "mod",
+    "scaffold"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roowus/TSPML.git",
+    "directory": "tooling/create-tspml-mod"
   },
   "scripts": {
     "test": "vitest run"
