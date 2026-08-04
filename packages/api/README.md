@@ -14,13 +14,21 @@ npm install -D @tspml/api
 ```ts
 import type { TspmlApi } from '@tspml/api';
 
-export default function myMod(api: TspmlApi) {
+export default async function myMod(api: TspmlApi) {
   // Typed events (Tier 1)
   api.events.on('car.control', (state) => {
     state.carId; state.up; // fully typed
   });
   // Typed keybind registry
   api.keybinds.register({ id: 'my-mod.toggle', key: 'KeyH', onDown: () => {} });
+
+  // Content registries — put a track in the player's list, or replace a game sound.
+  // Both return TYPED results rather than throwing, and both may be called here at
+  // load time: they queue until the game hands the bridge its own objects.
+  const track = await api.tracks.register({ code: 'PolyTrack2…' });
+  const sound = await api.audio.register({ key: 'click', url: '/my-click.wav' });
+  if (!track.ok) console.warn(track.reason); // 'invalid-code' | 'name-exists' | …
+  if (!sound.ok) console.warn(sound.reason); // 'decode-failed' | 'key-exists' | …
 }
 ```
 

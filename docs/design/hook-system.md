@@ -22,7 +22,9 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 **Registries (Fabric Registry analog; stable, versioned):**
 - `api.blocks` — custom track pieces (supersedes `pmlapi.editorExtras`; grounded in `PartObject`/`trackParts`)
 - `api.cars` — car skins/styles (`getCarStyle`/`setCarStyle`/`carColors`/`VisualCar`)
-- `api.audio` — `registerSound(name,[url])` / `playSound(name,vol)` (supersedes `pmlapi.soundManager`)
+- `api.audio` — `register({key,url})` / `unregister(key)` / `list()`: override any of the
+  game's clips by URL, or add new ones (**implemented**, [#11](https://github.com/roowus/TSPML/issues/11);
+  supersedes `pmlapi.soundManager`; see *instance capture* below)
 - `api.tracks` — register custom tracks by import code (**implemented**, [#12](https://github.com/roowus/TSPML/issues/12); see *instance capture* below)
 - `api.ui` — HUD widgets/panels
 - `api.keybinds` / `api.settings` — where `getSetting` returns **typed** values (fixes PML's always-string wart)
@@ -30,10 +32,10 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 ### Instance capture — reaching past the bootstrap wall
 
 Some of the game's most useful objects are **not in a locatable module**. The webpack
-module map ends at a fixed bundle offset; the code past it (the bootstrap) constructs
-long-lived managers — the track store, the audio manager — that the module locator
-cannot see. That wall is why [#11](https://github.com/roowus/TSPML/issues/11) (audio)
-is hard.
+module map ends at a fixed bundle offset (v0.6.2: the map closes and bootstrap scope
+begins ~330 lines before the audio manager's class expression); the code past it
+constructs long-lived managers — the track store, the audio manager — that the module
+locator cannot see.
 
 The way through is to stop trying to locate the **class** and instead capture the live
 **instance** from a caller that *is* a real module. A manager built in the bootstrap is
@@ -46,26 +48,60 @@ inject: capture(param_n)  →  window.__tspml.captureX(...)
 ```
 
 This is how `api.tracks` gets the game's track store (constructor parameter of the
-track-selection UI) and its codec (an export of the track-data module). Three
-properties make it safe and worth generalizing:
+track-selection UI) and its codec (an export of the track-data module) — and how
+`api.audio` gets the audio manager, which is **another parameter of the very same
+constructor** (param 3 where the track store is param 5). Both captures therefore ride
+**one** inject, and #11 needed no new anchor, no locator change, and no mappings edit.
+Worth internalizing as a search habit: before assuming a bootstrap-scope object needs
+new machinery, check the parameter lists of the constructors already patched.
+
+Three properties make instance capture safe and worth generalizing:
 
 - **Read-only.** The patch copies a reference out; it changes no game behavior, so a
   mis-target degrades to "capture never happens", not to corrupted state.
 - **Late-binding by nature.** Capture happens when the game builds that UI, so the
-  registry must start unbound and **queue** calls until `attach()`. `api.tracks` does
-  exactly this, which is why a mod can register at `init`.
+  registry must start unbound and **queue** calls until `attach()`. `api.tracks` and
+  `api.audio` both do this, which is why a mod can register at `init`.
 - **Anchor discipline still applies.** Anchors must be literals *unique* to the target
   module. Verified the hard way for the codec: `"PolyTrack2"` alone also matches
   another module, so that target needs four literals with `minHits: 4`. See
   [mappings-system.md](./mappings-system.md).
 
+Each capture in a shared inject gets its **own** `if (window.__tspml.captureX)` guard, so
+a rename on one side of a future game version cannot take the other side down with it.
+`source/shared/tests/bridge-patches.test.ts` enforces this.
+
+#### Own the lookup, not the loader (the `addResource` trap)
+
+Once you hold a manager instance, the tempting move is to call its own loading method.
+For audio that is a **latent crash**, and it is the kind that only fires in production:
+the manager's `load(key, urls)` begins by calling `addResource()` on the game's
+loading-screen tracker, which throws `"Cannot add resources after loading is complete"`
+once boot finishes. Instance capture is inherently late-binding — so *every* mod call
+would land in exactly that window.
+
+`api.audio` therefore **shadows the read path** instead. It installs an own-property
+`getBuffer` on the captured instance that answers from the mod's map and delegates to the
+bound prototype method otherwise. The game reads clips through `getBuffer` at *play* time
+(`playUIClick()` does `this.getBuffer("click")`), so an override lands where the game
+actually looks — and three things fall out for free:
+
+- `unregister` restores the game's original clip exactly (`delete` the own property, or
+  drop the map entry); no need to keep a copy.
+- The game's resource tracker is never touched.
+- Decoding goes through the game's *own* `AudioContext`, so a decoded buffer is
+  guaranteed compatible with the graph that will play it.
+
+Generalizing: **prefer shadowing the accessor the game reads through over invoking the
+loader it read through at boot.** Boot-time paths carry boot-time assumptions.
+
 #### The capture window opens before the bridge exists
 
 A capture patch runs whenever *its* module runs, and that can be **earlier than the
-surface's bridge**. The two `api.tracks` captures straddle this: the track store is
-handed over late (when the game builds its menu, comfortably after the host page's
-`load` handler), but the **codec's module factory runs during bundle init** — before
-`window.__tspml` exists.
+surface's bridge**. The three captures shipped so far straddle this: the track store and
+the audio manager are handed over late (when the game builds its menu, comfortably after
+the host page's `load` handler), but the **codec's module factory runs during bundle
+init** — before `window.__tspml` exists.
 
 The consequence is a uniquely misleading failure. The late capture succeeds, the early
 one hits an absent bridge and is dropped by its own `if (window.__tspml && …)` guard,
@@ -78,7 +114,8 @@ recorded when it installs the real bridge. Both live in
 [`@tspml/shared`](../../source/shared) (`EARLY_CAPTURE_SCRIPT_TAG` / `readEarlyCaptures`)
 so no surface can forget one. Generalizing: **any** new instance capture must ask where
 its target module runs relative to the bridge, and if the answer is "possibly earlier",
-it belongs in the stub too.
+it belongs in the stub too. `api.audio` asked and answered *no* — it shares the
+track store's late-running constructor — so it needed no stub slot.
 
 > The portal's committed smoke reports which captures arrived early
 > (`scripts/smoke-tracks.mjs`); in practice it is the codec, empirically confirming the
