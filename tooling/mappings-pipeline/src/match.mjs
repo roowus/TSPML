@@ -105,6 +105,10 @@ const isGameLogic = (mod) => {
   return false;
 };
 
+// The tuple annotation is load-bearing for the #25 typecheck: without it the array
+// widens to `(string | RegExp)[][]` and `re.test(...)` below is an error, because
+// nothing tells the checker that element 0 is always the pattern.
+/** @type {readonly [RegExp, string][]} */
 const SUBSYS = [
   [/car|vehicle|wheel|suspension|chassis|steer|throttle|brake|drivetrain/i, "Car/Physics"],
   [/track|part|block|road|grid|environment/i, "Track"],
