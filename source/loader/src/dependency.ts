@@ -198,7 +198,31 @@ export function resolveDependencies(
     }
   }
 
-  // 6. Topological sort (depends-graph) with priority tiebreak.
+  // 6. `includes`: PARSED BUT NOT IMPLEMENTED — warn, never silently ignore.
+  //
+  // The spec defines it as Fabric's JAR-in-JAR analog (nested/contained mods).
+  // We have no delivery mechanism for that: TSPML cannot yet install a mod from
+  // a directory at all, let alone one nested inside another package. So an
+  // author writing `includes` today gets a field that validates cleanly and
+  // does nothing — the worst outcome, because the mod appears to load fine and
+  // the nested mod simply is not there (#16).
+  //
+  // Warn rather than reject: rejecting would break a manifest that is valid per
+  // the published spec, and the field may be honoured later. But say plainly
+  // that the nested mod will NOT be loaded, so this fails loudly at authoring
+  // time instead of silently at runtime.
+  for (const m of mods) {
+    for (const [includedId, range] of Object.entries(m.includes)) {
+      warnings.push({
+        kind: 'unsupported-includes',
+        mod: m.id,
+        other: includedId,
+        message: `mod '${m.id}' declares includes '${includedId}@${range}', which TSPML does not implement — the nested mod will NOT be loaded. Ship it as a separate mod and use 'depends' instead (#16).`,
+      });
+    }
+  }
+
+  // 7. Topological sort (depends-graph) with priority tiebreak.
   const order = topoSort(mods, index);
 
   warnings.sort(compareWarnings);

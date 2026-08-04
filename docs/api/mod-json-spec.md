@@ -70,6 +70,8 @@ An ES module whose **default export** is a class extending `TspmlMod` (lifecycle
 
 ## Dependency semantics
 
-Direct port of Fabric: `depends` (must be present & satisfied or the mod won't load), `recommends` (soft warn), `suggests` (informational), `conflicts` (both load but warn), `breaks` (refuse if present at a matching version), `includes` (nested/contained mod), `provides` (drop-in for another id). Special ids: `polytrack` (matched against `targets`), `tspml`, `tspml-api`. Predicates use npm `semver` ranges. Load order is an **automatic topological sort** with cycle detection + explicit conflict reporting; user `priority` hints layer on top.
+Direct port of Fabric: `depends` (must be present & satisfied or the mod won't load), `recommends` (soft warn), `suggests` (informational), `conflicts` (both load but warn), `breaks` (refuse if present at a matching version), `includes` (nested/contained mod — **not implemented, see below**), `provides` (drop-in for another id). Special ids: `polytrack` (matched against `targets`), `tspml`, `tspml-api`. Predicates use npm `semver` ranges. Load order is an **automatic topological sort** with cycle detection + explicit conflict reporting; user `priority` hints layer on top.
+
+> ⚠️ **`includes` is parsed but not implemented (#16).** It is Fabric's JAR-in-JAR analog, and TSPML has no delivery mechanism for it — we cannot yet install a mod from a directory at all, let alone one nested inside another package. Declaring it validates cleanly and now emits an `unsupported-includes` warning; **the nested mod will not be loaded.** Ship it separately and use `depends` instead. The field stays in the schema (rejecting it would break manifests that are valid per this spec) and may be honoured later.
 
 > See [events-and-registries.md](./events-and-registries.md) and [mixin-reference.md](./mixin-reference.md) for the `api` surface.

@@ -201,3 +201,46 @@ describe('resolveDependencies — advanced semantics', () => {
     ).toThrow("duplicate mod id 'a'");
   });
 });
+
+// #16: `includes` (Fabric's JAR-in-JAR analog) was validated by manifest.ts and
+// copied onto Mod, then never consulted by anything. An author could declare a
+// nested mod, watch the manifest validate cleanly, watch the load succeed — and
+// the nested mod simply would not be there. Silent no-ops on a documented field
+// are worse than an unimplemented field, because nothing tells you.
+describe('resolveDependencies — includes is not implemented (#16)', () => {
+  it('warns loudly instead of silently ignoring the field', () => {
+    const result = resolveDependencies([
+      mod({ id: 'bundle', includes: { nested: '^1.0.0' } }),
+    ]);
+    const w = result.warnings.find((x) => x.kind === 'unsupported-includes');
+    expect(w).toBeDefined();
+    expect(w?.mod).toBe('bundle');
+    expect(w?.other).toBe('nested');
+    // The message has to say the nested mod will NOT load — "unsupported" alone
+    // reads as "harmless", which is exactly the wrong inference.
+    expect(w?.message).toMatch(/will NOT be loaded/);
+    expect(w?.message).toMatch(/depends/); // points at the workaround
+  });
+
+  it('still loads the declaring mod — the warning is not fatal', () => {
+    const result = resolveDependencies([
+      mod({ id: 'bundle', includes: { nested: '*' } }),
+      mod({ id: 'other' }),
+    ]);
+    // Rejecting would break a manifest that is valid per the published spec.
+    expect(ids(result.order).sort()).toEqual(['bundle', 'other']);
+  });
+
+  it('warns once per included id', () => {
+    const result = resolveDependencies([
+      mod({ id: 'bundle', includes: { one: '*', two: '*' } }),
+    ]);
+    const w = result.warnings.filter((x) => x.kind === 'unsupported-includes');
+    expect(w.map((x) => x.other).sort()).toEqual(['one', 'two']);
+  });
+
+  it('says nothing when no mod declares includes', () => {
+    const result = resolveDependencies([mod({ id: 'plain' })]);
+    expect(result.warnings.filter((x) => x.kind === 'unsupported-includes')).toEqual([]);
+  });
+});

@@ -736,6 +736,31 @@ the issue text against the code before acting on it saved doing both twice.
 
 **257 tests green** (252 + 5), build and lint clean. PR #45, branched off `main`.
 
+
+
+## 2026-08-03 — #16 `includes` is now honest
+
+`includes` was parsed, typed, validated, stored on `Mod` — and then never read by
+the resolver. A manifest declaring it loaded cleanly and the nested mod simply was
+not there. Same shape as #17: a field can be complete on every surface an author
+touches and still be structurally inert.
+
+**Decision: warn loudly, don't implement.** `includes` is Fabric's JAR-in-JAR
+analog, and TSPML has no delivery mechanism for it — we cannot install a mod from
+a directory *at all*, let alone one nested inside another package. Implementing it
+would mean inventing that mechanism first. Rejecting the field instead was also
+wrong: it is valid per the published spec, so rejecting would break conforming
+manifests, and the field may be honoured later.
+
+So `resolveDependencies` emits one `unsupported-includes` warning per included id,
+saying plainly that **the nested mod will NOT be loaded** and pointing at `depends`
+as the working alternative. The failure moves from silent-at-runtime to loud-at-
+authoring-time. `docs/api/mod-json-spec.md` says the same thing in both the
+semantics list and a ⚠️ callout.
+
+4 new tests (57 loader tests green). The guard was mutation-checked — neutering the
+loop turns 2 of them red.
+
 ## 2026-08-03 — #17: `onUnload` was declared, documented, and never called ✅
 
 `TspmlMod.onUnload` was on the base class. `loader.onUnload` was in the published
