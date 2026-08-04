@@ -103,7 +103,9 @@ export type WarningKind =
   | 'conflict'
   | 'missing-recommendation'
   | 'missing-suggests'
-  | 'incompatible-target';
+  | 'incompatible-target'
+  /** `includes` is validated but not implemented — the nested mod won't load (#16). */
+  | 'unsupported-includes';
 
 export interface Warning {
   kind: WarningKind;
