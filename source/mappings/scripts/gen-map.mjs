@@ -7,10 +7,20 @@
 //   - computes the bundleHash (sha256 of the 0.6.2 main bundle),
 //   - writes maps/polytrack-0.6.2.json.
 //
-// The matcher logic is copied verbatim from the spike (same regexes, IDF, margin,
-// and accept criterion) so the generated matches are consistent with the
-// report-sn-relaxed.json results — only the artificial `examples.length < 15`
-// cap is removed. File lists are sorted for deterministic output.
+// The anchor extraction and IDF weighting are copied verbatim from the spike (same
+// regexes, same corpus-wide IDF) so the generated matches stay consistent with the
+// report-sn-relaxed.json results — only the artificial `examples.length < 15` cap is
+// removed. File lists are sorted for deterministic output.
+//
+// The *decision* — which target a source module maps to — is NOT copied. It comes from
+// `tooling/mappings-pipeline/src/select.mjs`, the one module `match.mjs` also calls.
+// It used to be duplicated here, and that was a real hazard rather than mere untidiness:
+// #1's whole claim is a delta between two match rates, and if the harness that reports
+// the rate and the generator that writes the map could drift, the reported number would
+// say nothing about the map a mod actually resolves against.
+//
+// Structural tie-breaking (#1) is ON by default and can be disabled with
+// `GEN_STRUCTURAL=0` for an apples-to-apples diff against a pre-#1 map.
 //
 // Usage: node scripts/gen-map.mjs
 //   (paths are hardcoded to the pipeline cache; run from the package root.)
@@ -18,6 +28,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chooseTarget, makeFpCache } from "../../../tooling/mappings-pipeline/src/select.mjs";
 
 const PKG_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CACHE = join(PKG_DIR, "../../../tooling/mappings-pipeline/.cache");
@@ -33,6 +44,9 @@ const OUT = process.env.GEN_OUT ?? join(PKG_DIR, `../maps/polytrack-${GAME_VERSI
 // map — because OUT is the not-yet-written candidate, reading targets from OUT on a
 // first regen would ENOENT and silently drop all targets (M9 review finding: blocker).
 const PREV_MAP = process.env.GEN_PREV_MAP ?? OUT;
+// Structural tie-breaking (#1). On by default; `GEN_STRUCTURAL=0` reproduces the
+// lexical-only map the pre-#1 generator produced.
+const STRUCTURAL = process.env.GEN_STRUCTURAL !== "0";
 
 // ---------------------------------------------------------------------------
 // Matcher (verbatim from tooling/mappings-pipeline/src/match.mjs)
@@ -236,11 +250,13 @@ for (const mod of [...srcMods, ...tgtMods])
 const N = srcMods.length + tgtMods.length;
 const idf = (s) => Math.log((N + 1) / ((df.get(s) || 0) + 1)) + 1;
 
+// Takes whole modules (not bare anchor sets) so it can pass straight to `chooseTarget`,
+// which needs `.code` for shapes. `size` picks the smaller side to iterate.
 function sharedWeight(a, b) {
   const [small, big] = a.size < b.size ? [a, b] : [b, a];
   let w = 0;
   let count = 0;
-  for (const s of small) if (big.has(s)) { w += idf(s); count += 1; }
+  for (const s of small.anchors) if (big.anchors.has(s)) { w += idf(s); count += 1; }
   return { w, count };
 }
 
@@ -252,38 +268,37 @@ for (const m of srcMods) {
 }
 
 const margin = 1.25;
-const matched = []; // { src, tgt, count, w, subs, names }
+const fpOf = makeFpCache();
+const matched = []; // { src, tgt, count, w, subs, names, decidedBy }
 const unresolved = []; // { src, subs, anchors, bestShared }
 for (const m of srcMods) {
   if (m.anchors.size === 0) continue;
   const gl = isGameLogic(m);
   if (!gl) continue; // v1 map covers game-logic only (spike scope)
-  let best = null;
-  let second = null;
-  for (const n of tgtMods) {
-    const { w, count } = sharedWeight(m.anchors, n.anchors);
-    if (!best || w > best.w) { second = best; best = { n, w, count }; }
-    else if (!second || w > second.w) second = { n, w, count };
-  }
-  const hasMargin = !second || best.w >= margin * second.w;
-  const ok = best && hasMargin && ((best.count >= 2 && best.w >= 8) || (best.count === 1 && best.w >= 5));
+  const pick = chooseTarget(m, tgtMods, { sharedWeight, fpOf, margin, structural: STRUCTURAL });
+  const ok = !!pick?.accepted;
   const subs = classify(m);
   const srcId = m.name.replace(/\.js$/, "");
   if (ok) {
     matched.push({
       srcId,
-      tgtId: best.n.name.replace(/\.js$/, ""),
-      count: best.count,
-      w: Math.round(best.w),
+      tgtId: pick.name.replace(/\.js$/, ""),
+      count: pick.count,
+      w: Math.round(pick.w),
       subs: subs.length ? subs : ["Unknown"],
       names: stableNames(m.idents, identDocFreq),
+      // Recorded per module, not just counted: a mod author reading the map should be
+      // able to see which entries rest on circumstantial structural evidence rather than
+      // on a decisive anchor win, since those are the ones to re-verify after a bump.
+      decidedBy: pick.decidedBy,
+      structural: pick.decidedBy === "structural" ? +pick.structural.toFixed(5) : undefined,
     });
   } else {
     unresolved.push({
       srcId,
       subs: subs.length ? subs : ["Unknown"],
       anchors: m.anchors.size,
-      bestShared: best ? best.count : 0,
+      bestShared: pick ? pick.count : 0,
     });
   }
 }
@@ -307,6 +322,8 @@ for (const m of matched) {
     matchWeight: m.w,
     sharedAnchors: m.count,
     sourceModuleId: m.srcId,
+    decidedBy: m.decidedBy,
+    ...(m.structural !== undefined ? { structuralSimilarity: m.structural } : {}),
   };
   for (const n of m.names) {
     const k = n.toLowerCase();
@@ -334,7 +351,9 @@ const map = {
   bundleHash,
   generated: {
     from: "M1 drift spike (tooling/mappings-pipeline)",
-    matcher: "report-sn-relaxed configuration (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5)",
+    matcher: STRUCTURAL
+      ? "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, + #1 AST structural tie-break)"
+      : "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, lexical only)",
     granularity: "module + targets (M5-C)",
     note: "v1 module-level map. `targets` (stable name -> TargetSpec) are hand-curated + carried forward on regen; verify against the new build.",
   },
@@ -365,8 +384,10 @@ await writeFile(OUT, JSON.stringify(map, null, 2) + "\n", "utf8");
 const verify = ["1196", "1223", "1312", "1635", "1728", "1882", "2108", "2203", "2493", "2646", "2709", "2825", "2931", "2951", "2970"];
 const seen = new Set(matched.map((m) => m.srcId));
 const missing = verify.filter((id) => !seen.has(id));
+const promoted = matched.filter((m) => m.decidedBy === "structural");
 console.error(`bundleHash      : ${bundleHash}`);
 console.error(`matched modules : ${matched.length}`);
+console.error(`structural      : ${STRUCTURAL ? `on, ${promoted.length} tie-breaks (${promoted.map((m) => `${m.srcId}->${m.tgtId}`).join(", ") || "none"})` : "off (lexical only)"}`);
 console.error(`unresolved      : ${unresolved.length}`);
 console.error(`stable names    : ${Object.keys(stableIndex).length} (collisions: ${collisions.length})`);
 console.error(`example pairs   : ${verify.length - missing.length}/${verify.length} reproduced${missing.length ? ` (missing: ${missing.join(",")})` : ""}`);

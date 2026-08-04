@@ -42,9 +42,17 @@ The canonical stable namespace is human-curated; per-build concrete locators are
 > `node tooling/mappings-pipeline/scripts/regen.mjs <version>` (writes a
 > `*.candidate.json` — never clobbers a committed map). See that package's README for
 > the maintainer workflow. The semi-automated, human-in-the-loop scope (ADR-005)
-> stands: the matcher relocates ~85% of modules automatically; `diff.mjs` surfaces
-> the rest for review and `verify-targets.mjs` is the fail-closed anchor gate that
-> makes carrying `targets` forward safe across a version bump.
+> stands: the matcher relocates ~94% of game-logic modules automatically (0.848
+> lexical-only, 0.939 with the #1 structural tie-break wired in via `select.mjs`);
+> `diff.mjs` surfaces the rest for review and `verify-targets.mjs` is the fail-closed
+> anchor gate that makes carrying `targets` forward safe across a version bump.
+>
+> When two modules genuinely share a stable name — sibling registries really do all
+> declare `TrackPartRotationAxis` — the resolver ranks the collision by **evidence**
+> (lexically-decided beats structurally-decided, then higher `matchWeight`, then
+> `moduleId`), never by position in the JSON. Ranking by map order let structural
+> promotions steal 8 existing names purely by landing earlier in the file; see the
+> 2026-08-04 entry in [progress.md](../project/progress.md).
 
 On each new PolyTrack release:
 

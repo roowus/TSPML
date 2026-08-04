@@ -211,20 +211,32 @@ in first place, discarded for leading by 1.15× instead of 1.25×, and one has 6
 51 shared. Structure adjudicates the ties: **game-logic 0.848 → 0.939**, six promotions (all
 hand-verified), zero regressions, ~540 ms for all 421 modules.
 
-Not yet wired into `gen-map.mjs` — doing so changes which targets a candidate map proposes,
-so it wants its own PR with a full regen diff. Full write-up, including the four cases that
-remain unresolved and why:
+**Wired in** via `src/select.mjs`, the one place a source module's target is chosen. Both
+this harness and `source/mappings/scripts/gen-map.mjs` call it, so the rate reported here is
+the rate the map was built at *by construction* rather than by inspection — which matters
+because #1's claim is a **delta** between two rates, and two drifting copies of the scorer
+would make that number unfalsifiable.
+
+```sh
+node src/match.mjs <src> <tgt>              # baseline, tie-break OFF -> 0.848
+node src/match.mjs <src> <tgt> --structural # tie-break ON            -> 0.939
+GEN_STRUCTURAL=0 node ../../source/mappings/scripts/gen-map.mjs ...   # off in the generator
+```
+
+Full write-up — including the four cases that remain unresolved, the 24 byte-identical
+non-game-logic promotions, and the resolver-ordering defect the integration exposed:
 [`docs/research/structural-fingerprints.md`](../../docs/research/structural-fingerprints.md).
 
 ## Tests
 
 ```sh
-pnpm test    # 90 unit tests — CI-runnable, no bundle needed
+pnpm test    # 106 unit tests — CI-runnable, no bundle needed
 ```
 
 Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
 webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
-Node-invocation helper (5, #25), `wasm-locate` (16, #43) and `fingerprint` (20, #1).
+Node-invocation helper (5, #25), `wasm-locate` (16, #43), `fingerprint` (20, #1) and
+`select` (16, #1).
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.
