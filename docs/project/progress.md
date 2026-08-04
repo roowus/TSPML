@@ -738,6 +738,69 @@ the issue text against the code before acting on it saved doing both twice.
 
 
 
+## 2026-08-04 — #1 (structural fingerprints: 0.848 -> 0.939)
+
+[#1](https://github.com/roowus/TSPML/issues/1) asked for AST structural fingerprints to
+raise the auto-map match rate past ~85%, on the theory that the residual was
+*"low-anchor modules (1-2 string literals)"* that lexical anchors could not reach at all.
+Measuring the residual first retired that theory and changed what the fix had to be.
+
+**All 10 unmatched game-logic modules are rejected by the margin gate, not by anchor
+scarcity.** Two (`3025`, `6979`) have the *correct* target already in first place -- same
+webpack id across versions -- and are discarded purely for leading by 1.15x/1.19x instead
+of 1.25x. Five are exact 1.00 ties. And `8928.js` has 67 anchors with 51 shared: the
+opposite of anchor-starved.
+
+So structure's job is **adjudicating ties anchors already surfaced**, not finding matches
+anchors cannot see -- a much smaller and much more testable claim. It also rules out the
+cheap alternative: lowering the margin alone would admit the five exact ties on coin-flip
+evidence. Structure is what makes admitting them defensible.
+
+`src/fingerprint.mjs` counts 34 rename-invariant shape facts (arity distribution,
+control-flow mix, nesting depth bucketed 1/2/3/4+, computed-vs-static member access),
+log1p-compresses them and compares by cosine. Identifier names, literal values and source
+positions are deliberately excluded -- names are what minification destroys, literals are
+already covered better by the anchor scorer (double-counting them would hide disagreement
+between the two signals), and offsets are formatting-dependent, the same lesson #43 learned
+on the WASM side.
+
+**Result: game-logic 0.848 -> 0.939.** Six promotions, zero regressions, ~540 ms for all
+421 modules, 0 parse failures. Every promotion was hand-verified by reading both bodies
+rather than trusting the score -- `2247 -> 3080` is byte-identical; `5343 -> 1648` is
+confirmed by the source's `Math.ceil(i / 3 * 4)` being present in `1648` and absent in the
+runner-up. In two cases the lexical "best" was a much larger module that merely *imports*
+the right one, which is the failure mode a size-blind anchor score is prone to.
+
+**One design point measurement forced.** Scoring the whole top-K was the first
+implementation and it silently vetoed a correct decision: for `8928.js` structure separates
+the two tied heavyweights cleanly (0.99898 vs 0.71643), but a candidate an order of
+magnitude behind lexically scored 0.98159 on shape and collapsed the gap below threshold. A
+candidate already rejected on direct evidence must not get a structural veto. Restricting
+the vote to the lexical tie band took 0.909 -> 0.939.
+
+The four still open (`3025`, `6979`, `7129`, `8739`) are small enum-shaped modules where a
+34-bucket histogram **saturates** -- `3025.js` scores an exact 1.00000 against three
+different targets. That is the fingerprint correctly reporting it cannot tell, and
+`adjudicate` returns null rather than guessing. Separating them needs call-graph edges
+between already-matched modules: a module's neighbours are far more distinctive than its
+shape. That is the open remainder of #1.
+
+Not yet wired into `gen-map.mjs` -- doing so changes which targets a candidate map proposes,
+so it wants its own PR with a full regen diff.
+
+18 new tests (55 in the pipeline suite). Each guard mutation-checked:
+
+| mutation | result |
+|---|---|
+| track `fnDepth` as mutable state instead of passing it down | 1 failed / 54 passed |
+| return a zero vector instead of `null` on a parse failure | 1 failed / 54 passed |
+| drop `log1p` compression | 1 failed / 54 passed |
+| let structure override a decisive lexical win | 2 failed / 53 passed |
+| score the whole top-K instead of the lexical tie band | 1 failed / 54 passed |
+| accept a hairline structural gap (`minStructural` removed) | 2 failed / 53 passed |
+| stop distinguishing computed from static member access | 1 failed / 54 passed |
+| restored | 55 passed |
+
 ## 2026-08-03 — #43 spike: WASM constants can be located structurally
 
 #43 is the one capability gap in PML's favour (they ship `registerPhysicsMixin`,
