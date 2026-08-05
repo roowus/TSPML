@@ -178,9 +178,23 @@ an *unrecognised* `decidedBy` is rejected rather than tolerated, because a typo'
 as "not structural" would quietly win a collision it should lose. Absent means lexical, so
 pre-#1 maps keep resolving exactly as before.
 
-Still deliberately out of scope: **promoting the committed `polytrack-0.6.2.json`**. The
-candidate map verifies LOW RISK with 5/5 targets passing, but regenerating it changes what
-shipped mods resolve against and is a separate call.
+### Promoted
+
+**The committed `polytrack-0.6.2.json` is now the regenerated map** — 56 → 62 modules,
+10 → 4 unresolved, `bundleHash` unchanged. Held back from the integration PR on purpose,
+because it changes what shipped mods resolve against; landed separately once that change was
+measured rather than assumed.
+
+LOW RISK with 5/5 targets was not the evidence that settled it — that verdict was equally
+green while the `bestShared` defect was live. Resolution was compared directly instead,
+every stable name before against after: **232 unchanged, 14 newly resolvable, 0 re-pointed,
+0 lost**. Two module *keys* do change owner (`trackpartrotationaxis`, `checkpoint`, both to
+`decidedBy: structural`) — collisions the evidence ranking adjudicates, and it hands both to
+the same module as before, which is precisely the distinction a map-level diff cannot draw.
+
+The four still open are a strict subset of the ten, with byte-identical `reason` strings
+(9/10, 8/9, 2/4, 2/2). That subset relation is worth keeping as a check: a regressed
+`bestShared` would show up here as 0/10.
 
 ## Reproducing
 
