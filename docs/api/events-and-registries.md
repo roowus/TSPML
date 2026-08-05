@@ -40,6 +40,18 @@ The **host** (portal / dev harness) drives this: it calls `LoadResult.unload()`
 and emits `loader.onUnload` around it. The loader cannot emit — `ModApi.events`
 is `on`/`off` only, deliberately.
 
+In the portal that host logic is [`lib/teardown.ts`](../../source/portal/lib/teardown.ts),
+triggered on React unmount **and** `pagehide` (tab close and real navigation run no React
+lifecycle). The order it guarantees is what a mod can rely on:
+
+1. `loader.onUnload` is emitted **first**, while the bus and registries are still live —
+   so a handler can still call `keybinds.unregister`, `tracks.remove`, and so on;
+2. mods unload (each mod's disposer / `onUnload`, reverse load order);
+3. the bridge registries are disposed **last**.
+
+So: do your releasing in the handler, and expect the bridge to work while you do. Every
+stage is isolated — a mod that throws on the way out is reported, never fatal.
+
 ## Game events
 
 ```ts
