@@ -158,6 +158,21 @@ Measured directly: **insertion-order re-points 19 pre-existing names; evidence-o
 re-points 0**, and adds 14 newly-resolvable ones. The change is now purely additive, which
 is what adding modules to a map is supposed to be.
 
+**A second defect, and one that attacked this very document.** The first version of the
+integration read `bestShared` — the diagnostic recorded for each *unresolved* module — off
+`chooseTarget`'s return value. That function returns `null` exactly when it declines to
+pick, so every unresolved module was written down as sharing **0** anchors. The table at the
+top of this page is why that matters: it says all 10 residual modules are rejected by the
+**margin gate**, not by anchor scarcity, and that `3025.js` shares 9 of its 10 anchors. A
+map reading `0/10` asserts the opposite, and would send the next reader hunting for missing
+anchors instead of a too-tight margin. `bestShared` now comes from `topCandidates(..., 1)`,
+which reports the lexical leader whether or not the gate accepted it — restored to
+`9/10, 8/9, 2/4, 2/2`, matching the committed map.
+
+It surfaced from reading the regenerated map's `unresolved` section against the committed
+one. Every automated gate was green: tests passed, the diff came back LOW RISK, targets
+verified 5/5. Verifying the parts is not verifying the whole.
+
 `decidedBy` and `structuralSimilarity` are now emitted per module and validated on load —
 an *unrecognised* `decidedBy` is rejected rather than tolerated, because a typo'd value read
 as "not structural" would quietly win a collision it should lose. Absent means lexical, so
@@ -171,7 +186,7 @@ shipped mods resolve against and is a separate call.
 
 ```bash
 cd tooling/mappings-pipeline
-pnpm test                        # 106 unit tests, no bundle needed (20 fingerprint, 16 select)
+pnpm test                        # 107 unit tests, no bundle needed (20 fingerprint, 17 select)
 # the measured rate needs the gitignored cached bundles. Both rates, one command each:
 node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw              # 0.848
 node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw --structural # 0.939
@@ -201,7 +216,8 @@ The guards added by the integration were checked the same way — `select.mjs` a
 | default `structural` on without an `fpOf` to get shapes from | red |
 | drop the name tie-break in `topCandidates` (regen stops being reproducible) | red |
 | revert `buildIndex` to first-wins (`if (held === undefined)`) | 3 failed / 25 passed |
-| restored | 16 and 28 passed |
+| read `bestShared` off `chooseTarget` rather than the lexical leader | map reports `0/10` where the committed map says `9/10` |
+| restored | 17 and 28 passed |
 
 **One of those mutations initially stayed green, and the test was the thing at fault.**
 Rewriting the floor to read the lexical leader did not fail the test meant to catch it: the

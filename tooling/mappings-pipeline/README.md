@@ -230,13 +230,13 @@ non-game-logic promotions, and the resolver-ordering defect the integration expo
 ## Tests
 
 ```sh
-pnpm test    # 106 unit tests — CI-runnable, no bundle needed
+pnpm test    # 107 unit tests — CI-runnable, no bundle needed
 ```
 
 Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
 webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
 Node-invocation helper (5, #25), `wasm-locate` (16, #43), `fingerprint` (20, #1) and
-`select` (16, #1).
+`select` (17, #1).
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.
