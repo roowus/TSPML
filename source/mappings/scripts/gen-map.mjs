@@ -28,7 +28,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chooseTarget, makeFpCache } from "../../../tooling/mappings-pipeline/src/select.mjs";
+import { chooseTarget, makeFpCache, topCandidates } from "../../../tooling/mappings-pipeline/src/select.mjs";
 
 const PKG_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CACHE = join(PKG_DIR, "../../../tooling/mappings-pipeline/.cache");
@@ -294,11 +294,18 @@ for (const m of srcMods) {
       structural: pick.decidedBy === "structural" ? +pick.structural.toFixed(5) : undefined,
     });
   } else {
+    // `bestShared` is a DIAGNOSTIC about the lexical leader, so it must come from
+    // `topCandidates` and not from `pick`. `chooseTarget` returns null for a tie or a
+    // sub-margin leader, which would report 0 shared anchors for a module that in fact
+    // shares plenty — inverting the central #1 finding that these modules are rejected by
+    // the *margin gate*, not by anchor scarcity. The committed pre-#1 map records `3025`
+    // as 9/10; reading 0/10 here would send a reader looking for the wrong problem.
+    const [lexLeader] = topCandidates(m, tgtMods, sharedWeight, 1);
     unresolved.push({
       srcId,
       subs: subs.length ? subs : ["Unknown"],
       anchors: m.anchors.size,
-      bestShared: pick ? pick.count : 0,
+      bestShared: lexLeader ? lexLeader.count : 0,
     });
   }
 }

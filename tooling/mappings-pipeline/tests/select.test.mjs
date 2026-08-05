@@ -41,6 +41,25 @@ describe('topCandidates', () => {
     expect(top.some((c) => c.name === 'none')).toBe(false);
   });
 
+  it('still reports a lexical leader where chooseTarget returns null (the bestShared diagnostic)', () => {
+    // gen-map records `bestShared` for every UNRESOLVED module. It must come from here and
+    // not from chooseTarget, which returns null on a tie or a sub-margin leader — reporting
+    // 0 shared anchors for a module that in fact shares plenty.
+    //
+    // Caught in review, after the first version of the integration did exactly that: the
+    // regenerated map said `3025` had `0/10` shared anchors where the committed pre-#1 map
+    // says `9/10`. That inverts #1's central finding — these modules are rejected by the
+    // MARGIN GATE, not by anchor scarcity — and would send the next reader hunting for
+    // missing anchors instead of a too-tight margin.
+    const src = mod('src', ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']);
+    const cands = [mod('t1', [...src.anchors]), mod('t2', [...src.anchors].slice(0, 9))];
+    // A dead-heat-ish pair: chooseTarget refuses to pick (ratio 1.11 < 1.25 margin)...
+    expect(chooseTarget(src, cands, { sharedWeight: weigh, structural: false, margin: 1.25 })).toBeNull();
+    // ...but the evidence was never absent, and the diagnostic must say so.
+    const [leader] = topCandidates(src, cands, weigh, 1);
+    expect(leader.count).toBe(10);
+  });
+
   it('breaks equal weights by name so a regen is reproducible', () => {
     // Not cosmetic: the map generator must produce the same bytes from the same corpus.
     // Two equal-weight candidates resolved by arrival order would make the output depend

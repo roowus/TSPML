@@ -662,7 +662,7 @@ that never fails against the bug it describes is decoration.
 
 ## Where we stand (2026-08-04)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (28) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (106) · dev-harness (11) — **336 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (28) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (107) · dev-harness (11) — **337 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -860,7 +860,26 @@ every pre-#1 module below any structural newcomer.
 verifies LOW RISK with 5/5 targets passing, but regenerating it changes what shipped mods
 resolve against, and that is a separate call.
 
-19 new tests (**336 workspace green**; pipeline 90 -> 106, mappings 25 -> 28). Guards
+### A second defect, caught in review of this PR
+
+The first version of the integration read `bestShared` — the diagnostic gen-map records for
+every *unresolved* module — off `chooseTarget`'s return value. But `chooseTarget` returns
+`null` precisely when it refuses to pick, so every unresolved module was reported as having
+**0** shared anchors. The committed pre-#1 map says `3025` has **9/10**.
+
+That is worse than a cosmetic slip: it inverts the central finding of #1. "All 10 unmatched
+modules are rejected by the **margin gate**, not by anchor scarcity" is the measurement the
+whole design rests on, and a map reading `0/10` tells the next person the exact opposite —
+sending them to look for missing anchors instead of a too-tight margin. `bestShared` now
+comes from `topCandidates(..., 1)`, which reports the lexical leader whether or not the
+gate accepted it. Restored to `9/10, 8/9, 2/4, 2/2`, matching the committed map exactly.
+
+Worth noting how it surfaced: every gate was green. Tests passed, the diff was LOW RISK,
+targets verified 5/5. It showed up only from reading the regenerated map's `unresolved`
+section against the committed one — the artifact, not the pipeline. Verifying the parts is
+not verifying the whole.
+
+20 new tests (**337 workspace green**; pipeline 90 -> 107, mappings 25 -> 28). Guards
 mutation-checked:
 
 | mutation | result |
@@ -869,7 +888,8 @@ mutation-checked:
 | default `structural` on with no `fpOf` to get shapes from | red |
 | drop the name tie-break in `topCandidates` (regen stops being reproducible) | red |
 | revert `buildIndex` to first-wins (`if (held === undefined)`) | 3 failed / 25 passed |
-| restored | 16 and 28 passed |
+| read `bestShared` off `chooseTarget` instead of the lexical leader | map reports `0/10` where the committed map says `9/10` |
+| restored | 17 and 28 passed |
 
 **The first of those stayed green, and the test was at fault, not the guard.** The fixture
 used weights 7 and 6 — both *under* the evidence floor (`count >= 2 && w >= 8`) — so neither
