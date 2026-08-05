@@ -53,24 +53,39 @@
 // with twice the functions but the same *proportions* still reads as similar.
 
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // @babel/parser is not a direct dependency of this package — it arrives transitively via
 // webcrack, which is a devDependency here. Resolving through webcrack's own require is
 // deliberate: it pins us to whatever parser version webcrack itself unpacked the bundle
 // with, so a fingerprint can never be computed by a different parser than the one that
 // produced the modules. Adding a top-level @babel/parser dep would let those drift.
-const WEBCRACK_PKG = new URL(
-  "../../../node_modules/.pnpm/webcrack@2.16.0/node_modules/webcrack/package.json",
-  import.meta.url,
-);
+//
+// The path is the workspace symlink, and it MUST be realpath'd before requiring through
+// it. pnpm lays a package's own dependencies out as *siblings* inside its store
+// directory (`.pnpm/webcrack@<ver>/node_modules/{webcrack,@babel,...}`), and Node
+// resolves by walking up from the *real* path. Requiring through the symlink itself
+// walks up `tooling/mappings-pipeline/node_modules/`, where `@babel` does not exist —
+// so it fails. Realpathing lands us inside the store dir, where it does.
+//
+// Why not hardcode `.pnpm/webcrack@2.16.0/...` as this used to: measured, that form does
+// NOT break on a webcrack bump — pnpm keeps a hoisted `.pnpm/node_modules/`, so any path
+// under `.pnpm/` still resolves `@babel/parser` even when the named version directory is
+// gone. Both forms resolve the same parser (7.29.7) today. The version string was
+// therefore not load-bearing; it was misleading, because it *looks* like a pin and is
+// not one. This form drops it rather than keeping a number that can silently go stale.
+const WEBCRACK_LINK = new URL("../node_modules/webcrack/package.json", import.meta.url);
 
 let _parser = null;
 /** Lazily resolve @babel/parser through webcrack. Throws a legible error if absent. */
-export function getParser(pkgUrl = WEBCRACK_PKG) {
+export function getParser(pkgUrl = WEBCRACK_LINK) {
   if (_parser) return _parser;
   try {
-    _parser = createRequire(pkgUrl)("@babel/parser");
+    // realpathSync needs a path, not a URL; pathToFileURL puts it back for createRequire.
+    const real = pathToFileURL(realpathSync(fileURLToPath(pkgUrl)));
+    _parser = createRequire(real)("@babel/parser");
   } catch (cause) {
     throw new Error(
       "fingerprint.mjs needs @babel/parser, which normally arrives via webcrack. " +

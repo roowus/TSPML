@@ -662,7 +662,7 @@ that never fails against the bug it describes is decoration.
 
 ## Where we stand (2026-08-04)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (88) · dev-harness (11) — **315 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (90) · dev-harness (11) — **317 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -677,7 +677,7 @@ that never fails against the bug it describes is decoration.
 - **#43 / #1 / #3 spikes ✅** — WASM constants are locatable *structurally* (fail-closed on ambiguity, 97.4% of 0.6.2's functions unique), AST fingerprints break match ties (**0.848 → 0.939**), and split chunks are *discovered from the webpack runtime* rather than probed. All three are measurement + mechanism; none patches or is wired into `gen-map` yet.
 - **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
 - **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto. Then wire `fingerprint.mjs` into `gen-map.mjs` (the 0.939 is measured offline, not yet in the pipeline).
-- **Known paper cut:** `fingerprint.mjs` resolves `@babel/parser` through a **hardcoded `webcrack@2.16.0` path**, so a webcrack bump breaks it (legibly — `getParser` throws a named error, but one that misreads as a missing install). `tooling/mappings-pipeline/node_modules/webcrack/package.json` is the version-agnostic symlink.
+- **Known paper cut — retired, and the first diagnosis was wrong.** `fingerprint.mjs` used to resolve `@babel/parser` through a hardcoded `.pnpm/webcrack@2.16.0/…` path, recorded here as "a webcrack bump breaks it". Measured: it does **not**. pnpm keeps a hoisted `.pnpm/node_modules/`, reachable from *any* path under `.pnpm/`, so `@babel/parser` still resolves with `webcrack@2.16.0` moved off disk entirely. The version string was **misleading, not load-bearing** — it looks like a pin and is not one. Now resolved via the version-agnostic symlink `realpathSync`'d first (pnpm lays a package's deps out as *siblings* in its store dir, and Node walks up from the **real** path, so requiring through the symlink itself fails). The guard that catches this is a **spawned plain-Node** test: vitest resolves bare specifiers through Vite, not Node, *and* exports `NODE_PATH` that children inherit — so the broken form stayed green under vitest both ways until the child's `NODE_PATH` was stripped.
 
 ## 2026-08-03 — #19: the scaffold was unusable outside this monorepo ✅
 
