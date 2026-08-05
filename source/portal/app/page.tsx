@@ -7,6 +7,7 @@ import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/
 import type { ModApi } from '@tspml/loader';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
+import { teardown } from '@/lib/teardown';
 
 /**
  * Play page (milestone M2 proof of concept).
@@ -73,6 +74,10 @@ export default function PlayPage(): ReactElement {
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
   const modsLoadedRef = useRef(false);
+  // The loaded mods' teardown closure (#17), available only once `loadMods` resolves.
+  // A ref rather than state: teardown must read the LATEST value from an effect cleanup
+  // that deliberately never re-runs, and state would close over the mount-time value.
+  const unloadModsRef = useRef<(() => Promise<void>) | undefined>(undefined);
   // The two captures arrive independently and out of order (see attachTracksIfReady).
   const trackManagerRef = useRef<GameTrackManager | null>(null);
   const trackCodecRef = useRef<GameTrackCodec | null>(null);
@@ -175,6 +180,11 @@ export default function PlayPage(): ReactElement {
       modsLoadedRef.current = true;
       void loadMods(api as unknown as ModApi)
         .then((s) => {
+          // Retain the teardown closure (#17). Captured here rather than derived later
+          // because it is the only handle to the loaded mods' cleanup — dropping it,
+          // which is what used to happen, made every `onUnload` unreachable no matter
+          // how completely the loader implemented it.
+          unloadModsRef.current = s.unload;
           const rows: LoadedModRow[] = [
             ...s.loaded.map((id) => ({ id, status: 'loaded' as const })),
             ...s.failed.map((f) => ({ id: f.id, status: 'failed' as const, reason: f.reason })),
@@ -199,6 +209,33 @@ export default function PlayPage(): ReactElement {
         .catch((e) => setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`));
     }
   };
+
+  // Teardown (#17). The loader has always returned an idempotent `unload()` and every
+  // bridge registry has `dispose()`; what was missing was a caller, so mods could never
+  // actually clean up — the exact PML failure TSPML claims to fix.
+  //
+  // Two triggers, because neither covers the other: React unmount (navigation inside the
+  // app, dev-mode remount) and `pagehide` (closing the tab, a real navigation away),
+  // where no React lifecycle runs at all. `unload()` is idempotent and `teardown` is
+  // safe to run twice, so both firing is fine.
+  //
+  // `pagehide` rather than `unload`: `unload` never fires on mobile Safari and disables
+  // the back/forward cache outright. Empty deps — this must bind once and tear down
+  // once; it reads live values through refs.
+  useEffect(() => {
+    const run = (): void => {
+      void teardown({
+        bus,
+        unloadMods: unloadModsRef.current,
+        registries: [keybindsRef.current, tracks, audio],
+      });
+    };
+    window.addEventListener('pagehide', run);
+    return () => {
+      window.removeEventListener('pagehide', run);
+      run();
+    };
+  }, [bus, tracks, audio]);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) {
