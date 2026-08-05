@@ -12,7 +12,7 @@
  */
 import { Audio, EventBus, Keybinds, Tracks } from "@tspml/api-bridge";
 import type { GameAudioManager, GameTrackCodec, GameTrackManager } from "@tspml/api-bridge";
-import type { ModApi } from "@tspml/loader";
+import type { TspmlApi } from "@tspml/api";
 import { readEarlyCaptures } from "@tspml/shared";
 import { trackModApi } from "./tracking-api";
 import type { Subscribable } from "./tracking-api";
@@ -22,7 +22,7 @@ import initialFactory from "tspml:dev-mod";
 const GAME_VERSION = "0.6.2";
 const TSPML_VERSION = "0.0.0-dev";
 
-type ModFactory = (api: ModApi) => unknown;
+type ModFactory = (api: TspmlApi) => unknown;
 type FrameWindow = Window & { __tspml?: unknown };
 
 const bus = new EventBus();
@@ -162,7 +162,7 @@ function runMod(): void {
     version: TSPML_VERSION,
   });
   try {
-    currentFactory(tracked as unknown as ModApi);
+    currentFactory(tracked);
     dev.modLoaded = true;
     dev.modLoadCount += 1;
     setStatus(`mod loaded (×${dev.modLoadCount})`, "ok");

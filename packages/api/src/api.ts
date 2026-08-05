@@ -1,9 +1,9 @@
 import type { AudioRegistry } from './audio.js';
-import type { TspmlEventEmitter } from './events.js';
+import type { TspmlEventSubscriber } from './events.js';
 import type { KeybindsRegistry } from './keybinds.js';
 import type { TracksRegistry } from './tracks.js';
 
-/** Console-shaped logger handed to every mod (matches the loader's ModApi). */
+/** Console-shaped logger handed to every mod (the loader's `ModApi` aliases this type). */
 export type TspmlLogger = Pick<Console, 'log' | 'error' | 'warn' | 'info' | 'debug'>;
 
 /**
@@ -13,8 +13,11 @@ export type TspmlLogger = Pick<Console, 'log' | 'error' | 'warn' | 'info' | 'deb
  * escape hatch follow.
  */
 export interface TspmlApi {
-  /** Stable, error-isolated event bus (Tier 1). */
-  readonly events: TspmlEventEmitter;
+  /**
+   * Stable, error-isolated event bus (Tier 1) — **subscribe-only**. Emitting
+   * belongs to the bridge and the host; see {@link TspmlEventSubscriber}.
+   */
+  readonly events: TspmlEventSubscriber;
   /** Keybind registry (Tier 1). */
   readonly keybinds: KeybindsRegistry;
   /** Custom-track registry (Tier 1) — register a track by import code. */

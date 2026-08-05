@@ -12,15 +12,42 @@
  * so it is unit-testable with plain mocks.
  */
 
-/** Minimal event-emitter surface a mod subscribes through. */
+import type {
+  AudioRegisterResult,
+  AudioRegistration,
+  AudioRegistry,
+  KeybindsRegistry,
+  RegisteredAudio,
+  RegisteredTrack,
+  TrackRegisterResult,
+  TrackRegistration,
+  TracksRegistry,
+  TspmlApi,
+  TspmlEventSubscriber,
+} from "@tspml/api";
+import { stubApi } from "@tspml/loader";
+
+/**
+ * Minimal event-emitter surface a mod subscribes through.
+ *
+ * Deliberately `string`-keyed and loosely typed, unlike the published
+ * `TspmlEventSubscriber`: this is the shape the wrapper accepts as INPUT, and
+ * keeping it structural is what lets the tests drive it with plain `vi.fn()`
+ * mocks instead of a real bus. The wrapper's OUTPUT is the strict published
+ * type — see {@link TrackedModApi}.
+ */
 export interface Subscribable {
   on(event: string, fn: (...args: unknown[]) => void): () => void;
   once(event: string, fn: (...args: unknown[]) => void): () => void;
+  /** Optional so test mocks need not implement it; a real `EventBus` has it. */
+  off?(event: string, fn: (...args: unknown[]) => void): void;
 }
 
 /** Minimal registry surface a mod registers keybinds through. */
 export interface Registrable {
   register(binding: { id: string }): () => void;
+  /** Optional for the same reason as {@link Subscribable.off}. */
+  unregister?(id: string): void;
 }
 
 /**
@@ -29,8 +56,10 @@ export interface Registrable {
  * registered name — so tracking records the NAME and disposes via `unregister`.
  */
 export interface TrackRegistrable {
-  register(track: { code: string; name?: string }): Promise<{ ok: boolean; name?: string }>;
+  register(track: TrackRegistration): Promise<TrackRegisterResult>;
   unregister(name: string): boolean;
+  /** Optional so test mocks need not implement it. */
+  list?(): readonly RegisteredTrack[];
 }
 
 /**
@@ -40,8 +69,10 @@ export interface TrackRegistrable {
  * hot-swap that skipped this would leave the previous mod's sounds audible.
  */
 export interface AudioRegistrable {
-  register(audio: { key: string; url: string }): Promise<{ ok: boolean; key?: string }>;
+  register(audio: AudioRegistration): Promise<AudioRegisterResult>;
   unregister(key: string): boolean;
+  /** Optional so test mocks need not implement it. */
+  list?(): readonly RegisteredAudio[];
 }
 
 /** The api handed to a mod. */
@@ -54,14 +85,20 @@ export interface ModLikeApi {
   readonly version?: string;
 }
 
-/** A tracked api: the mod uses it as normal; the harness can disposeAll() on HMR. */
-export interface TrackedModApi {
-  events: Subscribable;
-  keybinds: Registrable;
-  tracks?: TrackRegistrable | undefined;
-  audio?: AudioRegistrable | undefined;
-  readonly logger?: unknown;
-  readonly version?: string | undefined;
+/**
+ * A tracked api: the mod uses it as normal; the harness can disposeAll() on HMR.
+ *
+ * Extends the published {@link TspmlApi} rather than mirroring it structurally
+ * (#18). The mirror used to be missing `off`, typed `logger` as `unknown`, and
+ * made `tracks`/`audio` optional — so handing it to a mod needed
+ * `as unknown as ModApi`, and a mod that called `api.off(...)` type-checked
+ * against a surface that had no such method. The harness was lying to the very
+ * mods it exists to test.
+ *
+ * The INPUT ({@link ModLikeApi}) stays structural so tests can pass mocks; only
+ * what the mod receives is strict.
+ */
+export interface TrackedModApi extends TspmlApi {
   /** Tear down every subscription the mod made through this tracked api. */
   disposeAll(): void;
 }
@@ -85,19 +122,41 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
     };
   };
 
-  const events: Subscribable = {
-    on: (event, fn) => track(api.events.on(event, fn)),
-    once: (event, fn) => track(api.events.once(event, fn)),
+  // The published `TspmlEventSubscriber` is generic over the event map, while the
+  // input `Subscribable` is `string`-keyed with `unknown[]` listener args. The
+  // wrapper is genuinely event-agnostic — it only records the unsubscriber — so
+  // the parameters are erased on the way in and the strict signature restored on
+  // the way out. `off` delegates when the input has it (a real bus always does)
+  // and is a no-op otherwise, which is the honest answer for a mock that never
+  // recorded the subscription in the first place.
+  // The one unavoidable cast in this file, and the reason it is unavoidable:
+  // `TspmlEventMap` gives each event a DIFFERENT readonly-tuple argument list, so
+  // a listener generic over `K` has no single loose supertype — TS reduces the
+  // intersection of every event's tuple to `never`. The wrapper never inspects an
+  // argument; it only records the unsubscriber, so erasing the parameters here is
+  // sound in a way the type system cannot express. Confined to these three lines
+  // rather than applied to the whole api object, which is what #18 removed.
+  type LooseListener = (...args: unknown[]) => void;
+  const loose = (listener: unknown): LooseListener => listener as LooseListener;
+  const events: TspmlEventSubscriber = {
+    on: (event, listener) => track(api.events.on(event, loose(listener))),
+    once: (event, listener) => track(api.events.once(event, loose(listener))),
+    off: (event, listener) => {
+      api.events.off?.(event, loose(listener));
+    },
   };
-  const keybinds: Registrable = {
+  const keybinds: KeybindsRegistry = {
     register: (binding) => track(api.keybinds.register(binding)),
+    unregister: (id) => {
+      api.keybinds.unregister?.(id);
+    },
   };
 
   // Tracks the mod registered, so a hot-swap doesn't leave the previous mod's
   // tracks in the player's list. Recorded by name (register has no unsubscriber).
   const registeredTracks = new Set<string>();
   const inner = api.tracks;
-  const tracks: TrackRegistrable | undefined = inner
+  const tracks: TracksRegistry | undefined = inner
     ? {
         register: async (t) => {
           const res = await inner.register(t);
@@ -108,6 +167,7 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
           registeredTracks.delete(name);
           return inner.unregister(name);
         },
+        list: () => inner.list?.() ?? [],
       }
     : undefined;
 
@@ -115,7 +175,7 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
   // game's buffer lookup until unregistered, so HMR must drop it.
   const registeredAudio = new Set<string>();
   const innerAudio = api.audio;
-  const audio: AudioRegistrable | undefined = innerAudio
+  const audio: AudioRegistry | undefined = innerAudio
     ? {
         register: async (a) => {
           const res = await innerAudio.register(a);
@@ -128,16 +188,21 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
           registeredAudio.delete(key);
           return innerAudio.unregister(key);
         },
+        list: () => innerAudio.list?.() ?? [],
       }
     : undefined;
 
   return {
     events,
     keybinds,
-    tracks,
-    audio,
-    logger: api.logger,
-    version: api.version,
+    // `TspmlApi` requires these; the harness may not have them yet (the registries
+    // need the game frame). `stubApi`'s members answer `'not-ready'`, which is
+    // precisely true here — and is what a mod would get calling too early against
+    // a real bridge, so the harness stays representative rather than special.
+    tracks: tracks ?? stubApi.tracks,
+    audio: audio ?? stubApi.audio,
+    logger: (api.logger as TspmlApi['logger'] | undefined) ?? stubApi.logger,
+    version: api.version ?? stubApi.version,
     disposeAll: () => {
       // Snapshot first: an unsubscribe that throws shouldn't skip the rest.
       for (const off of [...offs]) {

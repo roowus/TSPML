@@ -37,8 +37,12 @@ Returning nothing is fine — the mod is reported as `no-op` rather than
 other mod still tears down.
 
 The **host** (portal / dev harness) drives this: it calls `LoadResult.unload()`
-and emits `loader.onUnload` around it. The loader cannot emit — `ModApi.events`
-is `on`/`off` only, deliberately.
+and emits `loader.onUnload` around it. Neither the loader nor a mod can emit:
+`TspmlApi.events` is typed `TspmlEventSubscriber` — `on`/`once`/`off`, no `emit`.
+That is enforced by the type since [#18](https://github.com/roowus/TSPML/issues/18)
+rather than merely documented; a mod calling `api.events.emit('race.finished', …)`
+now fails to compile. The concrete `EventBus` a host holds still implements the
+full `TspmlEventEmitter`, so one object serves both roles at runtime.
 
 In the portal that host logic is [`lib/teardown.ts`](../../source/portal/lib/teardown.ts),
 triggered on React unmount **and** `pagehide` (tab close and real navigation run no React

@@ -9,7 +9,8 @@
  * The demo mod (@tspml/demo-hud) is statically imported + returned by
  * `importEntry`; a fallback dynamic `import()` covers any future URL/path mods.
  */
-import type { ModApi, ModDescriptor } from '@tspml/loader';
+import type { TspmlApi } from '@tspml/api';
+import type { ModDescriptor } from '@tspml/loader';
 import { classifySafety, load, parseVersionManifest } from '@tspml/loader';
 import type { SafetyReport } from '@tspml/loader';
 // Statically imported so the bundler includes the demo mod; `importEntry` below
@@ -31,7 +32,7 @@ export interface ModLoadSummary {
   /**
    * Tear down every loaded mod, in reverse load order (#17). Idempotent.
    * The caller emits `loader.onUnload` around this — the loader itself has no
-   * emit capability (`ModApi.events` is `on`/`off` only).
+   * emit capability (`TspmlApi.events` is a subscribe-only view of the bus).
    */
   readonly unload: () => Promise<void>;
 }
@@ -41,7 +42,7 @@ export interface ModLoadSummary {
  * isolation: a bad mod is reported, never boot-aborts. Also classifies each
  * mod's safety (M6-B, warn-only) for the portal to surface.
  */
-export async function loadMods(api: ModApi): Promise<ModLoadSummary> {
+export async function loadMods(api: TspmlApi): Promise<ModLoadSummary> {
   const importEntry = async (specifier: string): Promise<unknown> => {
     if (specifier === 'demo-hud') return { default: demoHudFactory };
     if (specifier === 'checkpoint-counter') return { default: checkpointCounterFactory };
