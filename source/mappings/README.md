@@ -41,6 +41,21 @@ least one hex digit.
 | `stale-map` | hashes differ                          | fetch exact-match map; bind nothing   |
 | `not-found` | hashes match but name unknown          | treat per hook criticality (M4)       |
 
+### Stable-name collisions rank by evidence, not map order
+
+One stable name can name several modules — sibling track-block registries genuinely
+all declare `TrackPartRotationAxis`. The generator prefers module-unique names, which
+keeps this rare, but the resolver still has to choose. It ranks, strongest evidence
+first: `decidedBy: 'lexical'` beats `'structural'` (anchors are direct evidence about a
+module's own literals; shape similarity is circumstantial), then higher `matchWeight`,
+then `moduleId` for determinism.
+
+This is load-bearing, not cosmetic. The index used to be first-wins over
+`Object.values(map.modules)` — i.e. over JSON key order — so the #1 structural
+promotions took **8 pre-existing stable names** off lexically-matched modules purely by
+landing earlier in the file. Adding modules to a map has to be additive. An absent
+`decidedBy` means lexical, so pre-#1 maps rank exactly as they always did.
+
 ## Build & test
 
 ```sh
