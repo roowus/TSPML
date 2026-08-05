@@ -57,9 +57,15 @@ describe('loadDefaultMap (the bundled 0.6.2 map)', () => {
       expect(entry.moduleId).toMatch(/^[0-9]+$/);
       expect(entry.subsystem).toBeTypeOf('string');
     }
-    // The drift spike matched 56 game-logic modules; 10 were left unresolved.
-    expect(Object.keys(map.modules).length).toBe(56);
-    expect(map.unresolved.length).toBe(10);
+    // 66 game-logic modules in the 0.6.0-renamed corpus, each one either matched or
+    // explicitly unresolved. The split was 56/10 on lexical anchors alone; the #1
+    // structural tie-break promoted six of the residual ten, all hand-verified against
+    // both module bodies (docs/research/structural-fingerprints.md). Exact counts
+    // rather than a floor: they are the tripwire for an unreviewed regeneration, which
+    // is the one way a wrong target reaches a shipped mod.
+    expect(Object.keys(map.modules).length).toBe(62);
+    expect(map.unresolved.length).toBe(4);
+    expect(Object.keys(map.modules).length + map.unresolved.length).toBe(66);
   });
 });
 

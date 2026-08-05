@@ -856,9 +856,10 @@ quietly win a collision it should lose. Absent means lexical, so every already-c
 resolves exactly as before — reading absent as "unknown, therefore weaker" would demote
 every pre-#1 module below any structural newcomer.
 
-**Deliberately not done:** promoting the committed `polytrack-0.6.2.json`. The candidate
-verifies LOW RISK with 5/5 targets passing, but regenerating it changes what shipped mods
-resolve against, and that is a separate call.
+**Deliberately not done in this PR:** promoting the committed `polytrack-0.6.2.json`. The
+candidate verifies LOW RISK with 5/5 targets passing, but regenerating it changes what
+shipped mods resolve against, and that is a separate call. *(Made, and promoted, in the
+next entry.)*
 
 ### A second defect, caught in review of this PR
 
@@ -897,6 +898,40 @@ reading of the floor could accept, and the assertion could not tell them apart. 
 straddle it (leader 8 clears, promoted candidate 7 does not), it goes red as intended. Worth
 recording because a surviving mutation reads identically whether the guard is redundant or
 the test is weak, and the two want opposite responses.
+
+## 2026-08-04 — the 0.6.2 map promoted: 56 -> 62 modules ✅
+
+The separate call from the entry above, now made. `maps/polytrack-0.6.2.json` is regenerated
+through the wired pipeline: **56 -> 62 modules, 10 -> 4 unresolved**, `bundleHash` unchanged.
+
+What made it safe to promote was not the LOW RISK verdict — that verdict was equally green
+while the `bestShared` defect was live. It was checking the thing mods actually depend on.
+A map diff is the wrong unit: two module *keys* changed owner (`trackpartrotationaxis`,
+`checkpoint`, both to `decidedBy: structural`), which looks like exactly the silent
+re-pointing the resolver ordering fix exists to prevent. So resolution itself was compared,
+every stable name before against after:
+
+| | count |
+|---|---|
+| unchanged | 232 |
+| newly resolvable | 14 |
+| **re-pointed** | **0** |
+| lost | 0 |
+
+Purely additive, which is what adding modules to a map is supposed to be. The two changed
+keys are collisions the evidence ranking now adjudicates, and it hands both to the same
+module as before. `verifyTargets` against the 0.6.2 corpus: **5 pass, 0 ambiguous, 0 fail**.
+
+The four still unresolved are a strict subset of the ten, carrying byte-identical `reason`
+strings — `3025` 9/10, `6979` 8/9, `7129` 2/4, `8739` 2/2. That subset relation is the
+check worth keeping: it says the promotion only ever removed modules from the unresolved
+list, and it is the artifact-level assertion that would have caught the `bestShared`
+inversion on its own, since a regressed diagnostic would read 0/10 here.
+
+`map.test.ts` asserts the exact counts and that `modules + unresolved == 66`, the corpus
+size. Exact rather than a floor deliberately: the assertion's job is to make an unreviewed
+regeneration fail loudly, and a regeneration that silently changes what a shipped mod binds
+to is the one failure this package exists to prevent.
 
 ## 2026-08-03 — #43 spike: WASM constants can be located structurally
 
