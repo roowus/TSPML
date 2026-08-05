@@ -7,8 +7,9 @@
 // PASS requires: the transformed bundle ran ([TSPML] marker logged), the
 // "unofficial version" gate cleared (pastGate), the bridge is wired, the
 // verifiable Tier-1 events fired during the auto-started race — car.control,
-// car.created, race.started, track.afterLoad — AND the portal's own sidebar
-// reflects the load (#41). checkpoint.passed / race.finished need the player to
+// car.created, race.started, track.afterLoad — the portal's own sidebar
+// reflects the load (#41), AND a real `pagehide` tears the mod back down (#17).
+// checkpoint.passed / race.finished need the player to
 // actually pass a checkpoint / finish, so they are reported but not asserted
 // (expect 0 in this harness).
 //
@@ -280,6 +281,41 @@ try {
   mod = { loaded: false, control: 0, key: 0 };
 }
 
+// #17 — does cleanup actually RUN in a browser? Every piece of the unload chain was
+// implemented and unit-tested while nothing invoked it, so the assertion that tells
+// "wired" apart from "merely present" is one made against a real page teardown.
+//
+// Runs LAST, after every reading above has been taken: it deliberately destroys the
+// thing under test. The event is `pagehide` because that is what the portal binds
+// (`unload` never fires on mobile Safari and disables the bfcache), and it is dispatched
+// on the MAIN frame, where the listener lives — the portal chrome, not the game iframe.
+//
+// The observable is demo-hud's `unloaded` flag, set by the disposer it returns. That
+// flag was added for exactly this check and has been read by nothing.
+const unloadCheck = { before: null, after: null, error: null };
+try {
+  unloadCheck.before = await gameFrame.evaluate(
+    () => window.__tspml?.__demoHud?.unloaded === true,
+  );
+  await page.mainFrame().evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false }));
+  });
+  // Teardown is async (the loader awaits each mod's disposer), so poll rather than read
+  // once — a single synchronous read races it and reports a false negative.
+  unloadCheck.after = await gameFrame.evaluate(async () => {
+    for (let i = 0; i < 40; i++) {
+      if (window.__tspml?.__demoHud?.unloaded === true) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  });
+} catch (e) {
+  unloadCheck.error = String(e && e.message ? e.message : e).slice(0, 160);
+}
+// `before === false` is part of the assertion: if the flag were somehow already set,
+// `after === true` would prove nothing about the teardown we just triggered.
+const unloadOk = unloadCheck.before === false && unloadCheck.after === true;
+
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
 const c = (e) => counts[e] || 0;
 // HARD requirements: gate cleared, bundle ran, bridge wired, the four verifiable
@@ -299,7 +335,8 @@ const pass =
   mod.loaded &&
   mod.control > 0 &&
   mod.key === 1 &&
-  dom.modMixinApplied;
+  dom.modMixinApplied &&
+  unloadOk;
 
 console.log(
   JSON.stringify(
@@ -315,6 +352,9 @@ console.log(
         modControl: mod.control,
         modKey: mod.key,
         modMixinApplied: dom.modMixinApplied,
+        // #17: the mod's disposer ran on a real page teardown.
+        unloadOk,
+        unloadCheck,
         events: {
           "car.control": c("car.control"),
           "car.created": c("car.created"),

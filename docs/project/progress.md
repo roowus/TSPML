@@ -899,6 +899,55 @@ straddle it (leader 8 clears, promoted candidate 7 does not), it goes red as int
 recording because a surviving mutation reads identically whether the guard is redundant or
 the test is weak, and the two want opposite responses.
 
+## 2026-08-04 — #17 closed: the unload trigger, and what "implemented" was hiding ✅
+
+#17 was marked ✅ on 2026-08-03 with a caveat at the bottom: no unload *trigger* was
+wired, deferred behind two unmerged PRs that touched `page.tsx`. Those landed, so this
+finishes it — and the finishing is the interesting part.
+
+Everything was already built. `load()` returned an idempotent, reverse-order, per-mod
+isolated `unload()`. Every bridge registry had `dispose()`. `loadMods` exposed the
+closure. demo-hud returned a disposer that sets an `unloaded` flag *specifically so a
+smoke could prove cleanup ran*. 61 loader tests covered it. **Nothing called any of it.**
+`page.tsx` dropped the closure `loadMods` handed back, so every `onUnload` in the system
+was unreachable no matter how well the loader implemented it.
+
+That is the same shape as the `bestShared` defect two entries up, and worth naming as a
+pattern: a capability nothing invokes passes every test written *about the capability*.
+The suite was green, the docs were accurate about each part, and the feature did not
+exist. Verifying the parts is not verifying the whole.
+
+**What landed.** `lib/teardown.ts` — a pure function, in `lib/` rather than inline
+because the portal's vitest environment is `node` and anything inside the component is
+untestable. Teardown is the last code path that should be verified by eyeballing it: it
+runs while the page is going away, where a thrown error is invisible. Two triggers,
+because neither subsumes the other: React unmount (in-app navigation, dev remount) and
+`pagehide` (tab close, real navigation), where no React lifecycle runs at all. `pagehide`
+rather than `unload` — the latter never fires on mobile Safari and disables the bfcache.
+
+**Ordering is the design, not an implementation detail.** `loader.onUnload` is emitted
+*first*, while the bus and registries are still live, because a mod's handler is its last
+chance to release something; emitting after disposal hands every listener a dead bridge
+and silently drops whatever they do in response — indistinguishable from "no mod cared".
+Mods unload before registries for the same reason: a mod's `onUnload` routinely calls
+`keybinds.unregister`, and disposing first turns that into a throw during cleanup. Every
+stage is isolated, since an exception escaping here abandons the steps after it and leaks
+the whole bridge, window listeners included.
+
+**The assertion that actually matters is the browser one.** 7 unit tests cover the
+ordering and isolation, all four mutations checked red (emit moved last, registry
+isolation dropped, early-return when mods never loaded, stages reordered). But unit tests
+were never what #17 was missing — it was missing a caller, and only a real teardown can
+tell "wired" from "present". The portal smoke now fires a real `pagehide` on the main
+frame and polls demo-hud's `unloaded` flag: **`before: false → after: true`**, PASS.
+
+Mutation-checked at that level too, which is the result worth recording: removing the
+`pagehide` wiring drops the smoke to `unloadOk: false`, exit 1 — while `modLoaded`,
+`sidebarOk`, `keybindFired` and every event count stay green. That green-everywhere-else
+is exactly why this sat open under a ✅ for a day.
+
+344 workspace tests (7 new), lint clean, smoke PASS.
+
 ## 2026-08-04 — the 0.6.2 map promoted: 56 -> 62 modules ✅
 
 The separate call from the entry above, now made. `maps/polytrack-0.6.2.json` is regenerated
@@ -1140,6 +1189,7 @@ own example mod. It now returns a disposer that detaches both.
 iframe reload), because that lives in `page.tsx`, which unmerged #38 and #39 both
 modify. Deferred rather than conflicted — the capability and its host entry point
 are in place, so the trigger is a small follow-up once the stack lands.
+*(Wired, with a browser-level assertion — see the 2026-08-04 entry below.)*
 
 ## 2026-08-03 — #5 webcrack on Node 25: the claim was half wrong
 
