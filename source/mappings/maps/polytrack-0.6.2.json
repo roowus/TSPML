@@ -4,11 +4,33 @@
   "bundleHash": "sha256:8495e6a31cfb66b55861188bd8041b38479ee5b50bd412cc1f6c2b17229f6488",
   "generated": {
     "from": "M1 drift spike (tooling/mappings-pipeline)",
-    "matcher": "report-sn-relaxed configuration (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5)",
+    "matcher": "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, + #1 AST structural tie-break)",
     "granularity": "module + targets (M5-C)",
     "note": "v1 module-level map. `targets` (stable name -> TargetSpec) are hand-curated + carried forward on regen; verify against the new build."
   },
   "modules": {
+    "meshbasicmaterial": {
+      "concept": "Mesh Basic Material",
+      "stableNames": [
+        "MeshBasicMaterial",
+        "InstancedMesh",
+        "loadedResource",
+        "addResource",
+        "initResources",
+        "makeRotationZ"
+      ],
+      "subsystem": "Render",
+      "subsystems": [
+        "Render",
+        "Network"
+      ],
+      "moduleId": "3339",
+      "matchWeight": 35,
+      "sharedAnchors": 9,
+      "sourceModuleId": "1066",
+      "decidedBy": "structural",
+      "structuralSimilarity": 0.99523
+    },
     "keep": {
       "concept": "Keep",
       "stableNames": [
@@ -27,7 +49,8 @@
       "moduleId": "1196",
       "matchWeight": 63,
       "sharedAnchors": 15,
-      "sourceModuleId": "1196"
+      "sourceModuleId": "1196",
+      "decidedBy": "lexical"
     },
     "carcollisionshapevertices": {
       "concept": "Car Collision Shape Vertices",
@@ -51,7 +74,8 @@
       "moduleId": "5220",
       "matchWeight": 112,
       "sharedAnchors": 20,
-      "sourceModuleId": "1223"
+      "sourceModuleId": "1223",
+      "decidedBy": "lexical"
     },
     "renderer": {
       "concept": "Renderer",
@@ -72,7 +96,8 @@
       "moduleId": "1312",
       "matchWeight": 705,
       "sharedAnchors": 121,
-      "sourceModuleId": "1312"
+      "sourceModuleId": "1312",
+      "decidedBy": "lexical"
     },
     "suppressederror": {
       "concept": "Suppressed Error",
@@ -91,7 +116,8 @@
       "moduleId": "1635",
       "matchWeight": 30,
       "sharedAnchors": 5,
-      "sourceModuleId": "1635"
+      "sourceModuleId": "1635",
+      "decidedBy": "lexical"
     },
     "decodearraytomesh": {
       "concept": "Decode Array To Mesh",
@@ -111,7 +137,8 @@
       "moduleId": "1728",
       "matchWeight": 128,
       "sharedAnchors": 23,
-      "sourceModuleId": "1728"
+      "sourceModuleId": "1728",
+      "decidedBy": "lexical"
     },
     "walltrack": {
       "concept": "Wall Track",
@@ -131,7 +158,8 @@
       "moduleId": "8043",
       "matchWeight": 50,
       "sharedAnchors": 9,
-      "sourceModuleId": "1882"
+      "sourceModuleId": "1882",
+      "decidedBy": "lexical"
     },
     "carstate": {
       "concept": "Car State",
@@ -153,7 +181,8 @@
       "moduleId": "3899",
       "matchWeight": 15,
       "sharedAnchors": 3,
-      "sourceModuleId": "2108"
+      "sourceModuleId": "2108",
+      "decidedBy": "lexical"
     },
     "walltrackbottominnercorner": {
       "concept": "Wall Track Bottom Inner Corner",
@@ -174,7 +203,47 @@
       "moduleId": "494",
       "matchWeight": 1534,
       "sharedAnchors": 276,
-      "sourceModuleId": "2203"
+      "sourceModuleId": "2203",
+      "decidedBy": "lexical"
+    },
+    "checkpoint": {
+      "concept": "Checkpoint",
+      "stableNames": [
+        "Checkpoint",
+        "Finish"
+      ],
+      "subsystem": "Checkpoint/Race",
+      "subsystems": [
+        "Checkpoint/Race"
+      ],
+      "moduleId": "3080",
+      "matchWeight": 10,
+      "sharedAnchors": 2,
+      "sourceModuleId": "2247",
+      "decidedBy": "structural",
+      "structuralSimilarity": 1
+    },
+    "carstyle": {
+      "concept": "Car Style",
+      "stableNames": [
+        "carStyle",
+        "tokenHash",
+        "defaultNickname",
+        "createToken",
+        "isVerifier",
+        "countryCode"
+      ],
+      "subsystem": "Car/Physics",
+      "subsystems": [
+        "Car/Physics",
+        "Network"
+      ],
+      "moduleId": "5492",
+      "matchWeight": 10,
+      "sharedAnchors": 2,
+      "sourceModuleId": "2387",
+      "decidedBy": "structural",
+      "structuralSimilarity": 1
     },
     "overlapping-enabled": {
       "concept": "Overlapping_enabled",
@@ -188,7 +257,8 @@
       "moduleId": "2493",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "2493"
+      "sourceModuleId": "2493",
+      "decidedBy": "lexical"
     },
     "multiplayer": {
       "concept": "Multiplayer",
@@ -202,7 +272,8 @@
       "moduleId": "2646",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "2646"
+      "sourceModuleId": "2646",
+      "decidedBy": "lexical"
     },
     "custom-tracks": {
       "concept": "Custom_tracks",
@@ -216,7 +287,8 @@
       "moduleId": "2709",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "2709"
+      "sourceModuleId": "2709",
+      "decidedBy": "lexical"
     },
     "isusingsoftwarerenderer": {
       "concept": "Is Using Software Renderer",
@@ -237,7 +309,8 @@
       "moduleId": "1507",
       "matchWeight": 308,
       "sharedAnchors": 59,
-      "sourceModuleId": "2825"
+      "sourceModuleId": "2825",
+      "decidedBy": "lexical"
     },
     "prevents": {
       "concept": "Prevents",
@@ -256,7 +329,8 @@
       "moduleId": "2931",
       "matchWeight": 23,
       "sharedAnchors": 7,
-      "sourceModuleId": "2931"
+      "sourceModuleId": "2931",
+      "decidedBy": "lexical"
     },
     "deleteallrecordsforprofile": {
       "concept": "Delete All Records For Profile",
@@ -277,7 +351,8 @@
       "moduleId": "2522",
       "matchWeight": 35,
       "sharedAnchors": 7,
-      "sourceModuleId": "2951"
+      "sourceModuleId": "2951",
+      "decidedBy": "lexical"
     },
     "madagascar": {
       "concept": "Madagascar",
@@ -297,7 +372,8 @@
       "moduleId": "5569",
       "matchWeight": 1148,
       "sharedAnchors": 193,
-      "sourceModuleId": "2970"
+      "sourceModuleId": "2970",
+      "decidedBy": "lexical"
     },
     "z-finish": {
       "concept": "Z_FINISH",
@@ -318,7 +394,8 @@
       "moduleId": "3075",
       "matchWeight": 788,
       "sharedAnchors": 137,
-      "sourceModuleId": "3075"
+      "sourceModuleId": "3075",
+      "decidedBy": "lexical"
     },
     "ghostcarsoundsenabled": {
       "concept": "Ghost Car Sounds Enabled",
@@ -342,9 +419,10 @@
       "moduleId": "5287",
       "matchWeight": 143,
       "sharedAnchors": 24,
-      "sourceModuleId": "3476"
+      "sourceModuleId": "3476",
+      "decidedBy": "lexical"
     },
-    "checkpoint": {
+    "checkpoint-3571": {
       "concept": "Checkpoint",
       "stableNames": [
         "checkpoint",
@@ -363,7 +441,8 @@
       "moduleId": "3571",
       "matchWeight": 53,
       "sharedAnchors": 13,
-      "sourceModuleId": "3571"
+      "sourceModuleId": "3571",
+      "decidedBy": "lexical"
     },
     "walltracksides": {
       "concept": "Wall Track Sides",
@@ -384,7 +463,8 @@
       "moduleId": "2600",
       "matchWeight": 2317,
       "sharedAnchors": 402,
-      "sourceModuleId": "405"
+      "sourceModuleId": "405",
+      "decidedBy": "lexical"
     },
     "notificationaudioenabled": {
       "concept": "Notification Audio Enabled",
@@ -409,7 +489,8 @@
       "moduleId": "641",
       "matchWeight": 614,
       "sharedAnchors": 113,
-      "sourceModuleId": "4078"
+      "sourceModuleId": "4078",
+      "decidedBy": "lexical"
     },
     "ghost": {
       "concept": "Ghost",
@@ -426,7 +507,8 @@
       "moduleId": "4239",
       "matchWeight": 17,
       "sharedAnchors": 5,
-      "sourceModuleId": "4239"
+      "sourceModuleId": "4239",
+      "decidedBy": "lexical"
     },
     "addcustomtrackschangedlistener": {
       "concept": "Add Custom Tracks Changed Listener",
@@ -448,7 +530,8 @@
       "moduleId": "8185",
       "matchWeight": 515,
       "sharedAnchors": 93,
-      "sourceModuleId": "4839"
+      "sourceModuleId": "4839",
+      "decidedBy": "lexical"
     },
     "stringkeyframetrack": {
       "concept": "String Keyframe Track",
@@ -472,7 +555,8 @@
       "moduleId": "4922",
       "matchWeight": 3466,
       "sharedAnchors": 597,
-      "sourceModuleId": "4922"
+      "sourceModuleId": "4922",
+      "decidedBy": "lexical"
     },
     "checkpoint-5148": {
       "concept": "Checkpoint",
@@ -486,7 +570,31 @@
       "moduleId": "5148",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "5148"
+      "sourceModuleId": "5148",
+      "decidedBy": "lexical"
+    },
+    "trackpartrotationaxis": {
+      "concept": "Track Part Rotation Axis",
+      "stableNames": [
+        "TrackPartRotationAxis",
+        "TrackEnvironment",
+        "TrackPartColorId",
+        "TrackPartManager",
+        "TrackDataModule",
+        "checkpointPartIds"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "1648",
+      "matchWeight": 18,
+      "sharedAnchors": 4,
+      "sourceModuleId": "5343",
+      "decidedBy": "structural",
+      "structuralSimilarity": 0.99998
     },
     "polytrack1": {
       "concept": "Poly Track1",
@@ -507,7 +615,8 @@
       "moduleId": "11",
       "matchWeight": 27,
       "sharedAnchors": 6,
-      "sourceModuleId": "5440"
+      "sourceModuleId": "5440",
+      "decidedBy": "lexical"
     },
     "invite": {
       "concept": "Invite",
@@ -521,9 +630,10 @@
       "moduleId": "5577",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "5577"
+      "sourceModuleId": "5577",
+      "decidedBy": "lexical"
     },
-    "trackpartrotationaxis": {
+    "trackpartrotationaxis-5735": {
       "concept": "Track Part Rotation Axis",
       "stableNames": [
         "TrackPartRotationAxis",
@@ -541,7 +651,8 @@
       "moduleId": "5494",
       "matchWeight": 51,
       "sharedAnchors": 10,
-      "sourceModuleId": "5735"
+      "sourceModuleId": "5735",
+      "decidedBy": "lexical"
     },
     "checkcustomtracknameexists": {
       "concept": "Check Custom Track Name Exists",
@@ -561,7 +672,8 @@
       "moduleId": "7100",
       "matchWeight": 216,
       "sharedAnchors": 41,
-      "sourceModuleId": "579"
+      "sourceModuleId": "579",
+      "decidedBy": "lexical"
     },
     "checkpoint-5811": {
       "concept": "Checkpoint",
@@ -575,7 +687,8 @@
       "moduleId": "5811",
       "matchWeight": 24,
       "sharedAnchors": 7,
-      "sourceModuleId": "5811"
+      "sourceModuleId": "5811",
+      "decidedBy": "lexical"
     },
     "vehiclecheckpointreset": {
       "concept": "Vehicle Checkpoint Reset",
@@ -598,7 +711,8 @@
       "moduleId": "3277",
       "matchWeight": 196,
       "sharedAnchors": 33,
-      "sourceModuleId": "5818"
+      "sourceModuleId": "5818",
+      "decidedBy": "lexical"
     },
     "hidecheckpointtime": {
       "concept": "Hide Checkpoint Time",
@@ -619,7 +733,8 @@
       "moduleId": "6789",
       "matchWeight": 262,
       "sharedAnchors": 48,
-      "sourceModuleId": "5839"
+      "sourceModuleId": "5839",
+      "decidedBy": "lexical"
     },
     "trackloaderror": {
       "concept": "Track Load Error",
@@ -634,7 +749,8 @@
       "moduleId": "7480",
       "matchWeight": 12,
       "sharedAnchors": 2,
-      "sourceModuleId": "6223"
+      "sourceModuleId": "6223",
+      "decidedBy": "lexical"
     },
     "leaderboard": {
       "concept": "Leaderboard",
@@ -655,7 +771,31 @@
       "moduleId": "6252",
       "matchWeight": 43,
       "sharedAnchors": 12,
-      "sourceModuleId": "6252"
+      "sourceModuleId": "6252",
+      "decidedBy": "lexical"
+    },
+    "trackpartrotationaxis-666": {
+      "concept": "Track Part Rotation Axis",
+      "stableNames": [
+        "TrackPartRotationAxis",
+        "TrackEnvironment",
+        "TrackPartColorId",
+        "TrackPartManager",
+        "TrackDataModule",
+        "checkpointPartIds"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "2849",
+      "matchWeight": 11,
+      "sharedAnchors": 2,
+      "sourceModuleId": "666",
+      "decidedBy": "structural",
+      "structuralSimilarity": 0.99997
     },
     "checkpoint-6738": {
       "concept": "Checkpoint",
@@ -675,7 +815,8 @@
       "moduleId": "6738",
       "matchWeight": 41,
       "sharedAnchors": 11,
-      "sourceModuleId": "6738"
+      "sourceModuleId": "6738",
+      "decidedBy": "lexical"
     },
     "checkpoint-6850": {
       "concept": "Checkpoint",
@@ -692,7 +833,8 @@
       "moduleId": "6850",
       "matchWeight": 27,
       "sharedAnchors": 8,
-      "sourceModuleId": "6850"
+      "sourceModuleId": "6850",
+      "decidedBy": "lexical"
     },
     "-istrackingpointer": {
       "concept": "_is Tracking Pointer",
@@ -715,7 +857,8 @@
       "moduleId": "7024",
       "matchWeight": 155,
       "sharedAnchors": 29,
-      "sourceModuleId": "7024"
+      "sourceModuleId": "7024",
+      "decidedBy": "lexical"
     },
     "invite-732": {
       "concept": "Invite",
@@ -734,7 +877,8 @@
       "moduleId": "732",
       "matchWeight": 20,
       "sharedAnchors": 6,
-      "sourceModuleId": "732"
+      "sourceModuleId": "732",
+      "decidedBy": "lexical"
     },
     "car-thumbnail-placeholder": {
       "concept": "Car_thumbnail_placeholder",
@@ -748,7 +892,8 @@
       "moduleId": "7404",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "7404"
+      "sourceModuleId": "7404",
+      "decidedBy": "lexical"
     },
     "wheel10": {
       "concept": "Wheel10",
@@ -768,7 +913,8 @@
       "moduleId": "8724",
       "matchWeight": 321,
       "sharedAnchors": 59,
-      "sourceModuleId": "765"
+      "sourceModuleId": "765",
+      "decidedBy": "lexical"
     },
     "tresize": {
       "concept": "Tresize",
@@ -784,7 +930,8 @@
       "moduleId": "7687",
       "matchWeight": 23,
       "sharedAnchors": 7,
-      "sourceModuleId": "7687"
+      "sourceModuleId": "7687",
+      "decidedBy": "lexical"
     },
     "car-thumbnail-placeholder-7780": {
       "concept": "Car_thumbnail_placeholder",
@@ -806,7 +953,8 @@
       "moduleId": "7780",
       "matchWeight": 1237,
       "sharedAnchors": 209,
-      "sourceModuleId": "7780"
+      "sourceModuleId": "7780",
+      "decidedBy": "lexical"
     },
     "-createcubicsplinetrackinterpolant": {
       "concept": "_create Cubic Spline Track Interpolant",
@@ -828,7 +976,8 @@
       "moduleId": "7888",
       "matchWeight": 948,
       "sharedAnchors": 165,
-      "sourceModuleId": "7888"
+      "sourceModuleId": "7888",
+      "decidedBy": "lexical"
     },
     "trackpartrotationaxis-7980": {
       "concept": "Track Part Rotation Axis",
@@ -849,7 +998,8 @@
       "moduleId": "7775",
       "matchWeight": 23,
       "sharedAnchors": 4,
-      "sourceModuleId": "7980"
+      "sourceModuleId": "7980",
+      "decidedBy": "lexical"
     },
     "community-tracks": {
       "concept": "Community_tracks",
@@ -863,7 +1013,8 @@
       "moduleId": "8115",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "8115"
+      "sourceModuleId": "8115",
+      "decidedBy": "lexical"
     },
     "setcamera": {
       "concept": "Set Camera",
@@ -884,7 +1035,8 @@
       "moduleId": "3787",
       "matchWeight": 49,
       "sharedAnchors": 11,
-      "sourceModuleId": "832"
+      "sourceModuleId": "832",
+      "decidedBy": "lexical"
     },
     "rendering": {
       "concept": "Rendering",
@@ -906,7 +1058,8 @@
       "moduleId": "8353",
       "matchWeight": 95,
       "sharedAnchors": 21,
-      "sourceModuleId": "8353"
+      "sourceModuleId": "8353",
+      "decidedBy": "lexical"
     },
     "overlapping-disabled": {
       "concept": "Overlapping_disabled",
@@ -920,7 +1073,8 @@
       "moduleId": "8358",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "8358"
+      "sourceModuleId": "8358",
+      "decidedBy": "lexical"
     },
     "fixes": {
       "concept": "Fixes",
@@ -941,7 +1095,8 @@
       "moduleId": "8419",
       "matchWeight": 102,
       "sharedAnchors": 22,
-      "sourceModuleId": "8419"
+      "sourceModuleId": "8419",
+      "decidedBy": "lexical"
     },
     "trackdataimporterlegacy": {
       "concept": "Track Data Importer Legacy",
@@ -962,7 +1117,31 @@
       "moduleId": "9117",
       "matchWeight": 145,
       "sharedAnchors": 29,
-      "sourceModuleId": "8438"
+      "sourceModuleId": "8438",
+      "decidedBy": "lexical"
+    },
+    "walltrackceilingplanecorner": {
+      "concept": "Wall Track Ceiling Plane Corner",
+      "stableNames": [
+        "WallTrackCeilingPlaneCorner",
+        "WallTrackFloorPlaneCorner",
+        "TrackPartRotationAxis",
+        "TrackEnvironment",
+        "TrackPartColorId",
+        "TrackPartManager"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Checkpoint/Race",
+        "Network"
+      ],
+      "moduleId": "8063",
+      "matchWeight": 267,
+      "sharedAnchors": 51,
+      "sourceModuleId": "8928",
+      "decidedBy": "structural",
+      "structuralSimilarity": 0.99898
     },
     "gettotalnumberofcheckpointindices": {
       "concept": "Get Total Number Of Checkpoint Indices",
@@ -984,7 +1163,8 @@
       "moduleId": "6762",
       "matchWeight": 108,
       "sharedAnchors": 20,
-      "sourceModuleId": "8971"
+      "sourceModuleId": "8971",
+      "decidedBy": "lexical"
     },
     "checkpoint-9178": {
       "concept": "Checkpoint",
@@ -999,7 +1179,8 @@
       "moduleId": "9178",
       "matchWeight": 24,
       "sharedAnchors": 7,
-      "sourceModuleId": "9178"
+      "sourceModuleId": "9178",
+      "decidedBy": "lexical"
     },
     "recorded": {
       "concept": "Recorded",
@@ -1019,7 +1200,8 @@
       "moduleId": "1754",
       "matchWeight": 37,
       "sharedAnchors": 8,
-      "sourceModuleId": "927"
+      "sourceModuleId": "927",
+      "decidedBy": "lexical"
     },
     "official-tracks": {
       "concept": "Official_tracks",
@@ -1033,7 +1215,8 @@
       "moduleId": "9391",
       "matchWeight": 6,
       "sharedAnchors": 1,
-      "sourceModuleId": "9391"
+      "sourceModuleId": "9391",
+      "decidedBy": "lexical"
     },
     "compileequirectangularshader": {
       "concept": "Compile Equirectangular Shader",
@@ -1057,7 +1240,8 @@
       "moduleId": "9437",
       "matchWeight": 13959,
       "sharedAnchors": 2362,
-      "sourceModuleId": "9437"
+      "sourceModuleId": "9437",
+      "decidedBy": "lexical"
     },
     "meshlambertmaterial": {
       "concept": "Mesh Lambert Material",
@@ -1078,7 +1262,8 @@
       "moduleId": "6421",
       "matchWeight": 830,
       "sharedAnchors": 143,
-      "sourceModuleId": "9507"
+      "sourceModuleId": "9507",
+      "decidedBy": "lexical"
     },
     "polytrack2": {
       "concept": "Poly Track2",
@@ -1099,36 +1284,11 @@
       "moduleId": "6582",
       "matchWeight": 28,
       "sharedAnchors": 6,
-      "sourceModuleId": "9681"
+      "sourceModuleId": "9681",
+      "decidedBy": "lexical"
     }
   },
   "unresolved": [
-    {
-      "sourceModuleId": "1066",
-      "subsystem": "Render",
-      "subsystems": [
-        "Render",
-        "Network"
-      ],
-      "reason": "no confident match (best shared anchors: 9/9)"
-    },
-    {
-      "sourceModuleId": "2247",
-      "subsystem": "Checkpoint/Race",
-      "subsystems": [
-        "Checkpoint/Race"
-      ],
-      "reason": "no confident match (best shared anchors: 2/2)"
-    },
-    {
-      "sourceModuleId": "2387",
-      "subsystem": "Car/Physics",
-      "subsystems": [
-        "Car/Physics",
-        "Network"
-      ],
-      "reason": "no confident match (best shared anchors: 2/6)"
-    },
     {
       "sourceModuleId": "3025",
       "subsystem": "Track",
@@ -1139,26 +1299,6 @@
         "UI"
       ],
       "reason": "no confident match (best shared anchors: 9/10)"
-    },
-    {
-      "sourceModuleId": "5343",
-      "subsystem": "Track",
-      "subsystems": [
-        "Track",
-        "Checkpoint/Race",
-        "Network"
-      ],
-      "reason": "no confident match (best shared anchors: 4/20)"
-    },
-    {
-      "sourceModuleId": "666",
-      "subsystem": "Track",
-      "subsystems": [
-        "Track",
-        "Checkpoint/Race",
-        "Network"
-      ],
-      "reason": "no confident match (best shared anchors: 2/18)"
     },
     {
       "sourceModuleId": "6979",
@@ -1187,16 +1327,6 @@
         "Render"
       ],
       "reason": "no confident match (best shared anchors: 2/2)"
-    },
-    {
-      "sourceModuleId": "8928",
-      "subsystem": "Track",
-      "subsystems": [
-        "Track",
-        "Checkpoint/Race",
-        "Network"
-      ],
-      "reason": "no confident match (best shared anchors: 51/67)"
     }
   ],
   "targets": {
