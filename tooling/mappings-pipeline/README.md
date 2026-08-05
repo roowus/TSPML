@@ -219,12 +219,12 @@ remain unresolved and why:
 ## Tests
 
 ```sh
-pnpm test    # 88 unit tests — CI-runnable, no bundle needed
+pnpm test    # 90 unit tests — CI-runnable, no bundle needed
 ```
 
 Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
 webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
-Node-invocation helper (5, #25), `wasm-locate` (16, #43) and `fingerprint` (18, #1).
+Node-invocation helper (5, #25), `wasm-locate` (16, #43) and `fingerprint` (20, #1).
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.

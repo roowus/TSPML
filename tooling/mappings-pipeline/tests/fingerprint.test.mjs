@@ -5,6 +5,8 @@
 // The measured effect on the real 0.6.0 -> 0.6.2 pair (game-logic 0.848 -> 0.939) is
 // recorded in docs/research/structural-fingerprints.md, not asserted here.
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   FEATURES,
   adjudicate,
@@ -15,8 +17,52 @@ import {
   vectorize,
 } from '../src/fingerprint.mjs';
 
+const MODULE = fileURLToPath(new URL('../src/fingerprint.mjs', import.meta.url));
+
 const parser = getParser();
 const fp = (code) => fingerprintSource(code, parser);
+
+describe('getParser', () => {
+  it('resolves a working Babel parser', () => {
+    expect(typeof parser.parse).toBe('function');
+    expect(parser.parse('const x = 1;', { sourceType: 'unambiguous' }).type).toBe('File');
+  });
+
+  // THIS ONE MUST SPAWN A REAL NODE. Asserting the import in-process proves nothing
+  // about the pipeline, because vitest resolves bare specifiers through its own Vite
+  // pipeline, not Node's algorithm — so `getParser` succeeds under vitest even when
+  // plain Node cannot resolve @babel/parser at all. `gen-map.mjs` and `regen.mjs` run
+  // under plain Node, which is the runtime that decides whether a regen works.
+  //
+  // Measured, not assumed: dropping the `realpathSync` from getParser leaves this whole
+  // file green under vitest and fails immediately under `node -e`. The symlink at
+  // tooling/mappings-pipeline/node_modules/webcrack has no reachable `@babel` in its
+  // parent chain; realpathing into pnpm's store directory does.
+  //
+  // Same lesson as regen-runnode.test.mjs: spawn the real thing, because the failure
+  // mode is invisible to the convenient harness.
+  it('resolves under plain Node, not just under vitest (the pipeline runtime)', () => {
+    // NODE_PATH must be stripped from the child's env. Vitest exports it pointing at
+    // pnpm's hoisted `.pnpm/node_modules`, which contains @babel/parser, and a spawned
+    // child inherits it — so the child resolves the parser through NODE_PATH no matter
+    // what getParser does, and the guard passes even against a broken resolution.
+    // Measured: with NODE_PATH inherited this test stays green when realpathSync is
+    // removed; with it stripped, it goes red. `regen.mjs` runs without NODE_PATH set,
+    // so stripping it is also the more faithful reproduction of the real pipeline.
+    const { NODE_PATH: _drop, ...env } = process.env;
+    const out = execFileSync(
+      process.execPath,
+      ['-e', `import(${JSON.stringify(MODULE)}).then(m => console.log(typeof m.getParser().parse))`],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env },
+    );
+    expect(out.trim()).toBe('function');
+  });
+
+  // NOT tested: that a bogus path throws the legible error. getParser memoises into a
+  // module-level `_parser` that the import above has already populated, so a later call
+  // with a bad path returns the cache instead of resolving. Asserting it would need a
+  // module-registry reset or exporting the cache — both worse than this note.
+});
 
 describe('countFeatures', () => {
   it('counts function shape by arity and kind', () => {
