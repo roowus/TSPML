@@ -17,6 +17,7 @@
 import type {
   GameMap,
   Locator,
+  ModuleEntry,
   ResolveContext,
   ResolveResult,
   TargetSpec,
@@ -35,22 +36,53 @@ function normalizeHash(h: string): string {
 }
 
 /**
- * Build the case-insensitive stable-name -> locator index for a map. First-wins
- * on collision: the v1 generator prefers module-unique names, so collisions are
- * rare and only occur between sibling modules that genuinely share an enum (e.g.
- * two track-block registries), where either target is a reasonable resolution.
+ * Build the case-insensitive stable-name -> locator index for a map.
+ *
+ * Collisions are real and unavoidable: sibling modules genuinely share enums (several
+ * track-block registries all declare `TrackPartRotationAxis`), so one name can name
+ * several modules. The generator prefers module-unique names, which keeps this rare.
+ *
+ * **Resolution order, strongest evidence first** — NOT map insertion order:
+ *
+ *   1. `decidedBy: 'lexical'` beats `'structural'`. Anchors are direct evidence about a
+ *      module's own literals; shape similarity is circumstantial. `adjudicate()` already
+ *      refuses to let structure override a decisive lexical win *within* one module's
+ *      decision, and this applies the same ordering *across* modules.
+ *   2. Then higher `matchWeight` — more shared anchor evidence.
+ *   3. Then `moduleId`, purely so the result is deterministic.
+ *
+ * This ordering is load-bearing, not cosmetic. Before #1 was wired into the generator,
+ * this function was first-wins over `Object.values(map.modules)` — i.e. over JSON key
+ * order. Measured on the real 0.6.0 -> 0.6.2 pair: the six structural promotions took
+ * **8 pre-existing stable names** away from lexically-matched modules purely by landing
+ * earlier in the file (`trackpartrotationaxis` 11 -> 1648, `checkpoint` 3571 -> 3080,
+ * `carstyle` 2522 -> 5492, and five more). Adding modules is meant to be additive; it
+ * must not silently re-point a name that already resolved on stronger evidence.
  */
 function buildIndex(map: GameMap): Map<string, Locator> {
-  const index = new Map<string, Locator>();
+  const byName = new Map<string, ModuleEntry>();
   for (const entry of Object.values(map.modules)) {
     for (const name of entry.stableNames) {
       const key = name.toLowerCase();
-      if (!index.has(key)) {
-        index.set(key, { type: 'module', moduleId: entry.moduleId });
-      }
+      const held = byName.get(key);
+      if (held === undefined || beatsForIndex(entry, held)) byName.set(key, entry);
     }
   }
+  const index = new Map<string, Locator>();
+  for (const [key, entry] of byName) {
+    index.set(key, { type: 'module', moduleId: entry.moduleId });
+  }
   return index;
+}
+
+/** Absent `decidedBy` means lexical — the only decision the pre-#1 generator could make. */
+const isStructural = (e: ModuleEntry): boolean => e.decidedBy === 'structural';
+
+/** Does `challenger` hold stronger evidence for a shared stable name than `held`? */
+function beatsForIndex(challenger: ModuleEntry, held: ModuleEntry): boolean {
+  if (isStructural(challenger) !== isStructural(held)) return !isStructural(challenger);
+  if (challenger.matchWeight !== held.matchWeight) return challenger.matchWeight > held.matchWeight;
+  return challenger.moduleId < held.moduleId;
 }
 
 export interface Resolver {

@@ -50,6 +50,19 @@ function validateModuleEntry(raw: unknown, key: string): ModuleEntry {
   assert(isNumber(raw.matchWeight), `modules['${key}'].matchWeight must be a number`);
   assert(isNumber(raw.sharedAnchors), `modules['${key}'].sharedAnchors must be a number`);
   assert(isString(raw.sourceModuleId), `modules['${key}'].sourceModuleId must be a string`);
+  // `decidedBy` is optional (#1): pre-#1 maps have no such field, and absent means
+  // lexical. But an *unrecognised* value must be rejected rather than tolerated — the
+  // resolver ranks lexical above structural when two modules share a stable name, so a
+  // typo'd or future value read as "not structural" would quietly win a collision it
+  // should lose. Fail closed on anything we do not understand.
+  assert(
+    raw.decidedBy === undefined || raw.decidedBy === 'lexical' || raw.decidedBy === 'structural',
+    `modules['${key}'].decidedBy must be 'lexical' or 'structural' when present`,
+  );
+  assert(
+    raw.structuralSimilarity === undefined || isNumber(raw.structuralSimilarity),
+    `modules['${key}'].structuralSimilarity must be a number when present`,
+  );
   return {
     concept: raw.concept,
     stableNames: raw.stableNames,
@@ -59,6 +72,10 @@ function validateModuleEntry(raw: unknown, key: string): ModuleEntry {
     matchWeight: raw.matchWeight,
     sharedAnchors: raw.sharedAnchors,
     sourceModuleId: raw.sourceModuleId,
+    ...(raw.decidedBy !== undefined ? { decidedBy: raw.decidedBy } : {}),
+    ...(raw.structuralSimilarity !== undefined
+      ? { structuralSimilarity: raw.structuralSimilarity }
+      : {}),
   };
 }
 

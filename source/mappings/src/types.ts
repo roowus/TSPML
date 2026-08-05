@@ -79,6 +79,22 @@ export interface ModuleEntry {
   readonly sharedAnchors: number;
   /** The 0.6.0 source module the concept was bootstrapped from. */
   readonly sourceModuleId: string;
+  /**
+   * Which kind of evidence chose this module's target (#1).
+   *
+   * `'lexical'` — the anchor scorer won outright by the margin: direct evidence about
+   * this module's own string/number literals.
+   * `'structural'` — anchors could not separate the leaders and an AST shape comparison
+   * broke the tie. Circumstantial evidence, and the entry to re-verify first after a
+   * game update.
+   *
+   * Optional for backward compatibility: maps generated before #1 was wired into
+   * `gen-map.mjs` have no such field, and an absent value means "lexical" (it is the
+   * only decision the old generator could make).
+   */
+  readonly decidedBy?: 'lexical' | 'structural';
+  /** Cosine shape similarity that won a `'structural'` decision. Absent otherwise. */
+  readonly structuralSimilarity?: number;
 }
 
 /** A game-logic module the spike could not confidently relocate this build. */

@@ -662,7 +662,7 @@ that never fails against the bug it describes is decoration.
 
 ## Where we stand (2026-08-04)
 
-- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (25) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (90) · dev-harness (11) — **317 tests green**, CI green.
+- **Engines + bridge + scaffold + pipeline + dev harness, all unit-tested:** loader (65) · mappings (28) · transform (35) · portal (17) · api-bridge (41) · shared (24) · create-tspml-mod (9) · mappings-pipeline (107) · dev-harness (11) — **337 tests green**, CI green.
 - **M4 ✅** — 6 Tier-1 events + keybinds registry + **real mod loading** (two demo mods load simultaneously).
 - **M5 ✅** — mod-declared mixins + chaining/conflict + **mappings-resolved stable-name targeting** (fail-closed).
 - **M6 ✅** — warn-only `classifySafety` + **surfaced in the portal** (sidebar safety indicator).
@@ -674,9 +674,9 @@ that never fails against the bug it describes is decoration.
 - **#11 ✅** — audio registry: a mod's clip replaces a real game sound in **both** surfaces, via the *same* capture as `api.tracks`. Two content registries now work.
 - **#25 ✅** — CI runs the three portal smokes (advisory per-PR + daily, with a bundle-hash canary so a red smoke is interpretable), and `pnpm -r lint` is real: [`@tspml/typecheck`](../../tooling/typecheck) checks the `.mjs` no build reads. Found a live defect in `regen.mjs`.
 - **#16 / #17 / #30 ✅** — `includes` warns instead of silently ignoring; `onUnload` is actually called (idempotent, reverse order); the stub packages stopped overstating themselves.
-- **#43 / #1 / #3 spikes ✅** — WASM constants are locatable *structurally* (fail-closed on ambiguity, 97.4% of 0.6.2's functions unique), AST fingerprints break match ties (**0.848 → 0.939**), and split chunks are *discovered from the webpack runtime* rather than probed. All three are measurement + mechanism; none patches or is wired into `gen-map` yet.
+- **#43 / #1 / #3 spikes ✅** — WASM constants are locatable *structurally* (fail-closed on ambiguity, 97.4% of 0.6.2's functions unique), AST fingerprints break match ties (**0.848 → 0.939**), and split chunks are *discovered from the webpack runtime* rather than probed. **#1 is now wired into `gen-map` via `select.mjs`** (see below); #43 and #3 remain measurement + mechanism, neither patches yet.
 - **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
-- **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto. Then wire `fingerprint.mjs` into `gen-map.mjs` (the 0.939 is measured offline, not yet in the pipeline).
+- **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto. (Wiring `fingerprint.mjs` into `gen-map.mjs` is **done** — the 0.939 now comes from the pipeline, not an offline harness. What remains is the separate call of whether to *promote* the candidate map.)
 - **Known paper cut — retired, and the first diagnosis was wrong.** `fingerprint.mjs` used to resolve `@babel/parser` through a hardcoded `.pnpm/webcrack@2.16.0/…` path, recorded here as "a webcrack bump breaks it". Measured: it does **not**. pnpm keeps a hoisted `.pnpm/node_modules/`, reachable from *any* path under `.pnpm/`, so `@babel/parser` still resolves with `webcrack@2.16.0` moved off disk entirely. The version string was **misleading, not load-bearing** — it looks like a pin and is not one. Now resolved via the version-agnostic symlink `realpathSync`'d first (pnpm lays a package's deps out as *siblings* in its store dir, and Node walks up from the **real** path, so requiring through the symlink itself fails). The guard that catches this is a **spawned plain-Node** test: vitest resolves bare specifiers through Vite, not Node, *and* exports `NODE_PATH` that children inherit — so the broken form stayed green under vitest both ways until the child's `NODE_PATH` was stripped.
 
 ## 2026-08-03 — #19: the scaffold was unusable outside this monorepo ✅
@@ -789,7 +789,8 @@ between already-matched modules: a module's neighbours are far more distinctive 
 shape. That is the open remainder of #1.
 
 Not yet wired into `gen-map.mjs` -- doing so changes which targets a candidate map proposes,
-so it wants its own PR with a full regen diff.
+so it wants its own PR with a full regen diff. *(Done — see the 2026-08-04 integration entry
+below.)*
 
 18 new tests (55 in the pipeline suite). Each guard mutation-checked:
 
@@ -803,6 +804,99 @@ so it wants its own PR with a full regen diff.
 | accept a hairline structural gap (`minStructural` removed) | 2 failed / 53 passed |
 | stop distinguishing computed from static member access | 1 failed / 54 passed |
 | restored | 55 passed |
+
+## 2026-08-04 — #1 wired into the generator, and the defect that surfaced ✅
+
+The 0.939 above was measured by a harness. The map a mod actually resolves against was
+still built by `gen-map.mjs`, which held its **own verbatim copy** of the scorer. That
+duplication was survivable while both were a frozen copy of the M1 spike, and stopped being
+survivable the moment the claim became a *delta between two rates*: if the copies could
+drift, `0.848 -> 0.939` would be a fact about `match.mjs` and not about the map, and the
+number in the README would be unfalsifiable.
+
+New `tooling/mappings-pipeline/src/select.mjs` is now the single place a source module's
+target is chosen (`topCandidates`, `chooseTarget`, `makeFpCache`); `match.mjs` and
+`gen-map.mjs` both call it. `--structural` on the harness (default **off**, so one command
+still yields the baseline) and `GEN_STRUCTURAL=0` in the generator (default **on**).
+
+**Behaviour-preservation proved before trusting the new number.** The post-refactor lexical
+baseline matches the pre-refactor report on every metric including `perSubsystem identical`,
+and the lexical-only regenerated map is **byte-identical to the committed
+`polytrack-0.6.2.json`** — same bundleHash, same 5 targets. Only then was the tie-break
+switched on: 0.848 -> 0.939 reproduced exactly, **0 regressions, 0 changed targets**,
+`gen-map` 56 -> 62 modules, ~0.585 s.
+
+**30 promotions, not 6.** The 6 in the #1 table are the game-logic ones. The other 24 were
+checked with `cmp -s` rather than assumed: every one byte-identical source→target, mostly
+`module.exports = require.p + "images/*.svg"` asset stubs. Overall rate 0.82 -> 0.966.
+
+### The defect this would otherwise have shipped
+
+`regen --diff` came back LOW RISK but reported `stableNames: 8 relocated`. Additive changes
+should relocate nothing, so that number was the interesting part of an otherwise clean run.
+
+Root cause was not in the fingerprints. `buildIndex` in `source/mappings/src/resolver.ts`
+was first-wins over `Object.values(map.modules)` — **JSON key order**. Structural promotions
+land earlier in the regenerated file, so they took 8 pre-existing stable names off
+lexically-matched modules purely by file position (`trackpartrotationaxis` 11 -> 1648,
+`checkpoint` 3571 -> 3080, `carstyle` 2522 -> 5492, and five more). That inverts the exact
+evidence ordering `adjudicate()` enforces *within* one module's decision: anchors are direct
+evidence about a module's own literals, structure is circumstantial. The index enforced the
+opposite *across* modules, by accident of serialization.
+
+Collisions are unavoidable and real — sibling track-block registries genuinely all declare
+`TrackPartRotationAxis` — so the fix is to rank them, not to forbid them. `beatsForIndex`
+now orders by kind of evidence (lexical beats structural), then `matchWeight`, then
+`moduleId` for determinism. Measured: **insertion-order re-points 19 pre-existing names;
+evidence-ordered re-points 0**, and adds 14 newly-resolvable. Now genuinely additive.
+
+`decidedBy` / `structuralSimilarity` are emitted per module and validated on load. An
+*unrecognised* `decidedBy` is **rejected**, not tolerated: read as "not structural" it would
+quietly win a collision it should lose. Absent means lexical, so every already-committed map
+resolves exactly as before — reading absent as "unknown, therefore weaker" would demote
+every pre-#1 module below any structural newcomer.
+
+**Deliberately not done:** promoting the committed `polytrack-0.6.2.json`. The candidate
+verifies LOW RISK with 5/5 targets passing, but regenerating it changes what shipped mods
+resolve against, and that is a separate call.
+
+### A second defect, caught in review of this PR
+
+The first version of the integration read `bestShared` — the diagnostic gen-map records for
+every *unresolved* module — off `chooseTarget`'s return value. But `chooseTarget` returns
+`null` precisely when it refuses to pick, so every unresolved module was reported as having
+**0** shared anchors. The committed pre-#1 map says `3025` has **9/10**.
+
+That is worse than a cosmetic slip: it inverts the central finding of #1. "All 10 unmatched
+modules are rejected by the **margin gate**, not by anchor scarcity" is the measurement the
+whole design rests on, and a map reading `0/10` tells the next person the exact opposite —
+sending them to look for missing anchors instead of a too-tight margin. `bestShared` now
+comes from `topCandidates(..., 1)`, which reports the lexical leader whether or not the
+gate accepted it. Restored to `9/10, 8/9, 2/4, 2/2`, matching the committed map exactly.
+
+Worth noting how it surfaced: every gate was green. Tests passed, the diff was LOW RISK,
+targets verified 5/5. It showed up only from reading the regenerated map's `unresolved`
+section against the committed one — the artifact, not the pipeline. Verifying the parts is
+not verifying the whole.
+
+20 new tests (**337 workspace green**; pipeline 90 -> 107, mappings 25 -> 28). Guards
+mutation-checked:
+
+| mutation | result |
+|---|---|
+| apply the evidence floor to the lexical leader, not the chosen candidate | 1 failed / 15 passed |
+| default `structural` on with no `fpOf` to get shapes from | red |
+| drop the name tie-break in `topCandidates` (regen stops being reproducible) | red |
+| revert `buildIndex` to first-wins (`if (held === undefined)`) | 3 failed / 25 passed |
+| read `bestShared` off `chooseTarget` instead of the lexical leader | map reports `0/10` where the committed map says `9/10` |
+| restored | 17 and 28 passed |
+
+**The first of those stayed green, and the test was at fault, not the guard.** The fixture
+used weights 7 and 6 — both *under* the evidence floor (`count >= 2 && w >= 8`) — so neither
+reading of the floor could accept, and the assertion could not tell them apart. Rewritten to
+straddle it (leader 8 clears, promoted candidate 7 does not), it goes red as intended. Worth
+recording because a surviving mutation reads identically whether the guard is redundant or
+the test is weak, and the two want opposite responses.
 
 ## 2026-08-03 — #43 spike: WASM constants can be located structurally
 
