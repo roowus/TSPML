@@ -25,7 +25,17 @@ import type {
   TspmlApi,
   TspmlEventSubscriber,
 } from "@tspml/api";
-import { stubApi } from "@tspml/loader";
+
+/**
+ * What the required-but-unattached members answer with.
+ *
+ * `@tspml/loader` exports an equivalent `stubApi`, but importing it here would be
+ * a RUNTIME import: CI runs `pnpm -r test` before `pnpm -r build`, so the loader's
+ * `dist/` does not exist yet and vite cannot resolve the package entry. A local
+ * literal keeps the harness's tests independent of build order — the type imports
+ * above are erased and cost nothing.
+ */
+const NOT_READY = { ok: false, reason: "not-ready" } as const;
 
 /**
  * Minimal event-emitter surface a mod subscribes through.
@@ -196,13 +206,21 @@ export function trackModApi(api: ModLikeApi): TrackedModApi {
     events,
     keybinds,
     // `TspmlApi` requires these; the harness may not have them yet (the registries
-    // need the game frame). `stubApi`'s members answer `'not-ready'`, which is
+    // need the game frame). Until then they answer `'not-ready'`, which is
     // precisely true here — and is what a mod would get calling too early against
     // a real bridge, so the harness stays representative rather than special.
-    tracks: tracks ?? stubApi.tracks,
-    audio: audio ?? stubApi.audio,
-    logger: (api.logger as TspmlApi['logger'] | undefined) ?? stubApi.logger,
-    version: api.version ?? stubApi.version,
+    tracks: tracks ?? {
+      register: () => Promise.resolve(NOT_READY),
+      unregister: () => false,
+      list: () => [],
+    },
+    audio: audio ?? {
+      register: () => Promise.resolve(NOT_READY),
+      unregister: () => false,
+      list: () => [],
+    },
+    logger: (api.logger as TspmlApi['logger'] | undefined) ?? console,
+    version: api.version ?? "0.0.0-stub",
     disposeAll: () => {
       // Snapshot first: an unsubscribe that throws shouldn't skip the rest.
       for (const off of [...offs]) {
