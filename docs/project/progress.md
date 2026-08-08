@@ -120,7 +120,7 @@ Ran a **discovery workflow** (5 agents, one per event) to find clean hook points
 
 **Headless-verified** (smoke subscribes to ALL events the moment the bridge is exposed — before race setup — since `car.created`/`track.afterLoad` fire early): `car.created=1`, `race.started=1`, `track.afterLoad=2` (menu bg + race), `car.control=5`; `checkpoint.passed`/`race.finished=0` (need real race progress; wired but not asserted).
 
-**Discovery fix during implementation:** the checkpoint anchor originally used method-name *identifiers* (`addCheckpointCallback`…) which the locator can't match (it keys off **string/numeric literals** only) → reused module 641's string-data anchor instead. **Adversarially reviewed** (3 lenses; 0 blockers, 1 major→fixed, nits→fixed): the major was that `race.started`/`checkpoint.passed`/`race.finished` fire **per-car** (player + ghosts), not player-only as comments claimed (the player flag is a private minified WeakMap field the inject can't read) → corrected the comments + filed **issue #10** (add an `isReplay` accessor for player-only filtering). Also normalized `CAR_CREATED` minHits 2→3 and replaced a dead `trackPartData` identifier-anchor entry with a real string literal. `@tspml/api` gained `CarCreatedInfo`/`RaceFinishInfo` payload types.
+**Discovery fix during implementation:** the checkpoint anchor originally used method-name *identifiers* (`addCheckpointCallback`…) which the locator can't match (it keys off **string/numeric literals** only) → reused module 641's string-data anchor instead. **Adversarially reviewed** (3 lenses; 0 blockers, 1 major→fixed, nits→fixed): the major was that `race.started`/`checkpoint.passed`/`race.finished` fire **per-car** (player + ghosts), not player-only as comments claimed (the player flag is a private minified WeakMap field the inject can't read) → corrected the comments + filed **issue #10** (add an `isReplay` accessor for player-only filtering). [**Correction, 2026-08-04:** that parenthetical is wrong — the flag is a module-scope `var` WeakMap in the inject's scope chain, and #10 shipped with no accessor. See the #10 entry at the end of this file.] Also normalized `CAR_CREATED` minHits 2→3 and replaced a dead `trackPartData` identifier-anchor entry with a real string literal. `@tspml/api` gained `CarCreatedInfo`/`RaceFinishInfo` payload types.
 
 ## 2026-07-31 — M4-G/H: first registry (keybinds) + `window.__tspml` → api object ✅
 
@@ -1345,3 +1345,78 @@ which is the difference between a defect and a note.
 Both smokes re-run because the portal `api` literal and the tracking wrapper were
 touched: portal `PASS: true` with `unloadOk` and every event count unchanged;
 harness `gameSurvivedHmr: true`.
+
+## 2026-08-04 — #10: per-car race events tagged, and the issue's premise disproved ✅
+
+`race.started`, `checkpoint.passed`, `checkpoint.respawn`, and `race.finished` are
+patched onto methods of the car-controller class, so they fire **once per car** —
+the player's *and* every ghost. A lap timer subscribing to `checkpoint.passed`
+double-counts on any track the user has a record on. Chosen fix shape (owner's
+call): **tag the payload** rather than filter at the source, so a mod that *wants*
+ghost data keeps it.
+
+**The blocker in the issue text was wrong.** #10 recorded the controlled-car flag
+as "a private minified WeakMap field the inject can't read" — that claim came from
+the M4-D/E/F review above and it stood unexamined for four days. It is false. The
+flag (`ie`) and the physics car id (`ee`) are module-scope `var` WeakMaps in the
+same webpack module (641) as the class, and a `before` inject is spliced lexically
+*inside* the target method's block — so both are in its scope chain alongside
+`this` and the params. No accessor patch, and nothing is ever written to a game
+object (which would have been a first for this repo). Verified against the real
+bundle, not inferred.
+
+The sense matters and is easy to get backwards: the game stores *is-controlled*
+(`ie.set(this, recording == null)` in the constructor), so `isReplay` is its
+**negation**. Every read is guarded and yields `null` on failure — `null` means
+*unknown*, explicitly not *the player*, and the docs now say so at every mention,
+because a mod checking truthiness instead of `=== true` would silently attribute
+unknown cars to the user. Failing soft rather than throwing is non-negotiable
+here: this code runs inside game code, and one of the two sites is a per-frame
+method. In that site the payload is built **lazily inside each transition
+branch**, not once up front — both branches are false on almost every frame for
+every car, and two WeakMap reads per car per frame for a value nothing reads is a
+real cost at 60fps.
+
+The two minified names live in one exported constant (`CAR_CONTROLLER_BINDINGS`)
+interpolated into the injects, which buys the same one-place-to-fix-on-rename
+surface the rejected accessor option would have, without the write
+([#24](https://github.com/roowus/TSPML/issues/24)). A test asserts each name
+appears an equal number of times, so a future inline re-scatters nothing quietly.
+
+**A bug I made and caught before it shipped:** the first payload helper read
+`this` inside its own IIFE. The game module is `"use strict"`, so `this` there is
+`undefined` — every read would have thrown, been swallowed by the guard, and
+degraded to `null`. The fix would have parsed, applied, emitted, and been a total
+no-op. The receiver is now passed explicitly, and a dedicated test pins it.
+
+**Verification (owner's call: synthetic bundle + tighten the live smoke).** No
+smoke can produce a ghost — a ghost needs a saved lap record and every smoke
+launches a fresh headless profile — so the player-vs-ghost distinction was
+untestable in this repo by construction. `source/shared/tests/per-car-events.test.ts`
+builds a synthetic webpack bundle mirroring module 641 (two cars, one driven, one
+recording; plus a decoy module carrying none of the anchor literals), runs the
+**real** transform over it, executes the output, and asserts the exact payload
+tuples. It asserts `failed` is empty and `applied` has the expected length first,
+so a patch that stops matching fails loudly instead of making every later
+assertion vacuous, and it selects patches by anchor literal rather than array
+index. Three mutations proven red then green: dropping the `!` (6 failures),
+reintroducing the strict-mode `this` (7 failures, everything `null`), inlining a
+binding (2 failures incl. `uneven binding use`). The portal smoke's `race.started`
+gate went from `> 0` to `=== 1` **plus** attribution — one payload,
+`isReplay === false`, numeric `carId` — since `> 0` would have passed on a payload
+of ghosts.
+
+**Second gap closed on the way.** Updating the api-bridge event-bus tests to the
+new payloads revealed that `bus.emit('checkpoint.passed', 0)` had become
+type-invalid and **nothing in CI could see it**: every emitting package is
+`include: ["src"]` with `rootDir: src`, so the suites were only ever compiled by
+vitest's esbuild transform, which strips types without checking them. A suite that
+is not typechecked is a poor guard for a type change. `source/shared` and
+`source/api-bridge` gained the `tsconfig.tests.json` + `lint` pattern #18
+introduced for the loader; reverting one emit proved it red. `transform`,
+`mappings`, and `portal` still do not typecheck their tests (task #25).
+
+Also avoided repeating #18's CI failure: `pnpm -r test` runs **before**
+`pnpm -r build`, so the new test importing `@tspml/transform` would have resolved
+a `dist/` that does not exist yet on CI while passing locally off a stale one. A
+vitest `resolve.alias` points at the dependency's source instead.
