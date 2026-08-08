@@ -62,6 +62,27 @@ describe("BRIDGE_PATCHES composition", () => {
   });
 
   /**
+   * #10: every per-car race event carries the `{ carId, isReplay }` discriminator.
+   * A static check that the payload SHAPE is there; that it computes the right
+   * values is `per-car-events.test.ts`, which executes the transformed output.
+   */
+  it("tags every per-car race event with carId + isReplay", () => {
+    const perCar = TIER1_BRIDGE_PATCHES.filter((p) =>
+      ["skidding", "engine", "tires", "BrakeLight"].every((l) =>
+        p.target.anchor.literals.includes(l),
+      ),
+    );
+    // start() (race.started) + setCarState() (checkpoint.passed + race.finished).
+    expect(perCar).toHaveLength(2);
+    for (const patch of perCar) {
+      for (const { label, source } of injectSources(patch)) {
+        expect(source, `${label} lacks carId`).toContain("carId");
+        expect(source, `${label} lacks isReplay`).toContain("isReplay");
+      }
+    }
+  });
+
+  /**
    * Three captures from two patches: the track-selection constructor yields both the
    * track manager and the audio manager, and the codec comes from its own module
    * factory. A count of 2 with 3 capture calls is the point, not an oversight.

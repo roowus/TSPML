@@ -36,6 +36,36 @@ See the [events & registries](https://github.com/roowus/TSPML/blob/main/docs/api
 
 ## Changes
 
+### Unreleased — per-car race events carry `{ carId, isReplay }` (breaking)
+
+`race.started`, `checkpoint.passed`, `checkpoint.respawn`, and `race.finished` are
+emitted **once per car** — the player's *and* every ghost/replay car on the track.
+That was always true; there was no way to tell the cars apart
+([#10](https://github.com/roowus/TSPML/issues/10)). Each payload now extends
+`CarRef`, a new exported type:
+
+```ts
+interface CarRef {
+  readonly carId: number | null;
+  readonly isReplay: boolean | null;
+}
+```
+
+Three payloads changed shape, so listeners must be updated:
+
+| Event | Was | Now |
+|---|---|---|
+| `race.started` | `()` | `({ carId, isReplay })` |
+| `checkpoint.passed` / `.respawn` | `(index: number)` | `({ index, carId, isReplay })` |
+| `race.finished` | `(frames: number)` | `({ frames, carId, isReplay })` (`RaceFinishInfo` gained the two fields) |
+
+`CarRef` and `CheckpointInfo` are new exports.
+
+Compare with `isReplay === true`, not truthiness: `null` means TSPML could not
+determine which car it was, which is *unknown* rather than *the player*. Treating
+`null` as falsy silently attributes unknown cars to the user, which for a lap timer
+is the exact bug this change exists to prevent.
+
 ### Unreleased — `TspmlApi.events` is subscribe-only (pre-1.0 narrowing)
 
 `TspmlApi.events` is now `TspmlEventSubscriber` (`on` / `once` / `off`) rather

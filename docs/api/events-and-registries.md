@@ -77,11 +77,11 @@ api.events.on('car.created',     (car) => {});
 api.events.on('car.stateUpdate',  (state) => {});
 api.events.on('car.styleChanged', (car) => {});
 
-// checkpoints / race
-api.events.on('checkpoint.passed',  (index) => {});
-api.events.on('checkpoint.respawn',  (index) => {});
-api.events.on('race.started',  () => {});
-api.events.on('race.finished', (time) => {});
+// checkpoints / race — all PER-CAR, all carrying `{ carId, isReplay }` (#10)
+api.events.on('checkpoint.passed',  ({ index, carId, isReplay }) => {});
+api.events.on('checkpoint.respawn', ({ index, carId, isReplay }) => {});
+api.events.on('race.started',       ({ carId, isReplay }) => {});
+api.events.on('race.finished',      ({ frames, carId, isReplay }) => {});
 
 // input
 api.events.on('input.keyDown', (e) => {});
@@ -97,6 +97,40 @@ api.events.on('network.disconnect', () => {});
 ```
 
 `on/off` rebuild an array-backed invoker (Fabric `ArrayBackedEvent`) — lock-free, hot-path fast.
+
+### Per-car race events (#10)
+
+`race.started`, `checkpoint.passed`, `checkpoint.respawn`, and `race.finished` are
+emitted **once per car**, not once per race. A track you have a saved record on spawns
+a ghost, and the ghost is a car: it starts, passes checkpoints, and finishes exactly
+like yours does. A lap timer that ignores this double-counts.
+
+Every one of those payloads therefore extends `CarRef`:
+
+```ts
+interface CarRef {
+  readonly carId: number | null;     // physics-worker car id; matches car.created / car.control
+  readonly isReplay: boolean | null; // true = ghost/replay, false = the player
+}
+```
+
+```ts
+api.events.on('race.finished', ({ frames, isReplay }) => {
+  if (isReplay === true) return;     // a ghost finished, not the player
+  showTime(frames);
+});
+```
+
+Compare against `=== true`, not truthiness. Both fields are nullable and `null` means
+**TSPML could not determine it**, which is not the same as "the player" — a mod that
+treats `null` as falsy silently attributes unknown cars to the player. `carId` is `null`
+for a car with no physics body; `isReplay` is `null` only if the bridge's read of the
+game's own controlled-car flag fails (e.g. a game update moved it), which is the
+fail-soft path rather than a throw inside game code.
+
+Because `carId` is the same id `car.created` and `car.control` report, you can still
+correlate across events if you need per-car state — but you no longer *have to* in
+order to answer "was that me?".
 
 ## Registries (Fabric Registry analog)
 

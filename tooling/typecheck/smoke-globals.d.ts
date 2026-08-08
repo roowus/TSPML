@@ -26,6 +26,14 @@ declare global {
     __tspmlDev?: any;
     /** Smoke scratch: per-event counters set up by the smoke's own subscriber. */
     __tspmlCounts?: Record<string, number>;
+    /**
+     * Smoke scratch: captured per-car payloads (`{carId, isReplay}`) for the race
+     * events, so the smoke can assert WHICH car fired, not just how often (#10).
+     */
+    __tspmlPayloads?: Record<
+      string,
+      Array<{ carId: number | null; isReplay: boolean | null }>
+    >;
     /** Smoke scratch: keybind-registry fire count. */
     __tspmlKb?: number;
     /** Set by @tspml/demo-hud's declared mixin — proves a mod mixin applied. */

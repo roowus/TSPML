@@ -1,0 +1,17 @@
+// Typecheck-only config for the test suite (see source/loader/tsconfig.tests.json
+// for the rationale in full).
+//
+// The build config emits `src` with `rootDir: src` and cannot also include
+// `tests`, so the suite was only ever compiled by vitest's esbuild transform,
+// which strips types without checking them.
+//
+// Closed here because #10 changed three event payload shapes, and this package's
+// suite emits every one of them: `bus.emit('checkpoint.passed', 0)` became
+// type-invalid and nothing in CI would have said so.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "tests"]
+}

@@ -11,6 +11,10 @@ const CONTROL = {
   reset: false,
 } as const;
 
+// The per-car discriminator every race event carries (#10). `isReplay: false` is
+// the player's car; a ghost would be `true`.
+const PLAYER = { carId: 0, isReplay: false } as const;
+
 describe('EventBus', () => {
   it('delivers emit args to on() listeners', () => {
     const bus = new EventBus();
@@ -27,7 +31,7 @@ describe('EventBus', () => {
     expect(bus.listenerCount('race.started')).toBe(1);
     off();
     expect(bus.listenerCount('race.started')).toBe(0);
-    bus.emit('race.started');
+    bus.emit('race.started', PLAYER);
     expect(fn).not.toHaveBeenCalled();
   });
 
@@ -46,10 +50,10 @@ describe('EventBus', () => {
   it('once() fires only on the first emit', () => {
     const bus = new EventBus();
     const fn = vi.fn();
-    const finish = { frames: 12345 } as const;
+    const finish = { frames: 12345, ...PLAYER } as const;
     bus.once('race.finished', fn);
     bus.emit('race.finished', finish);
-    bus.emit('race.finished', { frames: 9999 });
+    bus.emit('race.finished', { frames: 9999, ...PLAYER });
     expect(fn).toHaveBeenCalledTimes(1);
     expect(fn).toHaveBeenCalledWith(finish);
     expect(bus.listenerCount('race.finished')).toBe(0);
@@ -108,11 +112,11 @@ describe('EventBus', () => {
     });
     unsubscribeSecond = bus.on('checkpoint.passed', () => seen.push(2));
 
-    bus.emit('checkpoint.passed', 0);
+    bus.emit('checkpoint.passed', { index: 0, ...PLAYER });
     // The snapshot still contained the second listener, so it ran this round.
     expect(seen).toEqual([1, 2]);
 
-    bus.emit('checkpoint.passed', 0);
+    bus.emit('checkpoint.passed', { index: 0, ...PLAYER });
     // On the next round only the first listener remains.
     expect(seen).toEqual([1, 2, 1]);
   });

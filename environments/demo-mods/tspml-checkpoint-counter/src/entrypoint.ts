@@ -1,7 +1,14 @@
 import type { TspmlApi } from '@tspml/api';
 
 /** Debug counters for headless verification (on the api object). */
-interface Counters { checkpoints: number; keyPresses: number; loaded: boolean }
+interface Counters {
+  /** Checkpoints the PLAYER passed — what a lap timer actually wants. */
+  checkpoints: number;
+  /** Checkpoints a ghost/replay car passed. Counted separately, never mixed in. */
+  ghostCheckpoints: number;
+  keyPresses: number;
+  loaded: boolean;
+}
 interface Api extends TspmlApi { __checkpointCounter?: Counters }
 
 /**
@@ -10,11 +17,22 @@ interface Api extends TspmlApi { __checkpointCounter?: Counters }
  * registers a KeyJ keybind (different from demo-hud's KeyG).
  */
 export default function checkpointCounter(api: Api): void {
-  const counters: Counters = { checkpoints: 0, keyPresses: 0, loaded: true };
+  const counters: Counters = {
+    checkpoints: 0,
+    ghostCheckpoints: 0,
+    keyPresses: 0,
+    loaded: true,
+  };
   api.__checkpointCounter = counters;
 
-  api.events.on('checkpoint.passed', () => {
-    counters.checkpoints++;
+  // checkpoint.passed is PER-CAR (#10): a track with a ghost emits for the ghost
+  // too. Counting both into one total is the bug the payload's `isReplay` exists to
+  // prevent — so this demo does what a real lap-timer must, and splits them.
+  // `isReplay === true` (not truthy) because `null` means "TSPML could not tell",
+  // which is neither the player nor a ghost and must not be silently claimed.
+  api.events.on('checkpoint.passed', ({ isReplay }) => {
+    if (isReplay === true) counters.ghostCheckpoints++;
+    else counters.checkpoints++;
   });
 
   api.keybinds.register({
