@@ -29,6 +29,14 @@ export type {
 
 export { ID_PATTERN, stubApi, TspmlMod } from './types.js';
 
+/**
+ * Re-exported so a consumer that links only `@tspml/loader` can name the mod
+ * api type. The loader's emitted declarations reference `@tspml/api`, and
+ * pnpm's isolated `node_modules` means a package that does not declare that
+ * dependency cannot resolve the name on its own (#18).
+ */
+export type { TspmlApi } from '@tspml/api';
+
 // semver predicate engine
 export {
   isValidRange,

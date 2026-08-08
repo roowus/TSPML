@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 import { Audio, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
 import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
-import type { ModApi } from '@tspml/loader';
+import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
 import { teardown } from '@/lib/teardown';
@@ -46,6 +46,21 @@ interface LoadedModRow {
   id: string;
   status: 'loaded' | 'failed';
   reason?: string;
+}
+
+/**
+ * What the portal puts on `window.__tspml`: the full mod-facing {@link TspmlApi}
+ * plus the three capture callbacks the shared bridge patches invoke from inside
+ * the game.
+ *
+ * The captures are deliberately NOT part of `TspmlApi` — they are the host's
+ * plumbing for reaching bootstrap-scope game objects, not something a mod calls.
+ * Extending keeps them typed while `loadMods(api)` still checks the mod contract.
+ */
+interface PortalApi extends TspmlApi {
+  captureTrackManager(m: GameTrackManager): void;
+  captureTrackCodec(c: GameTrackCodec): void;
+  captureAudioManager(m: GameAudioManager): void;
 }
 
 export default function PlayPage(): ReactElement {
@@ -142,7 +157,11 @@ export default function PlayPage(): ReactElement {
     // The Tier-1 `api` object handed to mods, PLUS the two capture callbacks the
     // shared track-capture patches invoke from inside the game (not part of the mod
     // API — the loader owns them).
-    const api = {
+    //
+    // Annotated rather than inferred: this literal IS the mod-facing contract, and
+    // before #18 it reached the loader through `as unknown as ModApi`, which
+    // suppressed every check. Dropping a member here used to compile.
+    const api: PortalApi = {
       events: bus,
       keybinds: keybindsRef.current,
       tracks,
@@ -178,7 +197,7 @@ export default function PlayPage(): ReactElement {
     // this api and subscribes. Per-mod failure isolation (never boot-aborts).
     if (!modsLoadedRef.current) {
       modsLoadedRef.current = true;
-      void loadMods(api as unknown as ModApi)
+      void loadMods(api)
         .then((s) => {
           // Retain the teardown closure (#17). Captured here rather than derived later
           // because it is the only handle to the loaded mods' cleanup — dropping it,

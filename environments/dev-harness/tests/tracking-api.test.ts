@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { trackModApi } from "../src/tracking-api";
 import type { ModLikeApi } from "../src/tracking-api";
+import type { AudioRegisterResult, AudioRegistration } from "@tspml/api";
 
 /** Build a mock api whose on/once/register return spy unsubscribers. */
 function mockApi() {
@@ -21,11 +22,11 @@ describe("trackModApi — subscription recording", () => {
     const fn = vi.fn();
     tracked.events.on("car.control", fn);
     tracked.events.once("race.started", fn);
-    tracked.keybinds.register({ id: "kb1" });
+    tracked.keybinds.register({ id: "kb1", key: "KeyH" });
 
     expect(api.events.on).toHaveBeenCalledWith("car.control", fn);
     expect(api.events.once).toHaveBeenCalledWith("race.started", fn);
-    expect(api.keybinds.register).toHaveBeenCalledWith({ id: "kb1" });
+    expect(api.keybinds.register).toHaveBeenCalledWith({ id: "kb1", key: "KeyH" });
   });
 
   it("disposeAll tears down every subscription the mod made", () => {
@@ -33,7 +34,7 @@ describe("trackModApi — subscription recording", () => {
     const tracked = trackModApi(api);
     tracked.events.on("car.control", vi.fn());
     tracked.events.once("race.started", vi.fn());
-    tracked.keybinds.register({ id: "kb1" });
+    tracked.keybinds.register({ id: "kb1", key: "KeyH" });
 
     expect(onOff).not.toHaveBeenCalled();
     tracked.disposeAll();
@@ -60,7 +61,7 @@ describe("trackModApi — subscription recording", () => {
     };
     const tracked = trackModApi(api);
     tracked.events.on("car.control", vi.fn());
-    tracked.keybinds.register({ id: "k" });
+    tracked.keybinds.register({ id: "k", key: "KeyK" });
     expect(() => tracked.disposeAll()).not.toThrow();
     expect(ok).toHaveBeenCalledTimes(1); // the keybind teardown still ran despite the throw
   });
@@ -84,9 +85,10 @@ describe("trackModApi — subscription recording", () => {
  */
 describe("trackModApi — audio registrations", () => {
   function mockAudioApi() {
-    const unregister = vi.fn(() => true);
-    const register = vi.fn((a: { key: string; url: string }) =>
-      Promise.resolve({ ok: true, key: a.key }),
+    const unregister = vi.fn((_key: string): boolean => true);
+    const register = vi.fn(
+      (a: AudioRegistration): Promise<AudioRegisterResult> =>
+        Promise.resolve({ ok: true, key: a.key, duration: 1, replacedBuiltin: false }),
     );
     const { api } = mockApi();
     return { api: { ...api, audio: { register, unregister } }, register, unregister };
@@ -99,7 +101,7 @@ describe("trackModApi — audio registrations", () => {
     const res = await tracked.audio?.register({ key: "engine", url: "blob:x" });
 
     expect(register).toHaveBeenCalledWith({ key: "engine", url: "blob:x" });
-    expect(res).toEqual({ ok: true, key: "engine" });
+    expect(res).toEqual({ ok: true, key: "engine", duration: 1, replacedBuiltin: false });
   });
 
   it("disposeAll unregisters every clip the mod registered", async () => {
@@ -117,7 +119,9 @@ describe("trackModApi — audio registrations", () => {
 
   it("does not record a clip that failed to register", async () => {
     const { api, unregister } = mockAudioApi();
-    api.audio.register = vi.fn(() => Promise.resolve({ ok: false }));
+    api.audio.register = vi.fn(
+      (): Promise<AudioRegisterResult> => Promise.resolve({ ok: false, reason: "decode-failed" }),
+    );
     const tracked = trackModApi(api);
 
     await tracked.audio?.register({ key: "engine", url: "blob:bad" });
@@ -153,8 +157,17 @@ describe("trackModApi — audio registrations", () => {
     expect(seen).toEqual(["engine", "click"]);
   });
 
-  it("omits the audio surface when the harness has no registry", () => {
+  it("falls back to the not-ready stub when the harness has no registry", async () => {
+    // `TspmlApi` requires `audio`, so the surface is always present (#18). Before
+    // the registries attach it answers `'not-ready'` — the same thing a mod gets
+    // calling too early against a real bridge, rather than an undefined it would
+    // have to guard on only in the harness.
     const { api } = mockApi();
-    expect(trackModApi(api).audio).toBeUndefined();
+    const audio = trackModApi(api).audio;
+    await expect(audio.register({ key: "engine", url: "blob:x" })).resolves.toEqual({
+      ok: false,
+      reason: "not-ready",
+    });
+    expect(audio.list()).toEqual([]);
   });
 });

@@ -99,3 +99,22 @@ export interface TspmlEventEmitter {
   /** Remove all listeners of `event`, or all listeners on the bus if omitted. */
   removeAllListeners<K extends keyof TspmlEventMap>(event?: K): void;
 }
+
+/**
+ * The event surface a **mod** receives — subscribe-only.
+ *
+ * Emitting is the bridge's job and the host's: the bridge patches raise game
+ * events from inside the game, and the host raises `loader.onUnload` around
+ * teardown. A mod holding `emit` could forge `race.finished` or
+ * `checkpoint.passed`, which every other mod would then act on as if the game
+ * had said it — indistinguishable, at the receiving end, from the real thing.
+ *
+ * The docs have promised this ("`on`/`off` only, deliberately") since M1, but
+ * the promise lived only in prose while `TspmlApi.events` was the full emitter
+ * and hosts handed mods the concrete bus through a cast. This type is what
+ * makes it check.
+ *
+ * `EventBus` implements the full {@link TspmlEventEmitter}, so it satisfies
+ * this by superset — no separate object is needed at runtime.
+ */
+export type TspmlEventSubscriber = Pick<TspmlEventEmitter, 'on' | 'once' | 'off'>;

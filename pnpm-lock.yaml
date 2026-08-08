@@ -30,6 +30,9 @@ importers:
 
   environments/dev-harness:
     dependencies:
+      '@tspml/api':
+        specifier: workspace:*
+        version: link:../../packages/api
       '@tspml/api-bridge':
         specifier: workspace:*
         version: link:../../source/api-bridge
@@ -91,6 +94,9 @@ importers:
 
   source/loader:
     dependencies:
+      '@tspml/api':
+        specifier: workspace:*
+        version: link:../../packages/api
       semver:
         specifier: ^7.6.0
         version: 7.8.5
@@ -122,6 +128,9 @@ importers:
 
   source/portal:
     dependencies:
+      '@tspml/api':
+        specifier: workspace:*
+        version: link:../../packages/api
       '@tspml/api-bridge':
         specifier: workspace:*
         version: link:../api-bridge

@@ -11,6 +11,7 @@ export type {
   RaceFinishInfo,
   TspmlEventEmitter,
   TspmlEventMap,
+  TspmlEventSubscriber,
   TspmlListener,
 } from './events.js';
 

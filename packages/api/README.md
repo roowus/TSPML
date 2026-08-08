@@ -34,6 +34,21 @@ export default async function myMod(api: TspmlApi) {
 
 See the [events & registries](https://github.com/roowus/TSPML/blob/main/docs/api/events-and-registries.md) + [mixin reference](https://github.com/roowus/TSPML/blob/main/docs/api/mixin-reference.md).
 
+## Changes
+
+### Unreleased — `TspmlApi.events` is subscribe-only (pre-1.0 narrowing)
+
+`TspmlApi.events` is now `TspmlEventSubscriber` (`on` / `once` / `off`) rather
+than the full `TspmlEventEmitter`. Emitting belongs to the bridge and the host: a
+mod holding `emit` could forge `race.finished` or `checkpoint.passed`, and at the
+receiving end no other mod could tell that from the real game event. The docs
+promised this from M1; until [#18](https://github.com/roowus/TSPML/issues/18) it
+was prose only.
+
+**If your mod called `api.events.emit(…)`, it no longer compiles.** That is the
+intended breakage and there is no replacement — mods are consumers of game
+events. `TspmlEventEmitter` is still exported unchanged for hosts and bridges.
+
 ## Publishing (maintainers)
 
 The package is publish-ready (publishConfig `access: public`, `prepublishOnly` builds). From the repo root:
