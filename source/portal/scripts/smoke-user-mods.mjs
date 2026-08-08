@@ -2,35 +2,49 @@
 // actual "+ Add a mod" form and verify it loads through the same loader path as
 // the bundled mods — in a real browser, where the Blob-URL `import()` the unit
 // tests must fake (node cannot feed a Blob URL to `import()`) runs for real.
+// Since #62 this is ALSO the end-to-end proof for user-mod MIXINS: pasted
+// mixins.json → Cache API plan → SW POST replay → one-pass compose on the
+// server → report prelude inside the bundle → per-mod rows in the sidebar →
+// the inject actually firing in the GAME frame.
 //
 //   TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev    # in one terminal (:3000)
 //   pnpm --filter @tspml/portal smoke:usermods           # in another
 //
-// PASS requires, in order:
-//   1. add    — the pasted mod's entrypoint RAN (it stamps a main-frame global),
-//               its id shows "loaded" in the sidebar, and the mods row lists it;
-//   2. mixins — its declared mixin is surfaced as SKIPPED in the sidebar warning
-//               (the honest-unapplied contract, #62), not silently ignored;
-//   3. persist— a full page reload loads the mod again from localStorage;
-//   4. disable— toggling it off unloads it (its disposer runs) and drops it from
-//               the loaded list while the bundled demo mods stay loaded;
-//   5. remove — removing it clears the stored record.
-//
-// The transform does NOT need to have applied for this smoke (the user-mod path
-// is bridge-side, not bundle-side), but the standard dev-server setup is used so
-// it composes with the other smokes.
+// TSPML_TRANSFORM=1 is REQUIRED (unlike pre-#62): the mixin legs assert on the
+// transformed bundle. PASS requires, in order:
+//   1. add     — the pasted mod's entrypoint RAN (it stamps a main-frame
+//                global), its id shows "loaded" in the sidebar, and the mods
+//                row lists it;
+//   2. skip    — added WITHOUT its mixins.json, the declared mixin is surfaced
+//                as skipped ("manifest declares mixins… not applied"), not
+//                silently ignored;
+//   3. re-add  — pasting the mod AGAIN with mixins.json (the modder iterate
+//                loop, upsert) clears the skip warning and raises the restart
+//                banner (the running frame keeps its bundle);
+//   4. restart — clicking the banner's "reload now" reloads; the mod comes
+//                back from localStorage (persistence) AND its mixin is applied:
+//                the game frame carries the injected global and the sidebar's
+//                "Your mixins" row reads 1/1 applied;
+//   5. negative— a second mod with a bogus {symbol} mixin reports 0/1 applied
+//                with symbol-unresolved, per-mod isolated: the first mod stays
+//                1/1 and the base transform's LIVE badge survives;
+//   6. disable — toggling the first mod off unloads it (disposer runs), drops
+//                it from the loaded list (bundled mods stay), and raises the
+//                restart banner again (its patch set left the plan);
+//   7. remove  — removing both mods clears the stored records.
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-user-mods-smoke.png";
 const MOD_ID = "smoke-user-mod";
+const BOGUS_ID = "smoke-bogus-mod";
 
 const step = (msg) => process.stderr.write(`smoke:usermods · ${msg}\n`);
 
-// What a modder would paste: a mod.json and BUILT entrypoint JS. The entrypoint
-// stamps main-frame globals so the assertions are about observable effects, not
-// UI copy: ran-count on load, a flag from its disposer on unload. It declares a
-// mixin precisely so the smoke can assert the mixin is REPORTED skipped.
+// What a modder would paste: a mod.json, BUILT entrypoint JS, and a mixins.json.
+// The entrypoint stamps MAIN-frame globals (ran-count on load, a disposer flag
+// on unload); the mixin stamps a GAME-frame global — the same split the real
+// feature has (entrypoints run bridge-side, mixins run inside the bundle).
 const MANIFEST = JSON.stringify({
   schemaVersion: 1,
   id: MOD_ID,
@@ -45,6 +59,30 @@ const CODE = `export default (api) => {
   api.logger.log("[${MOD_ID}] loaded");
   return () => { window.__smokeUserModDisposed = true; };
 };`;
+// Modeled on demo-hud's mixins.json — an `after` inject on the mapped Car
+// symbol, the proven M5-C shape.
+const MIXINS = JSON.stringify({
+  patches: [
+    {
+      op: "after",
+      symbol: "Car",
+      inject: "(function(){ try { window.__smokeUserMixin = true; } catch (e) {} })();",
+    },
+  ],
+});
+const BOGUS_MANIFEST = JSON.stringify({
+  schemaVersion: 1,
+  id: BOGUS_ID,
+  name: "Smoke bogus-mixin mod",
+  version: "1.0.0",
+  entrypoint: "entrypoint.js",
+  targets: [">=0.6.0 <0.7.0"],
+  mixins: [{ config: "mixins.json" }],
+});
+const BOGUS_CODE = "export default () => {};";
+const BOGUS_MIXINS = JSON.stringify({
+  patches: [{ op: "after", symbol: "SmokeNoSuchSymbol", inject: "void 0;" }],
+});
 
 const browser = await chromium.launch({
   headless: true,
@@ -62,7 +100,7 @@ const pageErrors = [];
 page.on("console", (m) => consoleMsgs.push(`${m.type()}: ${m.text().slice(0, 200)}`));
 page.on("pageerror", (e) => pageErrors.push(String(e && e.message ? e.message : e).slice(0, 300)));
 
-/** The sidebar's full text (main frame — the game frame is irrelevant here). */
+/** The sidebar's full text (main frame). */
 const sidebarText = () =>
   page.evaluate(() => {
     const aside = /** @type {HTMLElement | null} */ (
@@ -71,12 +109,32 @@ const sidebarText = () =>
     return aside?.innerText ?? "";
   });
 
-/** Wait until the sidebar's mods row matches (or timeout → false). */
+/** Wait until the main frame matches (or timeout → false). */
 async function waitForSidebar(predicateSource, timeout = 60000) {
   return page
     .waitForFunction(predicateSource, undefined, { timeout, polling: 500 })
     .then(() => true)
     .catch(() => false);
+}
+
+/** Find the game iframe's frame object (it detaches on every page reload). */
+async function waitForGameFrame(timeout = 45000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const f = page.frames().find((fr) => fr !== page.mainFrame() && fr.url().includes("/api/proxy"));
+    if (f) return f;
+    await page.waitForTimeout(300);
+  }
+  return null;
+}
+
+/** Fill the Add form's three textareas and click Add mod. */
+async function addMod(manifest, code, mixins) {
+  const areas = page.locator('aside[aria-label="Mods"] textarea');
+  await areas.nth(0).fill(manifest);
+  await areas.nth(1).fill(code);
+  await areas.nth(2).fill(mixins ?? "");
+  await page.click('aside[aria-label="Mods"] button:has-text("Add mod")');
 }
 
 step(`goto ${BASE_URL}`);
@@ -105,13 +163,11 @@ out.bundledLoaded = await waitForSidebar(
   90000,
 );
 
-// 1. Add the mod through the real form.
-step("open the Add form and paste the mod");
+// 1+2. Add the mod through the real form — WITHOUT its mixins.json first, so
+// the declared-but-unpasted skip warning has its moment.
+step("open the Add form and paste the mod (no mixins.json yet)");
 await page.click('aside[aria-label="Mods"] summary');
-const areas = page.locator('aside[aria-label="Mods"] textarea');
-await areas.nth(0).fill(MANIFEST);
-await areas.nth(1).fill(CODE);
-await page.click('aside[aria-label="Mods"] button:has-text("Add mod")');
+await addMod(MANIFEST, CODE);
 
 step("wait for the user mod to load");
 out.addedLoaded = await waitForSidebar(
@@ -126,22 +182,104 @@ const afterAdd = await sidebarText();
 out.sidebarListsMod = afterAdd.includes(MOD_ID);
 out.modsRowListsMod = new RegExp(`mods:\\s*✓ .*${MOD_ID}`).test(afterAdd);
 
-// 2. The declared mixin must be surfaced as skipped, by id.
-out.mixinSkippedSurfaced = new RegExp(`${MOD_ID}.*not applied`, "s").test(afterAdd);
+// The declared mixin must be surfaced as skipped, by id ("manifest declares
+// mixins but no mixins.json was pasted — … not applied").
+out.mixinSkippedSurfaced = await waitForSidebar(
+  () => /smoke-user-mod[^]{0,80}manifest declares mixins/.test(document.body.innerText),
+  15000,
+);
 
-await page.screenshot({ path: SHOT });
+// 3. Re-add WITH the mixins.json (upsert — the modder iterate loop). The skip
+// warning must clear and the restart banner must appear (the plan changed but
+// the running frame keeps the bundle it was served).
+step("re-add the mod with its mixins.json");
+await addMod(MANIFEST, CODE, MIXINS);
+out.reAddClearsSkipped = await waitForSidebar(
+  () => !/manifest declares mixins/.test(document.body.innerText),
+  15000,
+);
+out.restartBannerShown = await waitForSidebar(
+  () => /need a restart/.test(document.body.innerText),
+  15000,
+);
 
-// 3. Persistence: a fresh page context must load the mod from localStorage.
-step("reload — the mod must come back from storage");
-await page.reload({ waitUntil: "domcontentloaded" });
+// 4. Click the banner's real "reload now" button. After the reload the mod
+// must come back from localStorage AND its mixin must be applied.
+step("click 'reload now' and wait for the new page");
+const nav = page.waitForEvent("domcontentloaded", { timeout: 30000 }).catch(() => null);
+await page.click('aside[aria-label="Mods"] button:has-text("reload now")');
+await nav;
+
 out.persistedLoaded = await waitForSidebar(
   () => /mods:\s*✓ /.test(document.body.innerText) && window.__smokeUserModRuns === 1,
   90000,
 );
 out.persistedListed = (await sidebarText()).includes(MOD_ID);
 
-// 4. Disable: the mod unloads (disposer runs) and leaves the loaded list; the
-// bundled demo mods survive the reload cycle.
+step("wait for the mixin to fire in the GAME frame");
+let gameFrame = await waitForGameFrame();
+out.mixinAppliedInGame = gameFrame
+  ? await gameFrame
+      .waitForFunction(() => window.__smokeUserMixin === true, undefined, { timeout: 90000 })
+      .then(() => true)
+      .catch(() => false)
+  : false;
+// The report prelude rode inside the served bundle and the sidebar read it
+// cross-frame: the per-mod row must say 1/1 applied.
+// Case-insensitive: the row's status span renders with text-transform:
+// uppercase, and innerText reflects RENDERED casing ("1/1 APPLIED").
+out.mixinReportRow = await waitForSidebar(
+  () => /Your mixins[^]*smoke-user-mod[^]{0,80}1\/1 applied/i.test(document.body.innerText),
+  30000,
+);
+
+// 5. Negative leg: a mod whose mixin names a symbol the pinned map does not
+// have. Per-mod isolation is the contract — its row fails, the first mod's
+// row and the base transform survive.
+step("add the bogus-symbol mod and reload");
+// The reload collapsed the Add form's <details>; re-open it or fill() times
+// out on the hidden textareas.
+await page.click('aside[aria-label="Mods"] summary');
+await addMod(BOGUS_MANIFEST, BOGUS_CODE, BOGUS_MIXINS);
+out.bogusRestartBanner = await waitForSidebar(
+  () => /need a restart/.test(document.body.innerText),
+  15000,
+);
+await page.reload({ waitUntil: "domcontentloaded" });
+
+out.bogusReportRow = await waitForSidebar(
+  () =>
+    /smoke-bogus-mod[^]{0,80}0\/1 applied/i.test(document.body.innerText) &&
+    /symbol-unresolved/.test(document.body.innerText),
+  90000,
+);
+out.goodRowSurvives = await waitForSidebar(
+  () => /smoke-user-mod[^]{0,80}1\/1 applied/i.test(document.body.innerText),
+  30000,
+);
+gameFrame = await waitForGameFrame();
+out.goodMixinStillApplied = gameFrame
+  ? await gameFrame
+      .waitForFunction(() => window.__smokeUserMixin === true, undefined, { timeout: 90000 })
+      .then(() => true)
+      .catch(() => false)
+  : false;
+// The base transform's own inject survives a user-mixin failure (all-or-nothing
+// applies to the base only; user failures are per-mod).
+out.liveBadgeSurvives = gameFrame
+  ? await gameFrame
+      .waitForFunction(() => !!document.getElementById("tspml-live-marker"), undefined, {
+        timeout: 30000,
+      })
+      .then(() => true)
+      .catch(() => false)
+  : false;
+
+await page.screenshot({ path: SHOT });
+
+// 6. Disable: the mod unloads (disposer runs), leaves the loaded list, the
+// bundled demo mods survive — and the restart banner returns, because its
+// patch set left the plan while the frame keeps the already-patched bundle.
 step("disable the mod");
 await page.click(`aside[aria-label="Mods"] li:has(code:text-is("${MOD_ID}")) button:has-text("disable")`);
 out.disabledUnloaded = await page
@@ -153,20 +291,32 @@ out.disabledDropped = await waitForSidebar(
   20000,
 );
 out.bundledSurvive = /mods:\s*✓ .*tspml-example-hud/.test(await sidebarText());
+out.disableRestartBanner = await waitForSidebar(
+  () => /need a restart/.test(document.body.innerText),
+  15000,
+);
 
-// 5. Remove: the stored record is gone.
-step("remove the mod");
+// 7. Remove both mods: the stored records are gone.
+step("remove both mods");
 await page.click(`aside[aria-label="Mods"] li:has(code:text-is("${MOD_ID}")) button:has-text("remove")`);
+await page.click(`aside[aria-label="Mods"] li:has(code:text-is("${BOGUS_ID}")) button:has-text("remove")`);
 await page.waitForTimeout(1000);
 out.storageCleared = await page.evaluate(() => {
   try {
     const raw = window.localStorage.getItem("tspml.userMods.v1");
-    return !raw || !raw.includes("smoke-user-mod");
+    return !raw || (!raw.includes("smoke-user-mod") && !raw.includes("smoke-bogus-mod"));
   } catch {
     return false;
   }
 });
-out.rowGone = !(await sidebarText()).includes(MOD_ID);
+// NOT a whole-sidebar text check: the "Your mixins" report honestly keeps its
+// row for the still-served bundle. Only the "Your mods" rows have buttons.
+out.rowGone = await page.evaluate((ids) => {
+  const codes = Array.from(document.querySelectorAll('aside[aria-label="Mods"] li code'));
+  return !codes.some(
+    (c) => ids.includes(c.textContent ?? "") && c.closest("li")?.querySelector("button"),
+  );
+}, [MOD_ID, BOGUS_ID]);
 
 const PASS =
   out.frameMounted === true &&
@@ -176,11 +326,21 @@ const PASS =
   out.sidebarListsMod === true &&
   out.modsRowListsMod === true &&
   out.mixinSkippedSurfaced === true &&
+  out.reAddClearsSkipped === true &&
+  out.restartBannerShown === true &&
   out.persistedLoaded === true &&
   out.persistedListed === true &&
+  out.mixinAppliedInGame === true &&
+  out.mixinReportRow === true &&
+  out.bogusRestartBanner === true &&
+  out.bogusReportRow === true &&
+  out.goodRowSurvives === true &&
+  out.goodMixinStillApplied === true &&
+  out.liveBadgeSurvives === true &&
   out.disabledUnloaded === true &&
   out.disabledDropped === true &&
   out.bundledSurvive === true &&
+  out.disableRestartBanner === true &&
   out.storageCleared === true &&
   out.rowGone === true;
 

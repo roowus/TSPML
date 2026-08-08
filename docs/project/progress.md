@@ -1514,3 +1514,50 @@ and the stale "reading storage here" comment in `page.tsx` now describes the
 ref it actually reads. Verified: full `pnpm -r test` green (373), portal
 typecheck + build green, and all four smokes PASS against a production
 `next start` server.
+
+## 2026-08-08 — #62: pasted user-mod mixins reach the bundle transform ✅
+
+The last "surfaced as skipped" gap is closed: a runtime user mod's `mixins.json`
+(the new optional third box in the Add form) is now applied to the served
+bundle. Design chosen by a three-judge competition (unanimous) over three
+candidates; the losing query-param carriage was disqualified as a reflected-XSS
+vector that would also leak patch payloads upstream via the proxy's query
+passthrough, and full client-side transform was rejected for shipping ~1.5 MB
+of Babel into the SW.
+
+**Mechanism (request-carried plan; the server stores nothing):** `page.tsx`
+projects enabled mods' pasted mixins into a capped `UserPatchPlan` and parks it
+in the Cache API *before* the iframe mounts (mount gates on `planReady`);
+`sw.js` intercepts the same-origin bundle GET and, when a plan is parked,
+replays it as a POST with the plan as body (no plan → plain GET, byte-identical
+to pre-#62); the route re-validates the attacker-shaped body fail-soft
+(`parseUserPatchPlan`) and `composeTransform` runs base + user patches in ONE
+engine pass with per-mod index ranges. The per-mod report rides back INSIDE the
+bundle as a `;window.__tspmlUserMixins={...};` prelude (deferred scripts run
+before window `load`, so the page reads it cross-frame on the frame's load
+event) and renders as "Your mixins" rows (`1/1 applied` / failure reasons).
+POST responses are `no-store`; nothing from the body is ever forwarded
+upstream; every cap is enforced at add time, plan build, and again server-side.
+
+**Contracts:** base patches stay ALL-OR-NOTHING (any base failure serves
+vanilla, `planStatus: base-failed`); user patches are PER-MOD ISOLATED
+(`not-found`, `symbol-unresolved`, per-row). One subtle hazard closed by
+pre-screening: the engine's replace conflict detection only groups
+replace-vs-replace, so a user `replace` on a base-injected method would
+silently splice the bridge hook out while reporting success —
+`composeTransform` refuses those up front via `targetSignature` comparison
+(`conflicts-with-loader-patch`). A combined output that fails the re-parse
+gate triggers a base-only retry (`output-invalid`, user patches blamed
+honestly). Mixin changes mid-session surface a restart banner — the running
+frame keeps its bundle; only a reload re-runs the transform.
+
+Tests: 19 new portal unit tests (`user-patches.test.ts`,
+`demo-transform.test.ts` — the compose is driven with a synthetic
+webpack-shaped bundle + map via the new injectable `EngineFns`; anchors must
+sit in array literals, since statement-position strings parse as directives
+the anchor scan never sees) + mixins round-trip/validation additions in
+`user-mods.test.ts`. `smoke-user-mods.mjs` now proves the whole chain
+end-to-end: skip warning without the paste → re-add with mixins.json → restart
+banner → reload → inject fires in the GAME frame + `1/1 applied` row →
+bogus-symbol mod isolated (`0/1 symbol-unresolved`) while the good mod and the
+base LIVE badge survive → disable/remove.

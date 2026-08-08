@@ -9,13 +9,14 @@
  * mods: parsed, validated, dependency-resolved, safety-classified, isolated.
  *
  * Scope (deliberate):
- * - **Tier-1 only.** A user mod's entrypoint gets the full `api` (events,
- *   keybinds, tracks, audio). Its *declared mixins are NOT applied*: the mixin
- *   transform runs server-side in the proxy route when the bundle is fetched,
- *   and the server knows nothing of this browser's localStorage. Rather than
- *   silently ignoring a `mixins` field (PML's failure mode we exist to fix),
- *   the loader surfaces an explicit warning per affected mod. Applying user
- *   mixins needs the patch set to reach the proxy — tracked in #62.
+ * - **Tier-1 entrypoint + pasted Tier-2 mixins.** A user mod's entrypoint gets
+ *   the full `api` (events, keybinds, tracks, audio). Its pasted `mixins.json`
+ *   patches reach the server-side transform via the request-carried patch plan
+ *   (#62 — see ./user-patches.ts): the server knows nothing of this browser's
+ *   localStorage, so the plan rides the bundle request itself. A manifest that
+ *   DECLARES mixins with no pasted mixins.json still surfaces the explicit
+ *   `mixinsSkipped` warning rather than silence (PML's failure mode we exist
+ *   to fix).
  * - **The code runs unsandboxed in the portal origin, in the user's own
  *   browser.** That is what a mod loader does — a mod IS arbitrary code — and
  *   the portal has no accounts, no cookies worth stealing, and no server state.
@@ -36,6 +37,14 @@ export interface UserModRecord {
   readonly manifest: Record<string, unknown>;
   /** The BUILT entrypoint module source (ES module, default export). */
   readonly code: string;
+  /**
+   * The `patches` array from the pasted `mixins.json` (optional third paste,
+   * #62). Absent = the author pasted none; a manifest that still DECLARES
+   * mixins then surfaces the honest `mixinsSkipped` warning. Entries stay raw
+   * (unknown): the transform engine owns deep validation, same division of
+   * labor as `manifest`.
+   */
+  readonly mixins?: readonly Record<string, unknown>[];
   /** Disabled mods stay stored but are not loaded. */
   readonly enabled: boolean;
   /** ISO date the mod was added (display only). */
@@ -58,8 +67,40 @@ function isUserModRecord(v: unknown): v is UserModRecord {
     isRecord(v.manifest) &&
     typeof v.code === 'string' &&
     typeof v.enabled === 'boolean' &&
-    typeof v.addedAt === 'string'
+    typeof v.addedAt === 'string' &&
+    // `mixins` is optional (pre-#62 rows lack it) but when present must be an
+    // array of objects — a wrong-typed field drops the row like any other
+    // malformed entry rather than smuggling junk into the transform path.
+    (v.mixins === undefined || (Array.isArray(v.mixins) && v.mixins.every(isRecord)))
   );
+}
+
+/**
+ * Shallow paste-time validation of a `mixins.json` paste: valid JSON, an
+ * object, with a `patches` array of objects. DEEP validation (ops, anchors,
+ * symbols) is deliberately NOT done here — the transform engine owns it and
+ * reports per-patch failures honestly; duplicating its rules here would drift.
+ */
+export function parseMixinsJson(
+  text: string,
+): { ok: true; patches: Record<string, unknown>[] } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return { ok: false, error: `mixins.json is not valid JSON: ${(e as Error).message.slice(0, 80)}` };
+  }
+  if (!isRecord(parsed)) {
+    return { ok: false, error: 'mixins.json must be a JSON object (the contents of mixins.json)' };
+  }
+  const patches = parsed.patches;
+  if (!Array.isArray(patches) || patches.length === 0) {
+    return { ok: false, error: 'mixins.json must have a non-empty "patches" array' };
+  }
+  if (!patches.every(isRecord)) {
+    return { ok: false, error: 'every entry in "patches" must be an object' };
+  }
+  return { ok: true, patches: patches as Record<string, unknown>[] };
 }
 
 /**

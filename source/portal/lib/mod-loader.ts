@@ -34,10 +34,12 @@ export interface ModLoadSummary {
   readonly failed: ReadonlyArray<{ id: string; reason: string }>;
   readonly safety: readonly ModSafetyEntry[];
   /**
-   * User mods that declared `mixins` — declared honestly UNAPPLIED (#62). The
-   * mixin transform runs server-side when the bundle is fetched; the server
-   * cannot see this browser's localStorage. Surfaced so the author learns it
-   * from the UI, not from silence (the PML failure mode TSPML exists to fix).
+   * User mods whose manifest DECLARES mixins but whose stored record carries
+   * no pasted `mixins.json` (#62). Since #62 pasted mixins DO reach the
+   * server-side transform via the request-carried patch plan — this list is
+   * only the declared-but-missing-content gap, surfaced so the author learns
+   * it from the UI, not from silence (the PML failure mode TSPML exists to
+   * fix).
    */
   readonly mixinsSkipped: readonly string[];
   /**
@@ -180,14 +182,16 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   // M6-B: classify each mod's safety (warn-only — never blocks). User mods ride
   // the same classifier as bundled ones.
   const safety: ModSafetyEntry[] = [];
-  // User mods whose manifest declares mixins: parse-validated but NOT applied —
-  // see ModLoadSummary.mixinsSkipped.
+  // User mods whose manifest declares mixins with no pasted mixins.json to back
+  // them — see ModLoadSummary.mixinsSkipped. Records WITH pasted mixins ride
+  // the request-carried plan (#62), so they don't belong here.
   const mixinsSkipped: string[] = [];
   for (const desc of descriptors) {
     try {
       const manifest = parseVersionManifest(desc.manifest);
       safety.push({ id: manifest.id, report: classifySafety(manifest) });
-      if (userById.has(manifest.id) && (manifest.mixins?.length ?? 0) > 0) {
+      const record = userById.get(manifest.id);
+      if (record !== undefined && record.mixins === undefined && (manifest.mixins?.length ?? 0) > 0) {
         mixinsSkipped.push(manifest.id);
       }
     } catch {

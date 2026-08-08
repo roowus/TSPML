@@ -90,6 +90,10 @@ portal loads → /api/proxy serves the real live bundle (byte-exact) ✅
   → past the "unofficial version" gate, into gameplay ✅ (was issue #8 — closed)
   → track loads; the 4 race-setup Tier-1 events fire ✅ (was issue #9 — closed)
   → mods load, mixins apply, api.tracks attaches and reaches the game's list ✅
+  → a PASTED user mod's mixins.json applies too (#62): the page parks a patch
+     plan in the Cache API, the SW replays the bundle GET as a POST carrying it,
+     the route composes base+user patches in one pass and rides a per-mod report
+     back inside the bundle ✅ (base all-or-nothing, user per-mod isolated)
   → online/leaderboard requests still fail 🚧 issue #7 / M8 (bot-protected upstream)
 ```
 

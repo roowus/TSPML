@@ -31,7 +31,7 @@
  * // r.outputValid — regenerated output re-parses with 0 errors
  * ```
  */
-export { sortPatchesByPriority, transform } from "./engine.js";
+export { sortPatchesByPriority, targetSignature, transform } from "./engine.js";
 export { applyOp } from "./ops.js";
 export { findModulePath, locateTarget } from "./locators.js";
 
