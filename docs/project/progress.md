@@ -1420,3 +1420,97 @@ Also avoided repeating #18's CI failure: `pnpm -r test` runs **before**
 `pnpm -r build`, so the new test importing `@tspml/transform` would have resolved
 a `dist/` that does not exist yet on CI while passing locally off a stale one. A
 vitest `resolve.alias` points at the dependency's source instead.
+
+## 2026-08-07 — runtime user mods: the portal is usable without forking ✅
+
+The portal could load real mod packages — but only the two demo mods statically
+imported at build time. For the audience the portal exists for (a PolyTrack modder
+with a built mod in hand), that made it a demo, not a tool: running your own mod
+meant editing `source/portal/lib/mod-loader.ts` and rebuilding, which the
+getting-started guide actually instructed. That instruction is now deleted.
+
+**The feature.** A "+ Add a mod" form in the sidebar takes a pasted `mod.json` +
+BUILT entrypoint JS. The record persists in `localStorage`
+(`tspml.userMods.v1`), and on load the stored code becomes a live ES module via a
+Blob-URL `import()` (revoked after import — module namespaces outlive their URL,
+and leaking one per reload pins every old mod version for the tab's lifetime).
+Enable/disable/remove per mod; re-adding the same id replaces the stored copy,
+which is the iteration loop while developing. Every mutation funnels through one
+serialized unload-everything/load-everything chain — the loader owns dependency
+resolution over the *full* set, so incremental add would be a lie, and an
+unserialized toggle spam would interleave unload/load pairs.
+
+**One loader path, not a parallel one.** User mods enter the same `load()` call
+as the bundled mods, via the `importEntry` hook and a namespaced `user:<id>`
+entry specifier: manifest validation, dependency resolution, per-mod failure
+isolation, safety classification, and unload all apply unchanged. Two deliberate
+edges: a user mod whose id collides (with a bundled mod or another user mod) is
+pre-failed *before* `load()` — the loader rightly treats duplicate ids as
+abortive for the whole set, and one bad paste must not take the demo mods down —
+and a record with no usable id goes to the loader anyway so
+`parseVersionManifest` owns the error message.
+
+**Honesty over silence (the PML failure mode this repo exists to fix).** A user
+mod's declared `mixins` are NOT applied: the mixin transform runs server-side in
+the proxy when the bundle is fetched, and the server cannot see this browser's
+localStorage. Instead of silently ignoring the field, `ModLoadSummary` gained
+`mixinsSkipped` and the sidebar says exactly which mod's mixins were skipped and
+why. Applying them for real needs the patch set to reach the proxy — filed as
+#62 with the three candidate routes (session-scoped patch POST, client-side
+transform in the SW, or riding the M8 extension). The Add form also states the
+other contract in plain words: mod code runs unsandboxed in the portal page, in
+your browser — that is what a mod loader does; only add code you trust.
+
+**Verification.** 14 new unit tests (`source/portal/tests/user-mods.test.ts`):
+storage round-trip, corruption degrading to `[]` without a boot loop, malformed
+entries dropped individually, and the loader path — load-alongside-bundled,
+disabled-skipped, manifest/import failures isolated, both duplicate-id shapes,
+`mixinsSkipped`, unload through the standard disposer. The Blob-URL import
+itself is browser-only (node's `import()` cannot eat a Blob URL — the tests
+inject `importUserMod`), so a fourth headless smoke (`smoke:usermods`) drives
+the real form in a real browser: paste → entrypoint runs (stamps a global) →
+mixin-skipped warning names the mod → reload restores it from storage → disable
+runs its disposer while the bundled mods stay up → remove clears the record.
+PASS on all 13 gates, and the three existing smokes re-run green (page.tsx
+changed; regression is the point). Portal vitest config gained the
+source-aliasing trick from #10's entry (the mod-loader test imports
+`@tspml/loader` + both demo mods at runtime; CI tests before build).
+
+All 368 tests green (`pnpm -r test`), full build + lint green.
+
+## 2026-08-08 — pre-merge adversarial review of the #60/#61/#63 stack: two real gaps fixed ✅
+
+Before merging the stack, a four-dimension adversarial review (correctness,
+security, API contract, test adequacy) ran over the full
+`origin/main...feat/runtime-user-mods` diff. Security, XSS, prototype-pollution
+and specifier-spoofing angles came back clean — the `user:` scheme cannot
+collide with bundled specifiers because the loader's id regex forbids `:` and
+the id-less path dies in `parseVersionManifest` before any import. Two findings
+were real, and both are fixed on the branch rather than filed as follow-ups:
+
+**1. A pasted manifest with dependency fields could take ALL mods down.**
+`loadMods` pre-checked exactly one abortive condition (duplicate id) — but
+`resolveDependencies` also throws for missing `depends`, version conflicts,
+`breaks` and cycles, and nothing caught it. Pasting a manifest with
+`depends: {"anything": "*"}` aborted the whole set, bundled demo mods included:
+the exact per-mod-isolation violation the duplicate pre-fail exists to prevent,
+reachable by copy-pasting any manifest that uses `depends`. `loadMods` now runs
+a dependency pre-gate: each parsed user mod is accepted against the resolved
+set to a fixpoint (so user mods may depend on *each other* in any paste order),
+and whatever never resolves is pre-failed with the resolver's own message while
+everything else loads. Three new tests pin it: unmet `depends`, `breaks`
+against a bundled mod, and the fixpoint order-independence case.
+
+**2. The user-mods smoke wasn't in CI.** `smoke.yml` ran three of the four
+smokes — the one covering the headline feature of #63 (add form, storage
+hydration, real Blob-URL import, disable/remove) was a package script CI never
+executed. Now it is step four.
+
+Also from review: `handleAddMod`'s same-id-replace list computation — the
+modder iteration loop, previously living untested inside the component — is
+extracted to `upsertUserMod` in `lib/user-mods.ts` with tests (a dropped or
+inverted filter would make every re-paste pre-fail as a duplicate, silently),
+and the stale "reading storage here" comment in `page.tsx` now describes the
+ref it actually reads. Verified: full `pnpm -r test` green (373), portal
+typecheck + build green, and all four smokes PASS against a production
+`next start` server.

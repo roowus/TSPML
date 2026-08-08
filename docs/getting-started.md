@@ -123,7 +123,28 @@ Watch the sidebar for:
 - `mods: ✓ tspml-example-hud` — the demo mod loaded.
 - `safety: ✓ vanillaSafe · 1 warn` — the safety classification.
 
-To load YOUR mod (not just the demo-hud), add it to `source/portal/lib/mod-loader.ts` (the `descriptors` array) + rebuild.
+### Load YOUR mod — no fork needed
+
+In the sidebar, open **“+ Add a mod”** and paste:
+
+1. **mod.json** — the manifest, verbatim.
+2. **entrypoint.js (built)** — the contents of `dist/src/entrypoint.js` (the compiled
+   output, *not* your TypeScript source).
+
+Click **Add mod**. Your mod goes through the exact same `@tspml/loader` path as the
+bundled demos — manifest validation, per-mod failure isolation, safety classification —
+and it persists in your browser's storage across reloads. Enable/disable/remove from the
+same list; re-pasting with the same `id` replaces the stored copy, which is the iteration
+loop while developing.
+
+Two things to know:
+
+- **Mod code runs unsandboxed in the portal page, in your browser** — the same trust
+  level as the bundled mods. Only add code you wrote or trust.
+- **Declared `mixins` are not applied for runtime-added mods** (the transform runs
+  server-side and can't see your browser's storage —
+  [#62](https://github.com/roowus/TSPML/issues/62)). The portal tells you explicitly when
+  it skips them. Your entrypoint — events, keybinds, tracks, audio — works in full.
 
 ## 5. Declare a mixin (Tier 2 — the escape hatch)
 

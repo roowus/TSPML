@@ -11,7 +11,8 @@
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "smoke:tracks": "node scripts/smoke-tracks.mjs",
-    "smoke:audio": "node scripts/smoke-audio.mjs"
+    "smoke:audio": "node scripts/smoke-audio.mjs",
+    "smoke:usermods": "node scripts/smoke-user-mods.mjs"
   },
   "dependencies": {
     "@tspml/api": "workspace:*",
