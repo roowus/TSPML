@@ -4,6 +4,8 @@
 // (no workspace dependency on @tspml/shared yet). They are re-exported from the
 // package entrypoint.
 
+import type { TspmlApi } from '@tspml/api';
+
 /**
  * A mod id. Globally unique, lowercase, matching `/^[a-z0-9-]+$/`
  * (letters, digits, hyphens — no underscore). Matches `docs/api/mod-json-spec.md`.
@@ -157,31 +159,39 @@ export interface LoadResult {
    * Idempotent — calling it twice does not run cleanup twice, because a page
    * teardown and an explicit disable can race.
    *
-   * The loader does **not** emit `loader.onUnload`: {@link ModApi}'s `events` is
-   * `on`/`off` only, so the loader has no emit capability by design. The host
-   * that owns the bus (portal / dev harness) emits it around this call.
+   * The loader does **not** emit `loader.onUnload`: {@link ModApi}'s `events`
+   * is a `TspmlEventSubscriber` (`on`/`once`/`off`), so the loader has no emit
+   * capability — enforced by the type since #18, prose before that. The host
+   * that owns the concrete bus (portal / dev harness) emits it around this call.
    */
   unload(): Promise<UnloadResult>;
 }
 
 /**
- * Minimal capability-scoped API surface handed to each entrypoint. The real
- * bridge (events + registries + mixin ops) lands in M4; for M1 this is a stub.
+ * The API surface handed to each entrypoint — an alias of the published
+ * {@link TspmlApi} (#18).
+ *
+ * This was an M1 stub (`events` + `logger`, nothing else) that outlived the
+ * package it was a stand-in for. The gap was invisible because both hosts
+ * reached it through `as unknown as ModApi`, and a double cast suppresses every
+ * check: mods were typed against a surface missing three of its six real
+ * members while the runtime object had all six.
+ *
+ * Kept as an alias rather than deleted so existing imports keep resolving.
+ *
+ * @deprecated Prefer `TspmlApi` from `@tspml/api`.
  */
-export interface ModApi {
-  events: {
-    on(event: string, cb: (...args: unknown[]) => void): unknown;
-    off(event: string, cb: (...args: unknown[]) => void): unknown;
-  };
-  logger: Pick<Console, 'log' | 'error' | 'warn' | 'info' | 'debug'>;
-}
+export type ModApi = TspmlApi;
 
 /**
  * Base class for the class-form entrypoint. Mods may `extends TspmlMod` and
  * override any lifecycle hook. The loader duck-types these hooks, so a mod need
  * not extend this class — but doing so keeps the contract obvious.
  *
- * TODO: move to @tspml/api once that package exists.
+ * Stays here rather than in `@tspml/api`: that package is types-only (zero
+ * runtime, `sideEffects: false`) and this is a class a mod extends at runtime.
+ * Its `api` parameters now reference the published {@link TspmlApi} via
+ * {@link ModApi}, which is what the old "move to @tspml/api" TODO was after.
  */
 export abstract class TspmlMod {
   preInit?(api: ModApi): void | Promise<void>;
@@ -195,11 +205,35 @@ export abstract class TspmlMod {
   onUnload?(api: ModApi): void | Promise<void>;
 }
 
-/** Default no-op stub API used when the caller does not provide one. */
+/**
+ * Default no-op stub API used when the caller does not provide one.
+ *
+ * Every registry answers as if the game were not wired yet, because that is
+ * exactly the situation: nobody attached a bridge. `register` reports the typed
+ * `'not-ready'` failure both result unions already define rather than throwing
+ * or silently claiming success — a mod running against the stub gets the same
+ * shape of answer it would get calling too early against a real bridge.
+ */
 export const stubApi: ModApi = {
   events: {
-    on: () => {},
+    on: () => () => {},
+    once: () => () => {},
     off: () => {},
   },
+  keybinds: {
+    register: () => () => {},
+    unregister: () => {},
+  },
+  tracks: {
+    register: () => Promise.resolve({ ok: false, reason: 'not-ready' }),
+    unregister: () => false,
+    list: () => [],
+  },
+  audio: {
+    register: () => Promise.resolve({ ok: false, reason: 'not-ready' }),
+    unregister: () => false,
+    list: () => [],
+  },
   logger: console,
+  version: '0.0.0-stub',
 };

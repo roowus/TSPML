@@ -16,9 +16,11 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.tests.json",
     "test": "vitest run"
   },
   "dependencies": {
+    "@tspml/api": "workspace:*",
     "semver": "^7.6.0"
   },
   "devDependencies": {

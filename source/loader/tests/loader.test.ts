@@ -123,8 +123,12 @@ describe('load — error isolation', () => {
 
 describe('load — entrypoint contract', () => {
   it('hands each factory the provided api and game', async () => {
+    // A distinct object from `stubApi` — the assertion below is by identity, so
+    // it has to be one the loader could not have substituted. Built by spreading
+    // the stub because `ModApi` is now the full published `TspmlApi` (#18) and
+    // hand-rolling six members here would only re-create the drift this fixed.
     const customApi: ModApi = {
-      events: { on: () => {}, off: () => {} },
+      ...stubApi,
       logger: { log: () => {}, error: () => {}, warn: () => {}, info: () => {}, debug: () => {} },
     };
     const customGame = { polytrack: true };

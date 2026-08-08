@@ -1,0 +1,18 @@
+// Typecheck-only config for the test suite.
+//
+// The build config emits `src` into `dist` with `rootDir: src`, so it cannot also
+// include `tests` — which meant the loader's tests were compiled only by vitest's
+// esbuild transform. esbuild strips types without checking them, so a test file
+// could reference a type that no longer exists and every one of `build`, `test`
+// and `lint` would still pass.
+//
+// That is not hypothetical: #18 widened `ModApi` from a 2-member stub to the full
+// published `TspmlApi`, and the stale object literal in loader.test.ts would have
+// stayed green. Wired into `lint` so CI runs it.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "tests"]
+}

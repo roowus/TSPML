@@ -374,7 +374,8 @@ pipeline) → [#35](https://github.com/roowus/TSPML/pull/35) (M7-C dev harness) 
 [#29](https://github.com/roowus/TSPML/issues/29),
 [#31](https://github.com/roowus/TSPML/issues/31).
 [#18](https://github.com/roowus/TSPML/issues/18) stays open — #32 added `logger` to
-`TspmlApi`, but the loader's `ModApi` still lacks `keybinds`/`version`.
+`TspmlApi`, but the loader's `ModApi` still lacks `keybinds`/`version`. (Closed
+2026-08-04; see the #18 entry at the end of this log.)
 
 **Merging a stack is not four independent merges.** Two things worth writing down:
 
@@ -675,7 +676,7 @@ that never fails against the bug it describes is decoration.
 - **#25 ✅** — CI runs the three portal smokes (advisory per-PR + daily, with a bundle-hash canary so a red smoke is interpretable), and `pnpm -r lint` is real: [`@tspml/typecheck`](../../tooling/typecheck) checks the `.mjs` no build reads. Found a live defect in `regen.mjs`.
 - **#16 / #17 / #30 ✅** — `includes` warns instead of silently ignoring; `onUnload` is actually called (idempotent, reverse order); the stub packages stopped overstating themselves.
 - **#43 / #1 / #3 spikes ✅** — WASM constants are locatable *structurally* (fail-closed on ambiguity, 97.4% of 0.6.2's functions unique), AST fingerprints break match ties (**0.848 → 0.939**), and split chunks are *discovered from the webpack runtime* rather than probed. **#1 is now wired into `gen-map` via `select.mjs`** (see below); #43 and #3 remain measurement + mechanism, neither patches yet.
-- **Open:** #10 (player-only), #18 (`ModApi` drift, partially fixed).
+- **Open:** #10 (player-only). (#18 `ModApi` drift closed 2026-08-04.)
 - **Next:** **M10** (PML narrow importer, unblocked) — with two working content registries (`tracks`, `audio`) for the importer to map PML mods onto. (Wiring `fingerprint.mjs` into `gen-map.mjs` is **done** — the 0.939 now comes from the pipeline, not an offline harness. What remains is the separate call of whether to *promote* the candidate map.)
 - **Known paper cut — retired, and the first diagnosis was wrong.** `fingerprint.mjs` used to resolve `@babel/parser` through a hardcoded `.pnpm/webcrack@2.16.0/…` path, recorded here as "a webcrack bump breaks it". Measured: it does **not**. pnpm keeps a hoisted `.pnpm/node_modules/`, reachable from *any* path under `.pnpm/`, so `@babel/parser` still resolves with `webcrack@2.16.0` moved off disk entirely. The version string was **misleading, not load-bearing** — it looks like a pin and is not one. Now resolved via the version-agnostic symlink `realpathSync`'d first (pnpm lays a package's deps out as *siblings* in its store dir, and Node walks up from the **real** path, so requiring through the symlink itself fails). The guard that catches this is a **spawned plain-Node** test: vitest resolves bare specifiers through Vite, not Node, *and* exports `NODE_PATH` that children inherit — so the broken form stayed green under vitest both ways until the child's `NODE_PATH` was stripped.
 
@@ -1174,8 +1175,8 @@ A mod that loads but exposes no cleanup reports `no-op`, distinct from
 host surfacing results.
 
 **Deliberate split: the loader calls cleanup but does not emit the event.**
-`ModApi.events` is `on`/`off` only, so the loader has no emit capability by
-design, and giving it one to fire a single event would widen the capability
+`TspmlApi.events` is `on`/`once`/`off` only — enforced by the type since #18,
+prose before it — so the loader has no emit capability by design, and giving it one to fire a single event would widen the capability
 surface handed to every mod. The host that owns the bus emits `loader.onUnload`
 around the call; `loadMods` exposes `unload()` for exactly that.
 
@@ -1279,3 +1280,68 @@ fails to build" bullet now says what it does and does not block.
 
 Stacked on `docs/webcrack-node-25` (#5/PR #48) rather than branched off `main` — the
 fix lands in `unpack.mjs` and the pipeline README, which that PR already owns.
+
+## 2026-08-04 — #18: `ModApi` unified with `TspmlApi`, and a documented guarantee made true ✅
+
+`ModApi` (`source/loader/src/types.ts`) was an M1-era stub — `events` (`on`/`off`)
+plus `logger`, nothing else — still carrying `TODO: move to @tspml/api once that
+package exists`. That package exists, publishes the canonical six-member
+`TspmlApi`, and the two diverged. `ModApi` is now an alias of `TspmlApi`; the
+loader gained the `@tspml/api` dependency (no cycle — that package has none), and
+`stubApi` grew the missing `keybinds`/`tracks`/`audio`/`version` members,
+answering the typed `'not-ready'` failure both result unions already define.
+
+**The scope in the issue text was stale — two of its three symptoms were already
+fixed.** #32 added `logger` to `TspmlApi`, demo-hud dropped its local logger type,
+and the scaffold has a drift test (`tooling/create-tspml-mod/tests/scaffold.test.mjs:139`).
+A scaffolded project compiled fine before this change; the live problem was only
+the stub type and two casts. The issue body was corrected rather than worked
+around silently.
+
+**What the casts were hiding.** Both hosts reached the loader through
+`loadMods(api as unknown as ModApi)`. A double cast suppresses *every* check, so
+mods were typed against a surface missing three of its six real members while the
+runtime object had all six. Worse, three docs and a code comment promised
+`ModApi.events` was `on`/`off` only *by design* — meaning a mod cannot forge
+`race.finished` — while `page.tsx` assigned the full emit-capable `EventBus`. The
+guarantee was fiction, and the cast is why nobody noticed. It is now **true**:
+`TspmlApi.events` is `TspmlEventSubscriber` (`Pick<TspmlEventEmitter, 'on'|'once'|'off'>`),
+a pre-1.0 narrowing of a published type. `EventBus` still implements the full
+emitter, so hosts and bridge patches are unaffected and one object serves both
+roles at runtime.
+
+**A repo-wide typecheck blind spot, found while verifying.** Every emitting
+package's tsconfig is `include: ["src"]` with `rootDir: src` — so it *cannot* also
+include `tests`, and no package's tests were ever typechecked. vitest's esbuild
+transform strips types without checking them, so a test file could name a type
+that no longer exists and `build`, `test` and `lint` would all stay green. That is
+not hypothetical: the stale two-member `ModApi` literal in `loader.test.ts` would
+have survived this very change. Fixed for the loader with `tsconfig.tests.json`
+wired into its `lint` script. **The other packages still have the gap** — noted
+here rather than fixed, since widening it is not #18.
+
+**Mutations (each verified red, then restored green):**
+
+```
+revert loader.test.ts to the 2-member ModApi literal -> TS2322 (invisible before)
+drop `version` from the portal's api literal         -> TS2741 (silent before)
+add api.events.emit('race.finished', …) to demo-hud  -> TS2339 'emit' does not exist
+```
+
+The second is the regression being fixed, so it had to be demonstrated rather
+than asserted. The third proves `TspmlEventSubscriber` is load-bearing.
+
+The dev-harness `TrackedModApi` was a hand-rolled structural mirror with
+`logger?: unknown` and no `off` — the harness lying to the very mods it exists to
+test. It now `extends TspmlApi`. Its INPUT (`ModLikeApi`) stays structural so the
+tests drive it with plain `vi.fn()` mocks. **One cast survives, documented in
+place:** `TspmlEventMap` gives each event a different readonly tuple, so a
+listener generic over `K` has no single loose supertype — TS reduces the
+intersection to `never`. The wrapper never inspects an argument, only records the
+unsubscriber, so erasing the parameters is sound in a way the type system cannot
+express. It is confined to three lines rather than applied to a whole api object,
+which is the difference between a defect and a note.
+
+Both smokes re-run because the portal `api` literal and the tracking wrapper were
+touched: portal `PASS: true` with `unloadOk` and every event count unchanged;
+harness `gameSurvivedHmr: true`.
