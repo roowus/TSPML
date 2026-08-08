@@ -7,6 +7,9 @@ import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/
 import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
+import type { ModLoadSummary } from '@/lib/mod-loader';
+import { readUserMods, saveUserMods, userModId } from '@/lib/user-mods';
+import type { UserModRecord } from '@/lib/user-mods';
 import { teardown } from '@/lib/teardown';
 
 /**
@@ -73,6 +76,17 @@ export default function PlayPage(): ReactElement {
   const [tracksStatus, setTracksStatus] = useState('waiting for the game…');
   const [audioStatus, setAudioStatus] = useState('waiting for the game…');
   const [loadedMods, setLoadedMods] = useState<LoadedModRow[]>([]);
+  // User-added mods (runtime mod loading, the feature that makes the portal
+  // usable without forking the repo). State drives the UI; the ref mirrors it so
+  // load/reload paths — which run outside React's render cycle — read the latest
+  // list. localStorage is best-effort persistence, not the source of truth.
+  const [userMods, setUserMods] = useState<UserModRecord[]>([]);
+  const userModsRef = useRef<UserModRecord[]>([]);
+  const [mixinsSkipped, setMixinsSkipped] = useState<readonly string[]>([]);
+  const [persistWarning, setPersistWarning] = useState<string | null>(null);
+  const [draftManifest, setDraftManifest] = useState('');
+  const [draftCode, setDraftCode] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
@@ -89,6 +103,11 @@ export default function PlayPage(): ReactElement {
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
   const modsLoadedRef = useRef(false);
+  // The api handed to mods, kept so add/remove/toggle can RELOAD the mod set
+  // after the initial frame load. Null until the frame loads.
+  const apiRef = useRef<PortalApi | null>(null);
+  // Serializes reloads: a toggle spam must not interleave unload/load pairs.
+  const reloadChainRef = useRef<Promise<void>>(Promise.resolve());
   // The loaded mods' teardown closure (#17), available only once `loadMods` resolves.
   // A ref rather than state: teardown must read the LATEST value from an effect cleanup
   // that deliberately never re-runs, and state would close over the mount-time value.
@@ -117,6 +136,70 @@ export default function PlayPage(): ReactElement {
       window.clearInterval(id);
     };
   }, [bus]);
+
+  // Hydrate the user-mod list from localStorage once, on the client only —
+  // reading in the initial useState would run during SSR/prerender too.
+  useEffect(() => {
+    const stored = readUserMods();
+    userModsRef.current = stored;
+    setUserMods(stored);
+  }, []);
+
+  /** Push a load's results into the sidebar state. */
+  const applyLoadSummary = (s: ModLoadSummary): void => {
+    unloadModsRef.current = s.unload;
+    const rows: LoadedModRow[] = [
+      ...s.loaded.map((id) => ({ id, status: 'loaded' as const })),
+      ...s.failed.map((f) => ({ id: f.id, status: 'failed' as const, reason: f.reason })),
+    ];
+    setLoadedMods(rows);
+    setMixinsSkipped(s.mixinsSkipped);
+    setModsStatus(
+      s.loaded.length > 0
+        ? `✓ ${s.loaded.join(', ')}`
+        : s.failed.length > 0
+          ? `✗ ${s.failed[0]!.reason.slice(0, 48)}`
+          : 'none',
+    );
+    // M6-B: surface the warn-only safety classification.
+    const sr = s.safety[0]?.report;
+    if (sr) {
+      const w = sr.warnings.length;
+      setSafetyStatus(
+        `${sr.vanillaSafe ? '✓' : '⚠'} vanillaSafe${sr.leaderboardRisk === 'warn' ? ' (lb-risk)' : ''}${w > 0 ? ` · ${w} warn` : ''}`,
+      );
+    }
+  };
+
+  /**
+   * Replace the user-mod list: update state, persist, and reload the whole mod
+   * set through the loader (there is no incremental add — the loader owns
+   * dependency resolution over the FULL set, so the honest operation is
+   * unload-everything, load-everything).
+   *
+   * Reloads are chained on a single promise: React state updates make rapid
+   * toggle clicks cheap, but each still queues an unload/load pair, and
+   * interleaving two of those would double-load mods.
+   */
+  const updateUserMods = (next: UserModRecord[]): void => {
+    userModsRef.current = next;
+    setUserMods(next);
+    setPersistWarning(
+      saveUserMods(next)
+        ? null
+        : 'Storage unavailable — mods work this session but will not survive a reload.',
+    );
+    const api = apiRef.current;
+    if (!api || !modsLoadedRef.current) return; // frame not loaded yet; first load picks the list up
+    reloadChainRef.current = reloadChainRef.current.then(async () => {
+      try {
+        await unloadModsRef.current?.();
+        applyLoadSummary(await loadMods(api, { userMods: userModsRef.current }));
+      } catch (e) {
+        setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`);
+      }
+    });
+  };
 
   /**
    * Attach the track registry once BOTH captures have landed (#36).
@@ -185,6 +268,7 @@ export default function PlayPage(): ReactElement {
       },
     };
     w.__tspml = api;
+    apiRef.current = api;
     // Replay anything the pre-bridge stub recorded before `api` existed just now. The
     // codec capture fires during bundle init, so without this it is simply lost and
     // the registry never attaches (@tspml/shared's EARLY_CAPTURE_STUB, injected by
@@ -193,40 +277,59 @@ export default function PlayPage(): ReactElement {
     if (early.manager) trackManagerRef.current = early.manager;
     if (early.codec) trackCodecRef.current = early.codec;
     attachTracksIfReady();
-    // Load the bundled demo mods via @tspml/loader — a real mod package receives
-    // this api and subscribes. Per-mod failure isolation (never boot-aborts).
+    // Load the bundled demo mods + any stored user mods via @tspml/loader — a
+    // real mod package receives this api and subscribes. Per-mod failure
+    // isolation (never boot-aborts). Reading storage here (not `userMods` state)
+    // because the frame's load event can outrun the hydration effect.
     if (!modsLoadedRef.current) {
       modsLoadedRef.current = true;
-      void loadMods(api)
-        .then((s) => {
-          // Retain the teardown closure (#17). Captured here rather than derived later
-          // because it is the only handle to the loaded mods' cleanup — dropping it,
-          // which is what used to happen, made every `onUnload` unreachable no matter
-          // how completely the loader implemented it.
-          unloadModsRef.current = s.unload;
-          const rows: LoadedModRow[] = [
-            ...s.loaded.map((id) => ({ id, status: 'loaded' as const })),
-            ...s.failed.map((f) => ({ id: f.id, status: 'failed' as const, reason: f.reason })),
-          ];
-          setLoadedMods(rows);
-          setModsStatus(
-            s.loaded.length > 0
-              ? `✓ ${s.loaded.join(', ')}`
-              : s.failed.length > 0
-                ? `✗ ${s.failed[0]!.reason.slice(0, 48)}`
-                : 'none',
-          );
-          // M6-B: surface the warn-only safety classification.
-          const sr = s.safety[0]?.report;
-          if (sr) {
-            const w = sr.warnings.length;
-            setSafetyStatus(
-              `${sr.vanillaSafe ? '✓' : '⚠'} vanillaSafe${sr.leaderboardRisk === 'warn' ? ' (lb-risk)' : ''}${w > 0 ? ` · ${w} warn` : ''}`,
-            );
-          }
-        })
-        .catch((e) => setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`));
+      // Retaining `s.unload` (via applyLoadSummary) is load-bearing (#17): it is
+      // the only handle to the loaded mods' cleanup — dropping it, which is what
+      // used to happen, made every `onUnload` unreachable no matter how
+      // completely the loader implemented it.
+      reloadChainRef.current = reloadChainRef.current.then(async () => {
+        try {
+          applyLoadSummary(await loadMods(api, { userMods: userModsRef.current }));
+        } catch (e) {
+          setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`);
+        }
+      });
     }
+  };
+
+  /** Parse + add the pasted mod, or explain inline why not. */
+  const handleAddMod = (): void => {
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(draftManifest);
+    } catch (e) {
+      setAddError(`manifest is not valid JSON: ${(e as Error).message.slice(0, 80)}`);
+      return;
+    }
+    if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) {
+      setAddError('manifest must be a JSON object (the contents of mod.json)');
+      return;
+    }
+    if (draftCode.trim().length === 0) {
+      setAddError('entrypoint code is empty — paste the BUILT entrypoint JS (ES module, default export)');
+      return;
+    }
+    const rec: UserModRecord = {
+      manifest: manifest as Record<string, unknown>,
+      code: draftCode,
+      enabled: true,
+      addedAt: new Date().toISOString(),
+    };
+    // Same-id adds REPLACE the stored copy — that is how a modder iterates on
+    // their mod without a remove/add dance. Deeper validation (required fields,
+    // semver, duplicate-vs-bundled) is the loader's job; its verdict lands in
+    // the mod list with a reason.
+    const id = userModId(rec);
+    const next = id === null ? [...userModsRef.current, rec] : [...userModsRef.current.filter((m) => userModId(m) !== id), rec];
+    setAddError(null);
+    setDraftManifest('');
+    setDraftCode('');
+    updateUserMods(next);
   };
 
   // Teardown (#17). The loader has always returned an idempotent `unload()` and every
@@ -359,6 +462,96 @@ export default function PlayPage(): ReactElement {
               ))
             )}
           </ul>
+          {mixinsSkipped.length > 0 ? (
+            <p style={warnNoteStyle}>
+              ⚠ <code>{mixinsSkipped.join(', ')}</code>: declared mixins were{' '}
+              <strong>not applied</strong> — user-mod mixins need the server-side
+              transform, which cannot see this browser’s storage (#62). The mod’s
+              entrypoint (events, keybinds, tracks, audio) still runs.
+            </p>
+          ) : null}
+
+          <h2 style={{ ...asideTitleStyle, marginTop: 20 }}>Your mods</h2>
+          {userMods.length === 0 ? (
+            <p style={modMetaStyle}>None yet — add one below.</p>
+          ) : (
+            <ul style={listStyle}>
+              {userMods.map((mod, i) => {
+                const id = userModId(mod) ?? `(no id #${i + 1})`;
+                return (
+                  <li key={id} style={listItemStyle}>
+                    <div style={userModRowStyle}>
+                      <code style={{ fontSize: 13 }}>{id}</code>
+                      <span style={userModButtonsStyle}>
+                        <button
+                          type="button"
+                          style={smallButtonStyle}
+                          onClick={() =>
+                            updateUserMods(
+                              userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
+                            )
+                          }
+                        >
+                          {mod.enabled ? 'disable' : 'enable'}
+                        </button>
+                        <button
+                          type="button"
+                          style={smallButtonStyle}
+                          onClick={() => updateUserMods(userModsRef.current.filter((m) => m !== mod))}
+                        >
+                          remove
+                        </button>
+                      </span>
+                    </div>
+                    <div style={modMetaStyle}>{mod.enabled ? 'enabled' : 'disabled'}</div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {persistWarning ? <p style={warnNoteStyle}>⚠ {persistWarning}</p> : null}
+
+          <details style={addDetailsStyle}>
+            <summary style={addSummaryStyle}>+ Add a mod</summary>
+            <p style={modMetaStyle}>
+              Paste your <code>mod.json</code> and the <strong>built</strong>{' '}
+              entrypoint JS (an ES module whose default export is the mod factory —{' '}
+              <code>pnpm build</code> output, not TypeScript source). It loads
+              through the same validated loader path as the bundled mods and stays
+              in this browser’s storage.
+            </p>
+            <p style={warnNoteStyle}>
+              Mod code runs unsandboxed in this page, in your browser — exactly
+              like the bundled mods. Only add code you trust or wrote. The safety
+              classifier labels each mod but never blocks.
+            </p>
+            <label style={addLabelStyle}>
+              mod.json
+              <textarea
+                style={addTextareaStyle}
+                rows={5}
+                spellCheck={false}
+                placeholder='{"schemaVersion": 1, "id": "my-mod", ...}'
+                value={draftManifest}
+                onChange={(e) => setDraftManifest(e.target.value)}
+              />
+            </label>
+            <label style={addLabelStyle}>
+              entrypoint.js (built)
+              <textarea
+                style={addTextareaStyle}
+                rows={7}
+                spellCheck={false}
+                placeholder="export default (api) => { /* ... */ };"
+                value={draftCode}
+                onChange={(e) => setDraftCode(e.target.value)}
+              />
+            </label>
+            {addError ? <p style={warnNoteStyle}>✗ {addError}</p> : null}
+            <button type="button" style={addButtonStyle} onClick={handleAddMod}>
+              Add mod
+            </button>
+          </details>
           <div style={bridgeRowStyle}>
             <span
               style={{ ...bridgeDotStyle, background: controlCount > 0 ? '#3fb950' : '#9aa4b2' }}
@@ -533,4 +726,68 @@ const bridgeDotStyle: CSSProperties = {
   height: 8,
   borderRadius: '50%',
   background: '#9aa4b2',
+};
+const warnNoteStyle: CSSProperties = {
+  marginTop: 8,
+  fontSize: 12,
+  color: '#d29922',
+  lineHeight: 1.5,
+};
+const userModRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+};
+const userModButtonsStyle: CSSProperties = { display: 'flex', gap: 6 };
+const smallButtonStyle: CSSProperties = {
+  background: '#21262d',
+  color: '#c9d1d9',
+  border: '1px solid #30363d',
+  borderRadius: 6,
+  padding: '2px 8px',
+  fontSize: 11,
+  cursor: 'pointer',
+};
+const addDetailsStyle: CSSProperties = {
+  marginTop: 12,
+  borderTop: '1px solid #21262d',
+  paddingTop: 12,
+};
+const addSummaryStyle: CSSProperties = {
+  cursor: 'pointer',
+  fontSize: 13,
+  fontWeight: 600,
+  color: '#c9d1d9',
+};
+const addLabelStyle: CSSProperties = {
+  display: 'block',
+  marginTop: 10,
+  fontSize: 12,
+  color: '#9aa4b2',
+};
+const addTextareaStyle: CSSProperties = {
+  display: 'block',
+  width: '100%',
+  marginTop: 4,
+  background: '#0d1117',
+  color: '#c9d1d9',
+  border: '1px solid #30363d',
+  borderRadius: 6,
+  padding: 8,
+  fontFamily: 'ui-monospace, Menlo, monospace',
+  fontSize: 11,
+  resize: 'vertical',
+  boxSizing: 'border-box',
+};
+const addButtonStyle: CSSProperties = {
+  marginTop: 10,
+  background: '#238636',
+  color: '#fff',
+  border: '1px solid #2ea043',
+  borderRadius: 6,
+  padding: '6px 14px',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
 };

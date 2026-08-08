@@ -84,15 +84,17 @@ mismatch means nothing applies at all and the portal serves vanilla.
 
 | Path | Role |
 | --- | --- |
-| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the demo mods, and renders the live sidebar. |
+| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the demo mods + the user's added mods, and renders the live sidebar (including the "Add a mod" form). |
 | `app/layout.tsx` | Root layout (App Router). |
 | `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/OPTIONS) + the three `<head>` injections + the bundle transform. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
 | `lib/rewrite.ts` | Canonical pure `rewriteGameUrl()` + `isGameHost()` — the only place the rewrite rules live (unit-tested). |
 | `lib/demo-transform.ts` | Mappings `{symbol}` resolution + the hash-gated application of `@tspml/shared`'s patches. Never throws: on any mismatch the bundle is served untouched. |
-| `lib/demo-mods.ts` / `lib/mod-loader.ts` | The bundled demo mods and their load through `@tspml/loader` (per-mod failure isolation — a bad mod never aborts boot). |
+| `lib/demo-mods.ts` / `lib/mod-loader.ts` | The bundled demo mods and their load through `@tspml/loader` (per-mod failure isolation — a bad mod never aborts boot). `mod-loader.ts` also routes **user mods** through the same `load()` call. |
+| `lib/user-mods.ts` | Runtime user-mod substrate: localStorage persistence (versioned, corruption-tolerant) + Blob-URL `import()` of pasted entrypoint code + the `user:<id>` entry-specifier scheme. Tier-1 only — declared mixins are surfaced as skipped, not applied ([#62](https://github.com/roowus/TSPML/issues/62)). |
 | `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener. |
-| `tests/rewrite.test.ts` | vitest unit tests for the rewrite (the only unit tests here — `demo-transform.ts` is covered indirectly by `@tspml/transform`'s suite plus the smokes). |
-| `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs` | Playwright headless proofs against the live game (see below). |
+| `tests/rewrite.test.ts` | vitest unit tests for the rewrite (`demo-transform.ts` is covered indirectly by `@tspml/transform`'s suite plus the smokes). |
+| `tests/user-mods.test.ts` | vitest unit tests for the user-mod storage layer + the user-mod path through `loadMods` (injected import — node can't feed a Blob URL to `import()`). |
+| `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs`, `scripts/smoke-user-mods.mjs` | Playwright headless proofs against the live game (see below). |
 
 ## Commands
 
@@ -115,6 +117,7 @@ TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev   # terminal 1
 pnpm --filter @tspml/portal smoke                   # terminal 2: boot + mods + Tier-1 events
 pnpm --filter @tspml/portal smoke:tracks            # terminal 2: the api.tracks registry
 pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio registry
+pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user-mod loading
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -133,7 +136,14 @@ real ~0.032 — and reporting ~0.032 again after `unregister`. Also covers a typ
 It needs Chromium's `--autoplay-policy=no-user-gesture-required` (`decodeAudioData` wants a
 running `AudioContext`; a headless page never clicks), which the script passes itself.
 
-None of the three run in CI yet — they need the live upstream game
+`smoke-user-mods.mjs` drives the **"+ Add a mod" form** like a modder would: paste a
+manifest + built entrypoint → the mod loads through the loader (its entrypoint stamps a
+global — the real Blob-URL `import()` the unit tests must fake) → its declared mixin is
+surfaced as *skipped* ([#62](https://github.com/roowus/TSPML/issues/62)) → a reload brings
+it back from localStorage → disable runs its disposer and drops it (bundled mods
+untouched) → remove clears the stored record.
+
+None of the smokes run in CI yet — they need the live upstream game
 ([#25](https://github.com/roowus/TSPML/issues/25)).
 
 > Both registry smokes read the captured game objects off the registry's TypeScript-`private`
