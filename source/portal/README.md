@@ -6,12 +6,14 @@ Vercel-hosted Next.js web app — TSPML's **flagship delivery surface**. It play
 bridge the mods bind to. The architecture is described in
 [`docs/design/injection-and-delivery.md`](../../docs/design/injection-and-delivery.md).
 
-> **Status:** run-validated end to end by three committed headless smokes (below). A real
+> **Status:** run-validated end to end by four committed headless smokes (below). A real
 > mod loads, six Tier-1 events fire during a real race, a mod-declared mixin applies,
-> `api.tracks` puts a mod's track in the game's own Custom tracks list, and `api.audio`
-> replaces one of the game's own sounds. Still open: leaderboard/multiplayer through the
-> proxy ([#7](https://github.com/roowus/TSPML/issues/7) — `vps.kodub.com` is bot-protected,
-> so the **extension** is the resilient path there).
+> `api.tracks` puts a mod's track in the game's own Custom tracks list, `api.audio`
+> replaces one of the game's own sounds, and a **pasted user mod's mixins.json** is
+> applied to the served bundle with a per-mod report
+> ([#62](https://github.com/roowus/TSPML/issues/62)). Still open: leaderboard/multiplayer
+> through the proxy ([#7](https://github.com/roowus/TSPML/issues/7) — `vps.kodub.com` is
+> bot-protected, so the **extension** is the resilient path there).
 
 ## The proxy + service-worker strategy
 
@@ -80,20 +82,57 @@ What this package *does* own: `lib/demo-transform.ts` — resolving each patch's
 safety contract:** the injects may reference minified parameter names only because a hash
 mismatch means nothing applies at all and the portal serves vanilla.
 
+## User-mod mixins ([#62](https://github.com/roowus/TSPML/issues/62))
+
+A pasted mod's `mixins.json` (the optional third box in the Add form) reaches the
+bundle transform through a **request-carried patch plan** — the server stores nothing:
+
+```
+ page.tsx     projects enabled mods' pasted mixins → UserPatchPlan,
+              parks it in the Cache API BEFORE the iframe mounts
+              (the mount gates on planReady)
+ sw.js        intercepts the bundle GET; a parked plan turns it into a
+              POST /api/proxy/main.bundle.js with the plan as body
+              (no plan → plain GET, byte-identical to pre-#62)
+ route.ts     re-validates the plan fail-soft (attacker-shaped body) and
+              composes base + user patches in ONE transform() pass
+ the bundle   carries the per-mod report back as a
+              `;window.__tspmlUserMixins={...};` prelude, which page.tsx
+              reads cross-frame on iframe load → the "Your mixins" rows
+```
+
+Two contracts, enforced in `lib/demo-transform.ts`:
+
+- **Base patches are all-or-nothing** — any base failure serves vanilla, exactly the
+  pre-#62 behavior. A user `replace` aimed at a base-patched target is pre-screened out
+  (`conflicts-with-loader-patch`): the engine's conflict detection only groups
+  replace-vs-replace, so that replace would otherwise silently splice the bridge hook out.
+- **User patches are per-mod isolated** — one mod's bad patch fails that mod's report row
+  (`not-found`, `symbol-unresolved`, …); other mods and the base are untouched.
+
+The plan rides only channels writable by same-origin JS (Cache API + POST body) — never
+the URL, which would be a reflected-XSS vector and would leak to Kodub via the upstream
+query passthrough. Nothing from the POST body is ever forwarded upstream, and POST
+responses are `no-store` (per-user bytes must not be cached). Caps live in
+`lib/user-patches.ts` (`USER_PATCH_LIMITS`) and are enforced at add time, at plan build,
+and again server-side. The running frame keeps the bundle it was served: mixin changes
+surface a **restart banner** rather than pretending to apply live.
+
 ## Files
 
 | Path | Role |
 | --- | --- |
 | `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the demo mods + the user's added mods, and renders the live sidebar (including the "Add a mod" form). |
 | `app/layout.tsx` | Root layout (App Router). |
-| `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/OPTIONS) + the three `<head>` injections + the bundle transform. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
+| `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/POST/OPTIONS) + the three `<head>` injections + the bundle transform. POST is the SW's plan-carrying bundle fetch (#62) — the upstream fetch is always GET, the body never leaves the route. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
 | `lib/rewrite.ts` | Canonical pure `rewriteGameUrl()` + `isGameHost()` — the only place the rewrite rules live (unit-tested). |
-| `lib/demo-transform.ts` | Mappings `{symbol}` resolution + the hash-gated application of `@tspml/shared`'s patches. Never throws: on any mismatch the bundle is served untouched. |
+| `lib/demo-transform.ts` | Mappings `{symbol}` resolution + the hash-gated application of `@tspml/shared`'s patches, composed with user patch sets (#62: base all-or-nothing, user per-mod isolated, replace pre-screen). Never throws: on any mismatch the bundle is served untouched. |
 | `lib/demo-mods.ts` / `lib/mod-loader.ts` | The bundled demo mods and their load through `@tspml/loader` (per-mod failure isolation — a bad mod never aborts boot). `mod-loader.ts` also routes **user mods** through the same `load()` call. |
-| `lib/user-mods.ts` | Runtime user-mod substrate: localStorage persistence (versioned, corruption-tolerant) + Blob-URL `import()` of pasted entrypoint code + the `user:<id>` entry-specifier scheme. Tier-1 only — declared mixins are surfaced as skipped, not applied ([#62](https://github.com/roowus/TSPML/issues/62)). |
-| `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener. |
-| `tests/rewrite.test.ts` | vitest unit tests for the rewrite (`demo-transform.ts` is covered indirectly by `@tspml/transform`'s suite plus the smokes). |
-| `tests/user-mods.test.ts` | vitest unit tests for the user-mod storage layer + the user-mod path through `loadMods` (injected import — node can't feed a Blob URL to `import()`). |
+| `lib/user-mods.ts` | Runtime user-mod substrate: localStorage persistence (versioned, corruption-tolerant) + Blob-URL `import()` of pasted entrypoint code + the `user:<id>` entry-specifier scheme + `parseMixinsJson` for the third paste. |
+| `lib/user-patches.ts` | The #62 plan mechanism: caps, plan build/fingerprint (page side), defensive re-parse (server side), and the in-bundle report prelude. |
+| `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener + the #62 plan-to-POST replay for the bundle fetch. |
+| `tests/rewrite.test.ts` | vitest unit tests for the rewrite. |
+| `tests/user-mods.test.ts` / `tests/user-patches.test.ts` / `tests/demo-transform.test.ts` | vitest unit tests for the user-mod storage layer + loader path (injected import — node can't feed a Blob URL to `import()`), the #62 plan mechanism, and the compose contracts (driven with a synthetic bundle + map). |
 | `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs`, `scripts/smoke-user-mods.mjs` | Playwright headless proofs against the live game (see below). |
 
 ## Commands
@@ -117,7 +156,7 @@ TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev   # terminal 1
 pnpm --filter @tspml/portal smoke                   # terminal 2: boot + mods + Tier-1 events
 pnpm --filter @tspml/portal smoke:tracks            # terminal 2: the api.tracks registry
 pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio registry
-pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user-mod loading
+pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user mods + pasted mixins
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -138,10 +177,15 @@ running `AudioContext`; a headless page never clicks), which the script passes i
 
 `smoke-user-mods.mjs` drives the **"+ Add a mod" form** like a modder would: paste a
 manifest + built entrypoint → the mod loads through the loader (its entrypoint stamps a
-global — the real Blob-URL `import()` the unit tests must fake) → its declared mixin is
-surfaced as *skipped* ([#62](https://github.com/roowus/TSPML/issues/62)) → a reload brings
-it back from localStorage → disable runs its disposer and drops it (bundled mods
-untouched) → remove clears the stored record.
+global — the real Blob-URL `import()` the unit tests must fake) → added *without* its
+`mixins.json` the declared mixin is surfaced as skipped → re-pasting *with* it raises the
+restart banner → the banner's reload brings the mod back from localStorage **and applies
+the mixin**: the inject fires in the game frame and the sidebar's "Your mixins" row reads
+1/1 applied ([#62](https://github.com/roowus/TSPML/issues/62)) → a second mod with a bogus
+`{symbol}` reports 0/1 `symbol-unresolved` while the first mod's row and the base
+transform's LIVE badge survive (per-mod isolation) → disable runs its disposer and drops
+it (bundled mods untouched) → remove clears the stored records. Unlike the other smokes
+it **requires** `TSPML_TRANSFORM=1` — the mixin legs assert on the transformed bundle.
 
 All four portal smokes run in CI (`.github/workflows/smoke.yml`, closing
 [#25](https://github.com/roowus/TSPML/issues/25)) — advisory on PRs plus a daily
