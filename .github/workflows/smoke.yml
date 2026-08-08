@@ -165,7 +165,7 @@ jobs:
       - name: smoke — api.audio overrides the game's own getBuffer
         run: pnpm --filter @tspml/portal smoke:audio
 
-      - name: smoke — runtime user mods (add / persist / disable / remove)
+      - name: smoke — runtime user mods (add / mixins #62 / persist / disable / remove)
         run: pnpm --filter @tspml/portal smoke:usermods
 
       - name: portal server log

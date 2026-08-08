@@ -40,6 +40,8 @@ declare global {
     __smokeUserModRuns?: number;
     /** Smoke scratch: set by the pasted user mod's disposer on unload. */
     __smokeUserModDisposed?: boolean;
+    /** Set in the GAME frame by the pasted user mod's mixin inject (#62). */
+    __smokeUserMixin?: boolean;
     /** Set by @tspml/demo-hud's declared mixin — proves a mod mixin applied. */
     __demoHudMixin?: unknown;
   }

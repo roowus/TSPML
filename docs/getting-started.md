@@ -130,6 +130,8 @@ In the sidebar, open **“+ Add a mod”** and paste:
 1. **mod.json** — the manifest, verbatim.
 2. **entrypoint.js (built)** — the contents of `dist/src/entrypoint.js` (the compiled
    output, *not* your TypeScript source).
+3. **mixins.json** (optional) — if your mod declares Tier-2 mixins, paste the file's
+   contents in the third box.
 
 Click **Add mod**. Your mod goes through the exact same `@tspml/loader` path as the
 bundled demos — manifest validation, per-mod failure isolation, safety classification —
@@ -137,14 +139,18 @@ and it persists in your browser's storage across reloads. Enable/disable/remove 
 same list; re-pasting with the same `id` replaces the stored copy, which is the iteration
 loop while developing.
 
-Two things to know:
+Three things to know:
 
 - **Mod code runs unsandboxed in the portal page, in your browser** — the same trust
   level as the bundled mods. Only add code you wrote or trust.
-- **Declared `mixins` are not applied for runtime-added mods** (the transform runs
-  server-side and can't see your browser's storage —
-  [#62](https://github.com/roowus/TSPML/issues/62)). The portal tells you explicitly when
-  it skips them. Your entrypoint — events, keybinds, tracks, audio — works in full.
+- **Mixins apply on the next game load, not live** ([#62](https://github.com/roowus/TSPML/issues/62)).
+  The served bundle is immutable once loaded, so after adding or changing mixins the
+  sidebar shows a restart banner — click **reload now**. After the reload, the **Your
+  mixins** section reports exactly what applied, per mod (`1/1 applied`, or the failure
+  reason: an unknown `symbol`, a target the map can't find, a `replace` that collides
+  with TSPML's own bridge patches). Your mixins can never break the bridge: a failing
+  patch fails only your mod's row.
+- **Your entrypoint applies live** — events, keybinds, tracks, audio — no reload needed.
 
 ## 5. Declare a mixin (Tier 2 — the escape hatch)
 

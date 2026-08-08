@@ -23,6 +23,10 @@ export default defineConfig({
         here,
         '../../environments/demo-mods/example-hud/mod.json',
       ),
+      '@tspml/demo-hud/mixins.json': path.resolve(
+        here,
+        '../../environments/demo-mods/example-hud/mixins.json',
+      ),
       '@tspml/demo-hud': path.resolve(
         here,
         '../../environments/demo-mods/example-hud/src/entrypoint.ts',
@@ -36,6 +40,14 @@ export default defineConfig({
         '../../environments/demo-mods/tspml-checkpoint-counter/src/entrypoint.ts',
       ),
       '@tspml/loader': path.resolve(here, '../loader/src/index.ts'),
+      // demo-transform.test.ts drives the real engine + resolver; alias the
+      // whole runtime chain to source for the same test-before-build reason.
+      // (`/maps/*` stays unaliased — it resolves via the package's own
+      // `./maps/*` export, which needs no build step.)
+      '@tspml/mappings/maps': path.resolve(here, '../mappings/maps'),
+      '@tspml/mappings': path.resolve(here, '../mappings/src/index.ts'),
+      '@tspml/transform': path.resolve(here, '../transform/src/index.ts'),
+      '@tspml/shared': path.resolve(here, '../shared/src/index.ts'),
       '@': here,
     },
   },

@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TspmlApi } from '@tspml/api';
 import {
+  parseMixinsJson,
   readUserMods,
   saveUserMods,
   upsertUserMod,
@@ -114,6 +115,41 @@ describe('user-mods storage', () => {
     const noId = { ...record(), manifest: {} };
     const existing = record({ id: 'kept' });
     expect(upsertUserMod([existing], noId)).toEqual([existing, noId]);
+  });
+
+  it('round-trips the optional mixins field and accepts pre-#62 rows without it (#62)', () => {
+    const withMixins = record({ id: 'mx', mixins: [{ op: 'before', symbol: 'Car', inject: 'x' }] });
+    const legacy = record({ id: 'old' }); // no mixins key at all
+    const storage = memoryStorage();
+    expect(saveUserMods([withMixins, legacy], storage)).toBe(true);
+    expect(readUserMods(storage)).toEqual([withMixins, legacy]);
+  });
+
+  it('drops a row whose mixins field is wrong-typed rather than smuggling it through (#62)', () => {
+    const good = record({ id: 'good' });
+    const storage = memoryStorage({
+      'tspml.userMods.v1': JSON.stringify([
+        good,
+        { ...record({ id: 'bad-shape' }), mixins: 'not-an-array' },
+        { ...record({ id: 'bad-entries' }), mixins: [42] },
+      ]),
+    });
+    expect(readUserMods(storage)).toEqual([good]);
+  });
+});
+
+describe('parseMixinsJson (#62)', () => {
+  it('accepts a valid mixins.json paste', () => {
+    const r = parseMixinsJson('{"patches": [{"op": "after", "symbol": "Car", "inject": "x"}]}');
+    expect(r).toEqual({ ok: true, patches: [{ op: 'after', symbol: 'Car', inject: 'x' }] });
+  });
+
+  it('rejects bad JSON, non-objects, and missing/empty/non-object patches with distinct messages', () => {
+    expect(parseMixinsJson('nope{')).toMatchObject({ ok: false, error: expect.stringContaining('not valid JSON') });
+    expect(parseMixinsJson('[1]')).toMatchObject({ ok: false, error: expect.stringContaining('JSON object') });
+    expect(parseMixinsJson('{}')).toMatchObject({ ok: false, error: expect.stringContaining('"patches"') });
+    expect(parseMixinsJson('{"patches": []}')).toMatchObject({ ok: false, error: expect.stringContaining('non-empty') });
+    expect(parseMixinsJson('{"patches": ["x"]}')).toMatchObject({ ok: false, error: expect.stringContaining('object') });
   });
 });
 
@@ -231,7 +267,7 @@ describe('loadMods with user mods', () => {
     expect(summary.failed).toEqual([]);
   });
 
-  it('reports declared mixins as skipped rather than silently ignoring them (#62)', async () => {
+  it('reports declared-but-unpasted mixins as skipped rather than silently ignoring them (#62)', async () => {
     const withMixins = record({ id: 'mixin-mod' });
     (withMixins.manifest as Record<string, unknown>).mixins = [{ config: 'mixins.json' }];
     const summary = await loadMods(fakeApi(), {
@@ -242,6 +278,20 @@ describe('loadMods with user mods', () => {
     expect(summary.mixinsSkipped).toEqual(['mixin-mod']);
     // Bundled mods' mixins ARE applied (server-side) — they must not appear here.
     expect(summary.mixinsSkipped).not.toContain('tspml-example-hud');
+  });
+
+  it('does NOT report a mod whose mixins.json WAS pasted — those ride the patch plan (#62)', async () => {
+    const pasted = record({
+      id: 'pasted-mod',
+      mixins: [{ op: 'after', symbol: 'Car', inject: 'x' }],
+    });
+    (pasted.manifest as Record<string, unknown>).mixins = [{ config: 'mixins.json' }];
+    const summary = await loadMods(fakeApi(), {
+      userMods: [pasted],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.loaded).toContain('pasted-mod');
+    expect(summary.mixinsSkipped).toEqual([]);
   });
 
   it('unloads a user mod via the standard disposer path (#17)', async () => {

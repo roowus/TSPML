@@ -91,8 +91,16 @@ function normalizeHash(h: string): string {
   return h.trim().toLowerCase().replace(/^sha-?256:/, "");
 }
 
-/** Structural key for a TargetSpec, for replace single-winner conflict grouping. */
-function targetSignature(spec: TargetSpec): string {
+/**
+ * Structural key for a TargetSpec — two specs with the same signature address
+ * the same anchor+selector. Used here for replace single-winner conflict
+ * grouping, and exported for callers that must screen patch sets that run in
+ * SEPARATE `transform()` calls (or separate index ranges of one call) against
+ * each other: the engine's own conflict detection only sees replace-vs-replace
+ * within a single patch array, and a `replace` applied after a `before`/`after`
+ * on the same target splices out the earlier inject while reporting success.
+ */
+export function targetSignature(spec: TargetSpec): string {
   const lit = spec.anchor.literals.map(String).join("\x1f");
   const minHits = spec.anchor.minHits ?? spec.anchor.literals.length;
   const s = spec.selector;

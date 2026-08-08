@@ -54,10 +54,13 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 | # | Title | Scope |
 |---|---|---|
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
-| [#62](https://github.com/roowus/TSPML/issues/62) | Apply user-mod declared mixins via the proxy transform | Runtime user mods are Tier-1 only; their `mixins` are surfaced as skipped, not applied. |
 | [#64](https://github.com/roowus/TSPML/issues/64) | `checkpoint.respawn` typed but never emitted | The event map declares it; no bridge patch fires it — a subscriber waits forever. |
 
-Closed since the last update: [#25](https://github.com/roowus/TSPML/issues/25) (all four
+Closed since the last update: [#62](https://github.com/roowus/TSPML/issues/62) (runtime
+user mods' pasted `mixins.json` now reaches the bundle transform via a request-carried
+patch plan — Cache API → service-worker POST replay → one-pass compose, base
+all-or-nothing, user per-mod isolated, with an in-bundle per-mod report),
+[#25](https://github.com/roowus/TSPML/issues/25) (all four
 portal smokes now run in CI — advisory on PRs + daily schedule, with a pinned-bundle canary,
 `.github/workflows/smoke.yml`), [#10](https://github.com/roowus/TSPML/issues/10) (per-car race
 events now carry `{ carId, isReplay }`; the issue's premise — that the controlled-car flag is

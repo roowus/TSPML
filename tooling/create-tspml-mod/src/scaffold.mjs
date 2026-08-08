@@ -174,9 +174,9 @@ Build, then paste it into the TSPML portal — no fork or clone needed:
 
 1. \`pnpm build\` (produces \`dist/entrypoint.js\`).
 2. In the portal sidebar, open **+ Add a mod**.
-3. Paste \`mod.json\` into the first box and the **built** \`dist/entrypoint.js\` into the second.
+3. Paste \`mod.json\` into the first box, the **built** \`dist/entrypoint.js\` into the second, and \`mixins.json\` into the third.
 
-The mod loads through the same validated loader path as the bundled demo mods and persists in that browser's storage; re-pasting with the same \`id\` replaces it, which is the iterate loop. One limit: any \`mixins\` the manifest declares are surfaced as *skipped*, not applied — runtime mixin application is tracked in [TSPML#62](https://github.com/roowus/TSPML/issues/62). The entrypoint API (events, keybinds, tracks, audio) is fully live.
+The mod loads through the same validated loader path as the bundled demo mods and persists in that browser's storage; re-pasting with the same \`id\` replaces it, which is the iterate loop. The entrypoint API (events, keybinds, tracks, audio) applies live; mixins apply **on the next game load** — the sidebar shows a restart banner after a mixin change, and after the reload the **Your mixins** section reports per-mod what applied ([TSPML#62](https://github.com/roowus/TSPML/issues/62)).
 
 See the mod API: [events-and-registries.md](https://github.com/roowus/TSPML/blob/main/docs/api/events-and-registries.md) · [mixin-reference.md](https://github.com/roowus/TSPML/blob/main/docs/api/mixin-reference.md)
 `;

@@ -5,6 +5,8 @@ import { EARLY_CAPTURE_SCRIPT_TAG } from '@tspml/shared';
 
 import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
 import { applyDemoTransform } from '@/lib/demo-transform';
+import { parseUserPatchPlan, reportPrelude, USER_PATCH_LIMITS } from '@/lib/user-patches';
+import type { UserMixinReport, UserPatchSet } from '@/lib/user-patches';
 
 /**
  * /api/proxy/<path> — server-side fetch of the real PolyTrack game.
@@ -118,9 +120,23 @@ function shouldTransform(host: string, segments: string[]): boolean {
   );
 }
 
+/** The POST path's parsed plan (#62): `sets` to compose into the transform
+ *  (empty when the plan was refused up front), plus the refusal status to
+ *  report inside the bundle prelude when it was. */
+interface UserPlanInput {
+  readonly sets: readonly UserPatchSet[];
+  readonly degradedStatus: 'plan-invalid' | 'plan-too-large' | null;
+}
+
+/**
+ * Serve one proxied request. The UPSTREAM fetch is always a GET — the portal-
+ * side POST (#62) only carries the user patch plan in `user`; nothing from the
+ * request body is ever forwarded to Kodub.
+ */
 async function proxyGet(
   request: NextRequest,
   segments: string[],
+  user: UserPlanInput | null = null,
 ): Promise<NextResponse> {
   const search = request.nextUrl.searchParams;
   const version = search.get('version') ?? process.env.POLYTRACK_VERSION ?? DEFAULT_VERSION;
@@ -160,16 +176,33 @@ async function proxyGet(
   // When TSPML_TRANSFORM is set and this is the game's main bundle on the
   // default host, rewrite it with a visible marker so a browser load proves a
   // *transformed* bundle still boots & plays. See lib/demo-transform.ts.
+  // On the POST path (#62) `user` additionally carries the parsed patch plan:
+  // its sets compose into the same pass, and the per-mod report is prepended to
+  // the served bundle as the `window.__tspmlUserMixins` prelude.
   if (shouldTransform(host, segments)) {
     const src = await upstreamRes.text();
-    const { code, transformed, detail } = await applyDemoTransform(src);
+    const { code, transformed, detail, vanillaHash, userReport } = await applyDemoTransform(
+      src,
+      user?.sets ?? [],
+    );
+    // A refused plan (bad shape / oversized body) still gets an honest prelude:
+    // plan-level status, no per-mod rows (the mods were never parsed out).
+    const report: UserMixinReport | null = user
+      ? user.degradedStatus !== null
+        ? { v: 1, planStatus: user.degradedStatus, mods: [] }
+        : userReport
+      : null;
+    const body = report ? `${reportPrelude(report)}${code}` : code;
     const h = new Headers();
     h.set('content-type', 'text/javascript; charset=utf-8');
-    h.set('cache-control', 'no-cache'); // transformed demo output — never cache
+    // GET keeps the pre-#62 policy; a POST-carried plan makes the response
+    // per-request (it embeds this user's report) — no-store, never shared.
+    h.set('cache-control', user ? 'no-store' : 'no-cache');
     corsHeaders(request, h);
     h.set('x-tspml-transformed', transformed ? '1' : '0');
+    h.set('x-tspml-vanilla-hash', vanillaHash);
     if (detail) h.set('x-tspml-detail', detail.slice(0, 200));
-    return new NextResponse(code, { status: upstreamRes.status, headers: h });
+    return new NextResponse(body, { status: upstreamRes.status, headers: h });
   }
 
   // Rewrite the proxied game's HTML. Every injection runs BEFORE the game's deferred
@@ -239,9 +272,57 @@ export async function GET(
   return proxyGet(request, segments);
 }
 
+/**
+ * POST /api/proxy/main.bundle.js (#62): the SW replays the game's bundle GET as
+ * a POST whose body is the user patch plan (see lib/user-patches.ts). The plan
+ * is parsed FAIL-SOFT — this response is the `<script>` the game executes, so a
+ * bad plan must degrade to the base transform (with an honest prelude report),
+ * never 4xx and break the boot. Only the bundle-in-transform-mode path accepts
+ * POST at all; anything else is 405 (the SW never POSTs elsewhere).
+ */
+export async function POST(
+  request: NextRequest,
+  ctx: { params: Promise<{ path?: string[] }> },
+): Promise<Response> {
+  const { path } = await ctx.params;
+  const segments = (path ?? []).filter(Boolean);
+  const host = request.nextUrl.searchParams.get('host') ?? DEFAULT_GAME_HOST;
+  if (!shouldTransform(host, segments)) {
+    const headers = new Headers();
+    headers.set('allow', 'GET, OPTIONS');
+    corsHeaders(request, headers);
+    return NextResponse.json({ error: 'method not allowed' }, { status: 405, headers });
+  }
+
+  let user: UserPlanInput;
+  let bodyText = '';
+  try {
+    bodyText = await request.text();
+  } catch {
+    user = { sets: [], degradedStatus: 'plan-invalid' };
+    return proxyGet(request, segments, user);
+  }
+  if (new TextEncoder().encode(bodyText).length > USER_PATCH_LIMITS.maxBodyBytes) {
+    user = { sets: [], degradedStatus: 'plan-too-large' };
+  } else {
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      parsed = null;
+    }
+    const plan = parseUserPatchPlan(parsed);
+    user =
+      plan === null
+        ? { sets: [], degradedStatus: 'plan-invalid' }
+        : { sets: plan.sets, degradedStatus: null };
+  }
+  return proxyGet(request, segments, user);
+}
+
 export async function OPTIONS(request: NextRequest): Promise<Response> {
   const headers = new Headers();
-  headers.set('access-control-allow-methods', 'GET, OPTIONS');
+  headers.set('access-control-allow-methods', 'GET, POST, OPTIONS');
   headers.set('access-control-allow-headers', 'content-type');
   headers.set('access-control-max-age', '86400');
   corsHeaders(request, headers);

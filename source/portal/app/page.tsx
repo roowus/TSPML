@@ -8,8 +8,16 @@ import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
-import { readUserMods, saveUserMods, upsertUserMod, userModId } from '@/lib/user-mods';
+import { parseMixinsJson, readUserMods, saveUserMods, upsertUserMod, userModId } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
+import {
+  buildUserPatchPlan,
+  PLAN_CACHE,
+  planFingerprint,
+  REPORT_GLOBAL,
+  USER_PATCH_LIMITS,
+} from '@/lib/user-patches';
+import type { UserMixinReport } from '@/lib/user-patches';
 import { teardown } from '@/lib/teardown';
 
 /**
@@ -66,6 +74,49 @@ interface PortalApi extends TspmlApi {
   captureAudioManager(m: GameAudioManager): void;
 }
 
+/** Minimal shape check on the bundle-prelude report (#62) — it crossed a frame
+ *  boundary, so trust nothing beyond "looks like a v1 report". */
+function isMixinReport(v: unknown): v is UserMixinReport {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (v as { v?: unknown }).v === 1 &&
+    Array.isArray((v as { mods?: unknown }).mods)
+  );
+}
+
+/**
+ * Project `mods` into the request-carried patch plan and park it in the Cache
+ * API where the SW's bundle intercept reads it (#62; see lib/user-patches.ts).
+ * An empty plan DELETES the entry so the SW issues the plain GET. `cacheOk`
+ * false = the Cache API itself failed (insecure context, storage blocked) —
+ * mixins degrade to not-applied; the game still loads.
+ */
+async function parkUserPatchPlan(mods: readonly UserModRecord[]): Promise<{
+  fingerprint: string | null;
+  sets: number;
+  overCap: string[];
+  cacheOk: boolean;
+}> {
+  const { plan, overCap } = buildUserPatchPlan(mods);
+  const fingerprint = plan.sets.length > 0 ? planFingerprint(plan) : null;
+  let cacheOk = true;
+  try {
+    const cache = await caches.open(PLAN_CACHE.name);
+    if (plan.sets.length === 0) {
+      await cache.delete(PLAN_CACHE.url);
+    } else {
+      await cache.put(
+        PLAN_CACHE.url,
+        new Response(JSON.stringify(plan), { headers: { 'content-type': 'application/json' } }),
+      );
+    }
+  } catch {
+    cacheOk = false;
+  }
+  return { fingerprint, sets: plan.sets.length, overCap, cacheOk };
+}
+
 export default function PlayPage(): ReactElement {
   const [swState, setSwState] = useState<SwState>('idle');
   const [swError, setSwError] = useState<string | null>(null);
@@ -86,7 +137,26 @@ export default function PlayPage(): ReactElement {
   const [persistWarning, setPersistWarning] = useState<string | null>(null);
   const [draftManifest, setDraftManifest] = useState('');
   const [draftCode, setDraftCode] = useState('');
+  const [draftMixins, setDraftMixins] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
+  // #62 user-mixin plumbing. The plan must sit in the Cache API BEFORE the game
+  // iframe mounts (the SW reads it while serving the bundle), so the mount
+  // gates on `planReady` as well as the SW. `parked` = fingerprint of the plan
+  // currently in the cache; `served` = the one the current frame was loaded
+  // with. They diverge on any mid-session mod change → restart banner (the
+  // bundle is immutable once loaded; only a reload re-runs the transform).
+  const [planReady, setPlanReady] = useState(false);
+  const [mixinReport, setMixinReport] = useState<UserMixinReport | null>(null);
+  const [mixinOverCap, setMixinOverCap] = useState<readonly string[]>([]);
+  const [mixinNotice, setMixinNotice] = useState<string | null>(null);
+  const [needsRestart, setNeedsRestart] = useState(false);
+  const parkedFingerprintRef = useRef<string | null>(null);
+  const servedFingerprintRef = useRef<string | null>(null);
+  const planSetsRef = useRef(0);
+  // Serializes plan parks the way reloadChainRef serializes mod reloads: two
+  // rapid toggles must not land their cache.put calls out of order, or the
+  // parked plan and the fingerprint ref would disagree.
+  const planChainRef = useRef<Promise<void>>(Promise.resolve());
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
@@ -138,11 +208,29 @@ export default function PlayPage(): ReactElement {
   }, [bus]);
 
   // Hydrate the user-mod list from localStorage once, on the client only —
-  // reading in the initial useState would run during SSR/prerender too.
+  // reading in the initial useState would run during SSR/prerender too. Then
+  // park the mixin patch plan (#62): the iframe mount gates on `planReady`, so
+  // by the time the SW fetches the bundle the plan is already in the cache.
   useEffect(() => {
     const stored = readUserMods();
     userModsRef.current = stored;
     setUserMods(stored);
+    let cancelled = false;
+    planChainRef.current = planChainRef.current.then(async () => {
+      const r = await parkUserPatchPlan(stored);
+      if (cancelled) return;
+      parkedFingerprintRef.current = r.fingerprint;
+      servedFingerprintRef.current = r.fingerprint; // the first frame loads THIS plan
+      planSetsRef.current = r.sets;
+      setMixinOverCap(r.overCap);
+      if (!r.cacheOk) {
+        setMixinNotice('Storage for mixin plans is unavailable — user-mod mixins will not be applied this session.');
+      }
+      setPlanReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /** Push a load's results into the sidebar state. */
@@ -189,6 +277,16 @@ export default function PlayPage(): ReactElement {
         ? null
         : 'Storage unavailable — mods work this session but will not survive a reload.',
     );
+    // Re-park the mixin plan (#62). The RUNNING frame keeps the bundle it was
+    // served with — if the effective patch set changed, only a reload applies
+    // it, so surface the restart banner instead of pretending.
+    planChainRef.current = planChainRef.current.then(async () => {
+      const r = await parkUserPatchPlan(next);
+      parkedFingerprintRef.current = r.fingerprint;
+      planSetsRef.current = r.sets;
+      setMixinOverCap(r.overCap);
+      setNeedsRestart(r.fingerprint !== servedFingerprintRef.current);
+    });
     const api = apiRef.current;
     if (!api || !modsLoadedRef.current) return; // frame not loaded yet; first load picks the list up
     reloadChainRef.current = reloadChainRef.current.then(async () => {
@@ -225,8 +323,29 @@ export default function PlayPage(): ReactElement {
   // patches call `captureTrack*`. Built on iframe load (when the game window exists).
   // Also registers a demo keybind (KeyF) for a visible "registry works" signal.
   const handleFrameLoad = (): void => {
-    const w = frameRef.current?.contentWindow as (Window & { __tspml?: unknown }) | null;
+    const w = frameRef.current?.contentWindow as
+      | (Window & { __tspml?: unknown; [REPORT_GLOBAL]?: unknown })
+      | null;
     if (!w) return;
+    // #62: the per-mod mixin report rides INSIDE the served bundle as a
+    // `window.__tspmlUserMixins` prelude — same-origin frame, read it directly.
+    // Non-null plan but no global: the bundle bypassed the SW POST path
+    // (transform off, SW raced, or an extension interfered) — say so honestly
+    // rather than showing stale/no rows.
+    const rawReport = w[REPORT_GLOBAL];
+    if (isMixinReport(rawReport)) {
+      setMixinReport(rawReport);
+      setMixinNotice(null);
+    } else {
+      setMixinReport(null);
+      if (planSetsRef.current > 0) {
+        setMixinNotice(
+          'Mixins were not applied to this game load — the bundle was served without the patch plan (transform mode off, or the service worker did not intercept).',
+        );
+      }
+    }
+    servedFingerprintRef.current = parkedFingerprintRef.current;
+    setNeedsRestart(false);
     if (!keybindsRef.current) keybindsRef.current = new Keybinds(w);
     if (!demoKeybindRegistered.current) {
       keybindsRef.current.register({
@@ -316,9 +435,33 @@ export default function PlayPage(): ReactElement {
       setAddError('entrypoint code is empty — paste the BUILT entrypoint JS (ES module, default export)');
       return;
     }
+    // Optional third paste (#62): the mod's mixins.json. Validated shallowly
+    // here so the author hears about malformed JSON immediately; caps are
+    // checked at add time too (the same limits the server re-enforces).
+    let mixins: Record<string, unknown>[] | undefined;
+    if (draftMixins.trim().length > 0) {
+      const parsed = parseMixinsJson(draftMixins);
+      if (!parsed.ok) {
+        setAddError(parsed.error);
+        return;
+      }
+      if (parsed.patches.length > USER_PATCH_LIMITS.maxPatchesPerMod) {
+        setAddError(`mixins.json has ${parsed.patches.length} patches — the limit is ${USER_PATCH_LIMITS.maxPatchesPerMod}`);
+        return;
+      }
+      const oversized = parsed.patches.find(
+        (p) => typeof p.inject === 'string' && p.inject.length > USER_PATCH_LIMITS.maxInjectChars,
+      );
+      if (oversized) {
+        setAddError(`a patch's inject exceeds ${USER_PATCH_LIMITS.maxInjectChars.toLocaleString()} characters`);
+        return;
+      }
+      mixins = parsed.patches;
+    }
     const rec: UserModRecord = {
       manifest: manifest as Record<string, unknown>,
       code: draftCode,
+      ...(mixins === undefined ? {} : { mixins }),
       enabled: true,
       addedAt: new Date().toISOString(),
     };
@@ -330,6 +473,7 @@ export default function PlayPage(): ReactElement {
     setAddError(null);
     setDraftManifest('');
     setDraftCode('');
+    setDraftMixins('');
     updateUserMods(next);
   };
 
@@ -412,7 +556,11 @@ export default function PlayPage(): ReactElement {
 
       <div style={gridStyle}>
         <section style={gameSectionStyle} aria-label="Game">
-          {swState === 'active' ? (
+          {/* Mount also gates on planReady (#62): the SW reads the mixin plan
+              from the Cache API while serving the bundle, so it must be parked
+              before the frame's first fetch. The park is a couple of Cache API
+              calls — never a visible delay on top of SW activation. */}
+          {swState === 'active' && planReady ? (
             <iframe
               ref={frameRef}
               onLoad={handleFrameLoad}
@@ -465,11 +613,62 @@ export default function PlayPage(): ReactElement {
           </ul>
           {mixinsSkipped.length > 0 ? (
             <p style={warnNoteStyle}>
-              ⚠ <code>{mixinsSkipped.join(', ')}</code>: declared mixins were{' '}
-              <strong>not applied</strong> — user-mod mixins need the server-side
-              transform, which cannot see this browser’s storage (#62). The mod’s
-              entrypoint (events, keybinds, tracks, audio) still runs.
+              ⚠ <code>{mixinsSkipped.join(', ')}</code>: the manifest declares
+              mixins but no <code>mixins.json</code> was pasted — they were{' '}
+              <strong>not applied</strong>. Re-add the mod with its{' '}
+              <code>mixins.json</code> in the third box. The mod’s entrypoint
+              (events, keybinds, tracks, audio) still runs.
             </p>
+          ) : null}
+          {needsRestart ? (
+            <p style={warnNoteStyle}>
+              ⚠ Mixin changes need a restart —{' '}
+              <button type="button" style={smallButtonStyle} onClick={() => window.location.reload()}>
+                reload now
+              </button>{' '}
+              to apply them to the game. (The running game keeps the bundle it
+              was served; entrypoint-only changes apply live.)
+            </p>
+          ) : null}
+          {mixinNotice ? <p style={warnNoteStyle}>⚠ {mixinNotice}</p> : null}
+          {mixinOverCap.length > 0 ? (
+            <p style={warnNoteStyle}>
+              ⚠ <code>{mixinOverCap.join(', ')}</code>: mixins exceed the
+              per-request limits and were left out of the patch plan.
+            </p>
+          ) : null}
+          {mixinReport && mixinReport.mods.length > 0 ? (
+            <>
+              <h2 style={{ ...asideTitleStyle, marginTop: 20 }}>Your mixins</h2>
+              {mixinReport.planStatus !== 'applied' ? (
+                <p style={warnNoteStyle}>
+                  ⚠ plan {mixinReport.planStatus} — no user mixin was applied.
+                </p>
+              ) : null}
+              <ul style={listStyle}>
+                {mixinReport.mods.map((m) => (
+                  <li key={m.modId} style={listItemStyle}>
+                    <div style={userModRowStyle}>
+                      <code style={{ fontSize: 13 }}>{m.modId}</code>
+                      <span
+                        style={{
+                          ...modStatusStyle,
+                          marginTop: 0,
+                          color: m.applied === m.declared ? '#3fb950' : m.applied > 0 ? '#d29922' : '#f85149',
+                        }}
+                      >
+                        {m.applied}/{m.declared} applied
+                      </span>
+                    </div>
+                    {m.failed.map((f, i) => (
+                      <div key={i} style={modMetaStyle}>
+                        ✗ {f.reason}: {f.detail.slice(0, 96)}
+                      </div>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
 
           <h2 style={{ ...asideTitleStyle, marginTop: 20 }}>Your mods</h2>
@@ -546,6 +745,17 @@ export default function PlayPage(): ReactElement {
                 placeholder="export default (api) => { /* ... */ };"
                 value={draftCode}
                 onChange={(e) => setDraftCode(e.target.value)}
+              />
+            </label>
+            <label style={addLabelStyle}>
+              mixins.json (optional — Tier-2 patches, applied on the next game load)
+              <textarea
+                style={addTextareaStyle}
+                rows={5}
+                spellCheck={false}
+                placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
+                value={draftMixins}
+                onChange={(e) => setDraftMixins(e.target.value)}
               />
             </label>
             {addError ? <p style={warnNoteStyle}>✗ {addError}</p> : null}
