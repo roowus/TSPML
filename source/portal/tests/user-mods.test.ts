@@ -11,6 +11,7 @@ import type { TspmlApi } from '@tspml/api';
 import {
   readUserMods,
   saveUserMods,
+  upsertUserMod,
   userEntrySpecifier,
   userModId,
   type UserModRecord,
@@ -96,6 +97,24 @@ describe('user-mods storage', () => {
     expect(userModId(record({ id: 'x' }))).toBe('x');
     expect(userModId({ ...record(), manifest: {} })).toBeNull();
   });
+
+  it('upsertUserMod replaces the same-id record (the modder iterate loop)', () => {
+    const v1 = record({ id: 'iterating', code: 'export default () => 1;' });
+    const other = record({ id: 'other' });
+    const v2 = { ...v1, code: 'export default () => 2;' };
+    const next = upsertUserMod([v1, other], v2);
+    // One record for the id, holding the NEW code — a dropped/inverted filter
+    // would land v2 as a second record and pre-fail it as a duplicate.
+    expect(next.filter((m) => userModId(m) === 'iterating')).toEqual([v2]);
+    expect(next).toContain(other);
+    expect(next).toHaveLength(2);
+  });
+
+  it('upsertUserMod appends id-less records without touching the rest', () => {
+    const noId = { ...record(), manifest: {} };
+    const existing = record({ id: 'kept' });
+    expect(upsertUserMod([existing], noId)).toEqual([existing, noId]);
+  });
 });
 
 describe('loadMods with user mods', () => {
@@ -170,6 +189,46 @@ describe('loadMods with user mods', () => {
     });
     expect(summary.loaded).toContain('twin');
     expect(summary.failed.filter((f) => f.id === 'twin')).toHaveLength(1);
+  });
+
+  it('pre-fails a user mod with an unmet dependency, WITHOUT aborting the load', async () => {
+    // Resolution errors (missing depends, breaks, cycles) are abortive in the
+    // loader, exactly like duplicate ids — a pasted manifest saying
+    // `depends: {"anything": "*"}` must not take the bundled mods down.
+    const needy = record({ id: 'needy-mod' });
+    (needy.manifest as Record<string, unknown>).depends = { 'not-installed': '^1.0.0' };
+    const summary = await loadMods(fakeApi(), {
+      userMods: [needy],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.failed.find((f) => f.id === 'needy-mod')?.reason).toMatch(/not installed/);
+    expect(summary.loaded).toContain('tspml-example-hud');
+    expect(summary.loaded).toContain('tspml-checkpoint-counter');
+  });
+
+  it('pre-fails a user mod that breaks a bundled mod, WITHOUT aborting the load', async () => {
+    const breaker = record({ id: 'breaker-mod' });
+    (breaker.manifest as Record<string, unknown>).breaks = { 'tspml-example-hud': '*' };
+    const summary = await loadMods(fakeApi(), {
+      userMods: [breaker],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.failed.find((f) => f.id === 'breaker-mod')?.reason).toMatch(/breaks/);
+    expect(summary.loaded).toContain('tspml-example-hud');
+  });
+
+  it('loads a user mod depending on another user mod, in either paste order', async () => {
+    const base = record({ id: 'base-mod' });
+    const addon = record({ id: 'addon-mod' });
+    (addon.manifest as Record<string, unknown>).depends = { 'base-mod': '^1.0.0' };
+    // addon pasted FIRST: the fixpoint pass must still accept it once base is in.
+    const summary = await loadMods(fakeApi(), {
+      userMods: [addon, base],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.loaded).toContain('base-mod');
+    expect(summary.loaded).toContain('addon-mod');
+    expect(summary.failed).toEqual([]);
   });
 
   it('reports declared mixins as skipped rather than silently ignoring them (#62)', async () => {

@@ -117,6 +117,26 @@ function defaultStorage(): Storage | null {
 }
 
 /**
+ * Add `record` to `mods`, REPLACING any stored record claiming the same id —
+ * that is how a modder iterates on their mod without a remove/add dance. An
+ * id-less record can only append (there is nothing to match it against).
+ *
+ * Pure and extracted from the Add form's handler so the replace semantics are
+ * unit-testable: the regression here (filter dropped or inverted) makes every
+ * re-paste land as a second record, pre-failed as a duplicate, and the
+ * modder's updated code silently never takes effect.
+ */
+export function upsertUserMod(
+  mods: readonly UserModRecord[],
+  record: UserModRecord,
+): UserModRecord[] {
+  const id = userModId(record);
+  return id === null
+    ? [...mods, record]
+    : [...mods.filter((m) => userModId(m) !== id), record];
+}
+
+/**
  * The entry-specifier scheme for user mods: `user:<id>`. The loader's
  * `importEntry` hook maps these back to the stored code — a user mod never
  * touches the network or the bundler.

@@ -1477,3 +1477,40 @@ source-aliasing trick from #10's entry (the mod-loader test imports
 `@tspml/loader` + both demo mods at runtime; CI tests before build).
 
 All 368 tests green (`pnpm -r test`), full build + lint green.
+
+## 2026-08-08 — pre-merge adversarial review of the #60/#61/#63 stack: two real gaps fixed ✅
+
+Before merging the stack, a four-dimension adversarial review (correctness,
+security, API contract, test adequacy) ran over the full
+`origin/main...feat/runtime-user-mods` diff. Security, XSS, prototype-pollution
+and specifier-spoofing angles came back clean — the `user:` scheme cannot
+collide with bundled specifiers because the loader's id regex forbids `:` and
+the id-less path dies in `parseVersionManifest` before any import. Two findings
+were real, and both are fixed on the branch rather than filed as follow-ups:
+
+**1. A pasted manifest with dependency fields could take ALL mods down.**
+`loadMods` pre-checked exactly one abortive condition (duplicate id) — but
+`resolveDependencies` also throws for missing `depends`, version conflicts,
+`breaks` and cycles, and nothing caught it. Pasting a manifest with
+`depends: {"anything": "*"}` aborted the whole set, bundled demo mods included:
+the exact per-mod-isolation violation the duplicate pre-fail exists to prevent,
+reachable by copy-pasting any manifest that uses `depends`. `loadMods` now runs
+a dependency pre-gate: each parsed user mod is accepted against the resolved
+set to a fixpoint (so user mods may depend on *each other* in any paste order),
+and whatever never resolves is pre-failed with the resolver's own message while
+everything else loads. Three new tests pin it: unmet `depends`, `breaks`
+against a bundled mod, and the fixpoint order-independence case.
+
+**2. The user-mods smoke wasn't in CI.** `smoke.yml` ran three of the four
+smokes — the one covering the headline feature of #63 (add form, storage
+hydration, real Blob-URL import, disable/remove) was a package script CI never
+executed. Now it is step four.
+
+Also from review: `handleAddMod`'s same-id-replace list computation — the
+modder iteration loop, previously living untested inside the component — is
+extracted to `upsertUserMod` in `lib/user-mods.ts` with tests (a dropped or
+inverted filter would make every re-paste pre-fail as a duplicate, silently),
+and the stale "reading storage here" comment in `page.tsx` now describes the
+ref it actually reads. Verified: full `pnpm -r test` green (373), portal
+typecheck + build green, and all four smokes PASS against a production
+`next start` server.

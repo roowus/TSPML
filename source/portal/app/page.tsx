@@ -8,7 +8,7 @@ import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
-import { readUserMods, saveUserMods, userModId } from '@/lib/user-mods';
+import { readUserMods, saveUserMods, upsertUserMod, userModId } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
 import { teardown } from '@/lib/teardown';
 
@@ -279,8 +279,10 @@ export default function PlayPage(): ReactElement {
     attachTracksIfReady();
     // Load the bundled demo mods + any stored user mods via @tspml/loader — a
     // real mod package receives this api and subscribes. Per-mod failure
-    // isolation (never boot-aborts). Reading storage here (not `userMods` state)
-    // because the frame's load event can outrun the hydration effect.
+    // isolation (never boot-aborts). Reads `userModsRef` (not `userMods` state)
+    // because this handler runs outside React's render cycle; the ref is
+    // populated by the hydration effect, which runs before the SW effect that
+    // gates mounting the iframe, so it is always set by the time a frame loads.
     if (!modsLoadedRef.current) {
       modsLoadedRef.current = true;
       // Retaining `s.unload` (via applyLoadSummary) is load-bearing (#17): it is
@@ -320,12 +322,11 @@ export default function PlayPage(): ReactElement {
       enabled: true,
       addedAt: new Date().toISOString(),
     };
-    // Same-id adds REPLACE the stored copy — that is how a modder iterates on
-    // their mod without a remove/add dance. Deeper validation (required fields,
-    // semver, duplicate-vs-bundled) is the loader's job; its verdict lands in
-    // the mod list with a reason.
-    const id = userModId(rec);
-    const next = id === null ? [...userModsRef.current, rec] : [...userModsRef.current.filter((m) => userModId(m) !== id), rec];
+    // Same-id adds REPLACE the stored copy (upsertUserMod) — that is how a
+    // modder iterates on their mod without a remove/add dance. Deeper
+    // validation (required fields, semver, duplicate-vs-bundled) is the
+    // loader's job; its verdict lands in the mod list with a reason.
+    const next = upsertUserMod(userModsRef.current, rec);
     setAddError(null);
     setDraftManifest('');
     setDraftCode('');
