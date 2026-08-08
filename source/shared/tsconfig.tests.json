@@ -1,0 +1,18 @@
+// Typecheck-only config for the test suite (see source/loader/tsconfig.tests.json
+// for the rationale in full).
+//
+// The build config emits `src` with `rootDir: src`, so it cannot also include
+// `tests` — which left the tests compiled only by vitest's esbuild transform, and
+// esbuild strips types without checking them. A test could name a type that no
+// longer exists while `build`, `test` and `lint` all stayed green.
+//
+// Closed here because #10 changed the shape of three event payloads, and the
+// per-car fixture test is the thing asserting those shapes. A suite that is not
+// typechecked is a poor guard for a type change.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "tests"]
+}

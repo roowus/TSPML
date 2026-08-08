@@ -41,8 +41,10 @@ Open `src/entrypoint.ts`. The default scaffold subscribes to `car.control` + reg
 import type { TspmlApi } from '../types/tspml-api.js';
 
 export default function entrypoint(api: TspmlApi): void {
-  // Fire on every checkpoint passed (during a race).
-  api.events.on('checkpoint.passed', (index) => {
+  // Fire on every checkpoint passed (during a race). The event is PER-CAR, so
+  // skip the ghosts — see the per-car note under the event table.
+  api.events.on('checkpoint.passed', ({ index, isReplay }) => {
+    if (isReplay === true) return;
     api.logger.log(`[my-first-mod] checkpoint ${index} passed!`);
   });
 
@@ -64,12 +66,26 @@ export default function entrypoint(api: TspmlApi): void {
 |---|---|---|
 | `car.control` | `{ carId, up, right, down, left, reset }` | On input change (keydown/keyup) |
 | `car.created` | `{ carId, isReplay }` | When a car is created (player + ghosts) |
-| `race.started` | (none) | When a car's race starts (per-car; player on first throttle) |
+| `race.started` | `{ carId, isReplay }` | When a car's race starts (per-car; player on first throttle) |
 | `track.afterLoad` | `trackId` | When a track finishes loading |
-| `checkpoint.passed` | `index` | When a checkpoint is passed (per-car) |
-| `race.finished` | `{ frames }` | When a race is finished (per-car) |
+| `checkpoint.passed` | `{ index, carId, isReplay }` | When a checkpoint is passed (per-car) |
+| `race.finished` | `{ frames, carId, isReplay }` | When a race is finished (per-car) |
 
-> ⚠️ **Per-car events:** `race.started`, `checkpoint.passed`, and `race.finished` fire for ALL cars (player + ghosts). Filter on `car.created`'s `isReplay` to identify the player's car ([#10](https://github.com/roowus/TSPML/issues/10)).
+> ⚠️ **Per-car events:** `race.started`, `checkpoint.passed`, and `race.finished` fire
+> for ALL cars — the player's *and* every ghost/replay car on the track. Each payload
+> carries `isReplay` so you can tell them apart ([#10](https://github.com/roowus/TSPML/issues/10)):
+>
+> ```ts
+> api.events.on('race.finished', ({ frames, isReplay }) => {
+>   if (isReplay === true) return;   // a ghost finished, not the player
+>   showTime(frames);
+> });
+> ```
+>
+> Check `isReplay === true` rather than truthiness. It is `boolean | null`, and `null`
+> means TSPML could not determine which car it was — treat that as *unknown*, not as
+> the player. (`carId` matches the id `car.created` and `car.control` report, so you
+> can correlate across events; it is `null` for a car with no physics body.)
 
 ### Available registries
 

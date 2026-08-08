@@ -53,11 +53,13 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 
 | # | Title | Scope |
 |---|---|---|
-| [#10](https://github.com/roowus/TSPML/issues/10) | Player-only event filtering | race.started/checkpoint/finish fire per-car (player+ghosts); needs an isReplay accessor. |
 | [#25](https://github.com/roowus/TSPML/issues/25) | CI doesn't run the headless smokes | Three committed smokes (`smoke`, `smoke:tracks`, `smoke:audio`) prove the registries against the real game, but only run locally. |
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
 
-Closed since the last update: [#11](https://github.com/roowus/TSPML/issues/11) (`api.audio` —
+Closed since the last update: [#10](https://github.com/roowus/TSPML/issues/10) (per-car race
+events now carry `{ carId, isReplay }`; the issue's premise — that the controlled-car flag is
+an unreadable private field — was disproved, it is a module-scope `var` in the inject's scope
+chain), [#11](https://github.com/roowus/TSPML/issues/11) (`api.audio` —
 sound overrides, shipped **not** via the game's `load()` as the issue proposed: that call
 throws `"Cannot add resources after loading is complete"` post-boot, so the registry shadows
 the manager's buffer lookup instead), [#36](https://github.com/roowus/TSPML/issues/36)

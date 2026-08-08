@@ -9,6 +9,7 @@ they live here where they cannot drift ([#34]):
 | Export | What it is |
 |---|---|
 | `TIER1_BRIDGE_PATCHES` | The live badge + the 6 Tier-1 event emits (`car.control`, `car.created`, `race.started`, `track.afterLoad`, `checkpoint.passed`, `race.finished`). |
+| `CAR_CONTROLLER_BINDINGS` | The two minified module-scope names the per-car payloads read — the game's controlled-car flag and its physics car id ([#10]). Every inject that needs them interpolates this one constant, so a rename is a one-line fix rather than a grep ([#24]). |
 | `REGISTRY_CAPTURE_PATCHES` | The instance-capture patches the content registries need: the game's TrackManager and track codec ([#12]) and its audio manager ([#11]). Two patches, three captures — the track-selection constructor hands over the track manager *and* the audio manager, so both ride one inject. |
 | `BRIDGE_PATCHES` | Both of the above, in order. What a surface normally applies. |
 | `EARLY_CAPTURE_STUB` / `EARLY_CAPTURE_SCRIPT_TAG` | A pre-bridge shim, injected ahead of the game's own scripts. |
@@ -54,12 +55,21 @@ surface serves vanilla. If you add a patch, preserve that contract
 ([mappings-system.md](../../docs/design/mappings-system.md)); making the injects
 rename-robust is [#24].
 
+The per-car payloads ([#10]) reference two minified **module-scope** names, which is a
+different bet from the parameter names above — but a sound one for the same reason, and
+they are confined to `CAR_CONTROLLER_BINDINGS`. Two rules there. Read them **defensively**
+(`typeof` + `.get` check, `try/catch`, `null` on failure): this code runs inside game
+code, and a throw from a rename would break the game rather than just the mod. And mind
+the sense — the game stores *is-controlled*, so `isReplay` is its negation; a test pins
+that, because inverting it is invisible in any smoke that never spawns a ghost.
+
 Module anchors match string/numeric **literals only**, never identifiers, and a
 literal shared with another module resolves to the wrong one silently. Prefer
 several narrow literals with a matching `minHits` — the codec patch's comment
 records a real instance of this biting.
 
 [#8]: https://github.com/roowus/TSPML/issues/8
+[#10]: https://github.com/roowus/TSPML/issues/10
 [#11]: https://github.com/roowus/TSPML/issues/11
 [#12]: https://github.com/roowus/TSPML/issues/12
 [#24]: https://github.com/roowus/TSPML/issues/24

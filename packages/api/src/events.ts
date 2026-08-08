@@ -25,10 +25,55 @@ export interface CarCreatedInfo {
   readonly isReplay: boolean;
 }
 
+/**
+ * Which car a per-car race event came from ([#10]).
+ *
+ * `race.started`, `checkpoint.passed` and `race.finished` fire once per CAR, and a
+ * track can hold the player's car plus any number of ghost/replay cars. Without a
+ * discriminator a lap-timer mod counts the ghosts' checkpoints as the player's, so
+ * every payload carries this.
+ *
+ * ```ts
+ * api.events.on('checkpoint.passed', ({ index, isReplay }) => {
+ *   if (isReplay) return;         // a ghost passed it, not the player
+ *   console.log('checkpoint', index);
+ * });
+ * ```
+ *
+ * [#10]: https://github.com/roowus/TSPML/issues/10
+ */
+export interface CarRef {
+  /**
+   * The physics-worker car id — the same value `car.created` and `car.control`
+   * report, so a mod can correlate across all four events.
+   *
+   * `null` when the emitting car has no id yet: the game only assigns one if it
+   * built a physics car (`createCar`), and a purely visual car never does. Rare,
+   * but a mod keying a Map by `carId` must handle it rather than get `"null"`.
+   */
+  readonly carId: number | null;
+  /**
+   * `true` for a ghost/replay car, `false` for the car the player drives.
+   *
+   * `null` means TSPML could not determine it. That is not a normal outcome — it
+   * only happens if the game's internal shape changed under a bundle we still
+   * match — but it is reported honestly rather than guessed, because guessing
+   * `false` would silently attribute a ghost's lap to the player. **Treat `null`
+   * as unknown, not as the player.**
+   */
+  readonly isReplay: boolean | null;
+}
+
 /** Emitted when a race is finished (finish line crossed). */
-export interface RaceFinishInfo {
+export interface RaceFinishInfo extends CarRef {
   /** Finish time in physics-sim frames (the game's internal unit). */
   readonly frames: number;
+}
+
+/** Emitted when a car passes a checkpoint. Per-car — see {@link CarRef}. */
+export interface CheckpointInfo extends CarRef {
+  /** The index of the checkpoint just passed. */
+  readonly index: number;
 }
 
 /**
@@ -65,9 +110,11 @@ export interface TspmlEventMap {
   'car.styleChanged': readonly [];
 
   // ── checkpoints / race ──────────────────────────────────────────────────────
-  'checkpoint.passed': readonly [index: number];
-  'checkpoint.respawn': readonly [index: number];
-  'race.started': readonly [];
+  // All PER-CAR (player + ghosts): the payloads carry `CarRef` so a mod can tell
+  // which car it heard from (#10).
+  'checkpoint.passed': readonly [checkpoint: CheckpointInfo];
+  'checkpoint.respawn': readonly [checkpoint: CheckpointInfo];
+  'race.started': readonly [car: CarRef];
   'race.finished': readonly [result: RaceFinishInfo];
 }
 

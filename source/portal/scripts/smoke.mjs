@@ -9,6 +9,11 @@
 // verifiable Tier-1 events fired during the auto-started race — car.control,
 // car.created, race.started, track.afterLoad — the portal's own sidebar
 // reflects the load (#41), AND a real `pagehide` tears the mod back down (#17).
+//
+// race.started is checked as EXACTLY 1 and attributed to the player's car
+// (#10) — it is a per-car event, and this is a solo race. Ghost cars cannot occur
+// here (a fresh browser has no saved record to replay), so the player/ghost logic
+// itself is covered by an executable fixture in @tspml/shared, not by this script.
 // checkpoint.passed / race.finished need the player to
 // actually pass a checkpoint / finish, so they are reported but not asserted
 // (expect 0 in this harness).
@@ -89,10 +94,18 @@ if (bridgeWired) {
   try {
     await gameFrame.evaluate((evs) => {
       window.__tspmlCounts = {};
+      // Keep the PAYLOADS of the per-car race events, not just their counts (#10):
+      // the whole point of that fix is which car an event came from, and a count
+      // cannot show that. Capped so a runaway emit cannot balloon the page.
+      window.__tspmlPayloads = {};
       for (const e of evs) {
         window.__tspmlCounts[e] = 0;
-        window.__tspml.events.on(e, () => {
+        window.__tspmlPayloads[e] = [];
+        window.__tspml.events.on(e, (arg) => {
           window.__tspmlCounts[e] = (window.__tspmlCounts[e] || 0) + 1;
+          if (window.__tspmlPayloads[e].length < 10 && arg && typeof arg === "object") {
+            window.__tspmlPayloads[e].push({ carId: arg.carId ?? null, isReplay: arg.isReplay ?? null });
+          }
         });
       }
       // Register a keybind via the registry (api.keybinds) to verify the
@@ -252,6 +265,8 @@ for (let attempt = 0; attempt < 8; attempt++) {
   if ((counts["car.control"] || 0) > 0 && (counts["race.started"] || 0) > 0) break;
 }
 
+const payloads = await gameFrame.evaluate(() => window.__tspmlPayloads || {});
+
 const raceShot = SHOT.replace(/\.png$/, "-race.png");
 await page.screenshot({ path: raceShot });
 
@@ -318,6 +333,24 @@ const unloadOk = unloadCheck.before === false && unloadCheck.after === true;
 
 const markerLogs = consoleMsgs.filter((l) => l.includes("TSPML"));
 const c = (e) => counts[e] || 0;
+
+/**
+ * #10: `race.started` is PER-CAR, and this harness runs a solo race — so exactly
+ * one car starts. The old gate was `> 0`, which is also satisfied by a run where
+ * ghosts fire five extra events; that looseness is precisely why the per-car bug
+ * went unnoticed for a milestone. Pinning the number is what makes it an assertion
+ * (conventions.md: "hardcode what you expect, not just its shape").
+ *
+ * And the payload must say WHICH car: the player's, so `isReplay === false`. A
+ * `null` here would mean the transform applied but the binding read failed —
+ * the silent-degradation path, which a count can never distinguish from success.
+ */
+const startedPayloads = payloads["race.started"] ?? [];
+const playerStarted =
+  c("race.started") === 1 &&
+  startedPayloads.length === 1 &&
+  startedPayloads[0]?.isReplay === false &&
+  typeof startedPayloads[0]?.carId === "number";
 // HARD requirements: gate cleared, bundle ran, bridge wired, the four verifiable
 // Tier-1 events fired, the keybind registry fired, AND the portal's own sidebar
 // reflects the load (#41). checkpoint.passed / race.finished are reported only
@@ -329,7 +362,7 @@ const pass =
   bridgeWired &&
   c("car.control") > 0 &&
   c("car.created") > 0 &&
-  c("race.started") > 0 &&
+  playerStarted &&
   c("track.afterLoad") > 0 &&
   keybindFired === 1 &&
   mod.loaded &&
@@ -362,6 +395,13 @@ console.log(
           "track.afterLoad": c("track.afterLoad"),
           "checkpoint.passed": c("checkpoint.passed"),
           "race.finished": c("race.finished"),
+        },
+        // #10: solo race => exactly one race.started, from the PLAYER's car.
+        playerStarted,
+        perCarPayloads: {
+          "race.started": startedPayloads,
+          "checkpoint.passed": payloads["checkpoint.passed"] ?? [],
+          "race.finished": payloads["race.finished"] ?? [],
         },
         sidebarOk,
         sidebar: {

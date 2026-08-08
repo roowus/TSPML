@@ -50,6 +50,43 @@
 - **No breaks.** When a milestone finishes, immediately start the next one. Don't pause to summarize and wait — the progress doc is the summary. Pick the next piece, decide the approach, and carry on.
 - **Commit + push + verify CI, then move on.** Don't block on CI — start the next piece while CI runs. If CI fails, fix it; otherwise keep going.
 
+## Asking the owner a question (when one is genuinely warranted)
+
+The bar for asking is high (see above) — but when a decision really is the
+owner's, **explain it as if to someone who has never seen this code.** The owner
+is deciding, not guessing at your shorthand. A question that assumes context the
+owner does not have is worse than not asking: it produces a coin-flip answer that
+reads as approval.
+
+Every question must give:
+
+- **Plain-language framing.** Say what the thing *is* before asking which one to
+  pick. Spell out jargon and minified identifiers on first use — "`ie`, the
+  module-scoped WeakMap the game uses to mark which car is the player's" beats
+  "`ie`". Never make the owner grep to understand the question.
+- **What each option actually means, mechanically.** Not the label — the
+  behaviour. What changes in the code, what a mod author would write differently,
+  what a player would see.
+- **How it works.** The mechanism, in a sentence or two. If an option depends on
+  something not yet built, say so explicitly — that is usually the deciding fact.
+- **Pros AND cons for each, including the recommended one.** An option presented
+  with only upsides is not a real choice. Name what it costs and what it forecloses.
+- **A concrete before/after** where the difference is visible in code — a snippet
+  of what a mod author writes under each option beats any amount of description.
+- **Why you are asking at all** rather than deciding: what makes this the owner's
+  call (a breaking change, a product trade-off, an irreversible action) instead of
+  a fork you should have taken yourself.
+
+State your recommendation and the reasoning for it. "Recommended" without a
+because-clause is an unsupported assertion.
+
+Also **report what you found that changes the question.** If investigation
+contradicts the issue text, a doc, or something you said earlier, lead with that —
+the owner may be about to decide on a premise that is no longer true. (Real case:
+[#10](https://github.com/roowus/TSPML/issues/10) claimed the player flag was
+unreachable from an inject; it is reachable, which changed the whole option set —
+so the issue text was corrected before the owner chose.)
+
 ## Verification & CI
 
 - **Run it yourself — don't claim something is untested if you can test it.** If a check is executable — a unit test, `curl`, a throwaway script, a headless browser — run it before asserting it works. Never leave "needs manual testing" on something you can verify; if you genuinely can't, say exactly why and file an issue. (Concrete example: the portal proxy was validated by `curl`-ing `/api/proxy/main.bundle.js?version=0.6.2` and confirming the byte-exact live 0.6.2 bundle returns with the right content-type — no browser required for the server-side path.)

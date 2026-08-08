@@ -16,6 +16,7 @@
  */
 export {
   BRIDGE_PATCHES,
+  CAR_CONTROLLER_BINDINGS,
   REGISTRY_CAPTURE_PATCHES,
   TIER1_BRIDGE_PATCHES,
 } from "./bridge-patches.js";

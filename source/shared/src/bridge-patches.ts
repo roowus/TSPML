@@ -78,16 +78,93 @@ const EMIT = (body: string): string =>
   `try { if (typeof window !== "undefined" && window.__tspml && window.__tspml.events.emit) { ${body} } } catch (_e) {}`;
 
 /**
+ * The minified module-scope bindings the per-car race events (#10) read off `this`.
+ *
+ * Exported and referenced by name from each inject so a game rename is ONE edit
+ * here rather than a hunt through three payloads. (The alternative — attaching a
+ * stable accessor method to the game's class — was rejected: every patch in this
+ * file only READS, and a write is a behaviour change for no gain over a constant.)
+ *
+ * Both are `var`-declared at MODULE scope in the car-controller module (641),
+ * alongside the class whose methods we patch:
+ *
+ * ```js
+ * var D,B,G,…,ee,te,ne,ie,re,…            // module scope
+ * ee = new WeakMap; ie = new WeakMap;     // …later in the same scope
+ * class ot { start() { … } setCarState(e,t) { … } }
+ * ```
+ *
+ * A `before` inject is spliced lexically INSIDE the method body, so it sits in
+ * that scope chain and can name them directly. This is what makes #10 fixable at
+ * all: the issue text claims the replay flag is unreachable from an inject, which
+ * is wrong — it is a module-scope WeakMap, not a private field.
+ *
+ * Semantics, read off the constructor (`constructor(e,t,n,i,r,a,s,o,h,d,u)`):
+ *
+ * ```js
+ * if (null == n)                       // n = the carRecording parameter
+ *   ie.set(this, ne.get(this) != null) //   live car: true iff it has an input source
+ * else {                               // a recording WAS supplied => ghost
+ *   if (ne.get(this) != null) throw new Error("Can't control car when recording is set");
+ *   ie.set(this, false);
+ * }
+ * ```
+ *
+ * So `ie` is the game's own "this car is being driven" flag — it gates whether
+ * `update()` records input frames (`ie.get(this) && … re.get(this).recordFrame(…)`).
+ * `isReplay` is therefore its NEGATION, not the flag itself.
+ *
+ * ⚠️ These are minified identifiers, sound only under the hash gate every caller
+ * applies — see the header note and [#24].
+ */
+export const CAR_CONTROLLER_BINDINGS = {
+  /** WeakMap<car, boolean> — `true` when the car is driven, `false` for a ghost. */
+  isControlled: "ie",
+  /** WeakMap<car, number|null> — the physics-worker car id (`null` if none). */
+  carId: "ee",
+} as const;
+
+/**
+ * A JS expression yielding `CarRef` (`{ carId, isReplay }`) for a given car.
+ *
+ * Takes the car explicitly (`CAR_REF("this")`) rather than reading `this` inside
+ * its own IIFE. The game module is `"use strict"`, so inside a plain
+ * `(function(){…})()` `this` is `undefined` — every read would have thrown, been
+ * caught, and degraded to `null`, making the whole fix a silent no-op that still
+ * looked correct in the payload. Passing the receiver in is the fix.
+ *
+ * Every read is individually guarded and every failure degrades to `null` rather
+ * than a guess: attributing a ghost's lap to the player by defaulting `isReplay`
+ * to `false` would be a silent wrong answer, which is worse than an honest
+ * "unknown" a mod can branch on. `typeof` (not truthiness) because a renamed
+ * binding is a ReferenceError in module scope, not `undefined`.
+ */
+const CAR_REF = (receiver: string): string => {
+  const { isControlled, carId } = CAR_CONTROLLER_BINDINGS;
+  const read = (binding: string): string =>
+    `(function(){ try { return (typeof ${binding} !== "undefined" && ${binding} && typeof ${binding}.get === "function") ? ${binding}.get(__car) : null; } catch (_e) { return null; } })()`;
+  // `ie` holds "is controlled", so isReplay is its negation — and a non-boolean
+  // (only reachable if the game's shape changed) stays `null` rather than
+  // collapsing to a guess via `!`.
+  return (
+    `(function(__car){ var __c = ${read(isControlled)}; var __i = ${read(carId)};` +
+    ` return { carId: typeof __i === "number" ? __i : null,` +
+    ` isReplay: typeof __c === "boolean" ? !__c : null }; })(${receiver})`
+  );
+};
+
+/**
  * Badge + the six Tier-1 event emits.
  *
  * `car.control` and `car.created` come from the Car module; `race.started`,
  * `checkpoint.passed` and `race.finished` from the car-controller;
  * `track.afterLoad` from the track-data loader.
  *
- * PER-CAR caveat ([#10]): `race.started`, `checkpoint.passed` and `race.finished`
- * fire for ghost/replay cars as well as the player, and (unlike `car.created`)
- * carry no `isReplay` discriminator — the replay flag is a private field at those
- * sites. Player-only filtering needs an accessor.
+ * PER-CAR ([#10], fixed): `race.started`, `checkpoint.passed` and `race.finished`
+ * fire for ghost/replay cars as well as the player. They stay per-car — a
+ * ghost-comparison mod needs the ghosts' events — but each now carries
+ * `{ carId, isReplay }` ({@link CAR_REF}) so a mod can filter. The events are
+ * unchanged in WHEN they fire; only the payloads grew.
  *
  * [#10]: https://github.com/roowus/TSPML/issues/10
  */
@@ -119,7 +196,7 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
     // guards !hasStarted()), but ALSO for ghost cars at their creation, which call
     // start() unconditionally. So it is per-car, not a singleton "race began".
     target: { ...CAR_CONTROLLER_ANCHOR, selector: { kind: "method", name: "start" } },
-    inject: EMIT(`window.__tspml.events.emit("race.started");`),
+    inject: EMIT(`window.__tspml.events.emit("race.started", ${CAR_REF("this")});`),
   },
   {
     op: "after",
@@ -148,8 +225,12 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
     // the instance still holds the OLD state — getNextCheckpointIndex() and
     // hasFinished() read it — while `e` is the NEW carState.
     target: { ...CAR_CONTROLLER_ANCHOR, selector: { kind: "method", name: "setCarState" } },
+    // `__ref` is computed lazily INSIDE each transition branch, never once up
+    // front: this runs every frame for every car, and the two branches are
+    // false on almost all of them. Two WeakMap reads per frame per car would be
+    // a real cost on a 60fps hot path for a value nothing reads.
     inject: EMIT(
-      `if (e) { if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) window.__tspml.events.emit('checkpoint.passed', this.getNextCheckpointIndex()); if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) window.__tspml.events.emit('race.finished', { frames: e.finishFrames }); }`,
+      `if (e) { if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) { var __r1 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.passed', { index: this.getNextCheckpointIndex(), carId: __r1.carId, isReplay: __r1.isReplay }); } if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) { var __r2 = ${CAR_REF("this")}; window.__tspml.events.emit('race.finished', { frames: e.finishFrames, carId: __r2.carId, isReplay: __r2.isReplay }); } }`,
     ),
   },
 ];

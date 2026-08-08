@@ -15,11 +15,29 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 - `render.preRender` / `render.postRender` (Three.js render loop)
 - `track.beforeLoad` / `track.afterLoad` / `track.unload`
 - `car.created` / `car.stateUpdate` / `car.styleChanged`
-- `checkpoint.passed` / `checkpoint.respawn`
-- `race.started` / `race.finished`
+- `checkpoint.passed` / `checkpoint.respawn` — **per-car**, payload `{ index, carId, isReplay }`
+- `race.started` / `race.finished` — **per-car**, payload `{ carId, isReplay }` / `{ frames, carId, isReplay }`
 - `input.keyDown` / `input.keyUp` (clean stream, self-gated — replaces PML's fires-on-every-match keybind surface)
 - `ui.render`
 - `network.message` / `network.connect` / `network.disconnect` (capability-gated)
+
+**Per-car attribution ([#10](https://github.com/roowus/TSPML/issues/10), fixed).** The
+four race events above are emitted by patches on methods of the car-controller class, so
+they fire once per car — the player's *and* every ghost on the track. They now carry
+`{ carId, isReplay }` (`CarRef`) so a mod can filter instead of guessing. The issue
+recorded this as blocked on the controlled-car flag being "a private minified field";
+that is wrong. The flag and the car id are module-scope `var` WeakMaps in the same
+webpack module as the class, and a `before` inject is spliced lexically inside the
+method body, so both are in its scope chain — no accessor patch, and nothing written to
+a game object. The two minified names live in one exported constant
+(`CAR_CONTROLLER_BINDINGS` in `@tspml/shared`) rather than being sprinkled through the
+injects, which is the same rename-surface a stable accessor would have bought
+([#24](https://github.com/roowus/TSPML/issues/24)). Note the sense: the game stores
+*is-controlled*, so `isReplay` is its negation, and every read is guarded — a failed
+read yields `null` ("unknown") rather than throwing inside game code. Because no smoke
+can produce a ghost (a ghost needs a saved record; smokes launch a fresh profile), the
+player-vs-ghost distinction is proven by running the real transform over a synthetic
+two-car bundle in `source/shared/tests/per-car-events.test.ts`.
 
 **Registries (Fabric Registry analog; stable, versioned):**
 - `api.blocks` — custom track pieces (supersedes `pmlapi.editorExtras`; grounded in `PartObject`/`trackParts`)
