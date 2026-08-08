@@ -7,9 +7,10 @@
 // runtime failure during a release check — or worse, as a smoke that silently stops
 // asserting what its name claims.
 //
-// The five smokes span two packages (`@tspml/portal`, `@tspml/dev-harness`) and are
+// The smokes span two packages (`@tspml/portal`, `@tspml/dev-harness`) and are
 // the same kind of artifact, so one checker covers them all rather than two
-// half-configs bolted onto packages whose own builds have a different remit.
+// half-configs bolted onto packages whose own builds have a different remit. The
+// globbed `include` below picks up new smokes automatically — don't count them here.
 //
 // `checkJs` on plain `.mjs` needs two things the scripts cannot declare themselves:
 //   1. Node globals + `node:*` module types — hence `types: ["node"]`.
@@ -28,7 +29,7 @@
     "checkJs": true,
     "noEmit": true,
     "skipLibCheck": true,
-    // NOT strict, deliberately. Under `strict` these five scripts produce 231
+    // NOT strict, deliberately. When this was tried (at five smokes), `strict` produced 231
     // diagnostics, ~all of them `noImplicitAny` on inline callback params and
     // shape complaints about result objects that are built up field by field.
     // Annotating all of that would be a large diff that makes the smokes harder

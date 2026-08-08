@@ -1461,7 +1461,7 @@ transform in the SW, or riding the M8 extension). The Add form also states the
 other contract in plain words: mod code runs unsandboxed in the portal page, in
 your browser — that is what a mod loader does; only add code you trust.
 
-**Verification.** 14 new unit tests (`source/portal/tests/user-mods.test.ts`):
+**Verification.** 19 new unit tests (`source/portal/tests/user-mods.test.ts`):
 storage round-trip, corruption degrading to `[]` without a boot loop, malformed
 entries dropped individually, and the loader path — load-alongside-bundled,
 disabled-skipped, manifest/import failures isolated, both duplicate-id shapes,
@@ -1471,12 +1471,12 @@ inject `importUserMod`), so a fourth headless smoke (`smoke:usermods`) drives
 the real form in a real browser: paste → entrypoint runs (stamps a global) →
 mixin-skipped warning names the mod → reload restores it from storage → disable
 runs its disposer while the bundled mods stay up → remove clears the record.
-PASS on all 13 gates, and the three existing smokes re-run green (page.tsx
+PASS on all 14 gates, and the three existing smokes re-run green (page.tsx
 changed; regression is the point). Portal vitest config gained the
 source-aliasing trick from #10's entry (the mod-loader test imports
 `@tspml/loader` + both demo mods at runtime; CI tests before build).
 
-All 368 tests green (`pnpm -r test`), full build + lint green.
+All 373 tests green (`pnpm -r test`), full build + lint green.
 
 ## 2026-08-08 — pre-merge adversarial review of the #60/#61/#63 stack: two real gaps fixed ✅
 

@@ -28,11 +28,12 @@ export default function checkpointCounter(api: Api): void {
   // checkpoint.passed is PER-CAR (#10): a track with a ghost emits for the ghost
   // too. Counting both into one total is the bug the payload's `isReplay` exists to
   // prevent — so this demo does what a real lap-timer must, and splits them.
-  // `isReplay === true` (not truthy) because `null` means "TSPML could not tell",
-  // which is neither the player nor a ghost and must not be silently claimed.
+  // Strict three-way (`=== true` / `=== false`), because `null` means "TSPML could
+  // not tell", which is neither the player nor a ghost and must not be silently
+  // claimed for either — an unknown car is dropped, not guessed.
   api.events.on('checkpoint.passed', ({ isReplay }) => {
     if (isReplay === true) counters.ghostCheckpoints++;
-    else counters.checkpoints++;
+    else if (isReplay === false) counters.checkpoints++;
   });
 
   api.keybinds.register({
