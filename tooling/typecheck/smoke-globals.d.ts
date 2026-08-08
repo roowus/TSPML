@@ -36,6 +36,10 @@ declare global {
     >;
     /** Smoke scratch: keybind-registry fire count. */
     __tspmlKb?: number;
+    /** Smoke scratch: how many times the pasted user mod's entrypoint ran. */
+    __smokeUserModRuns?: number;
+    /** Smoke scratch: set by the pasted user mod's disposer on unload. */
+    __smokeUserModDisposed?: boolean;
     /** Set by @tspml/demo-hud's declared mixin — proves a mod mixin applied. */
     __demoHudMixin?: unknown;
   }
