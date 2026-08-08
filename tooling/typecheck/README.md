@@ -6,7 +6,7 @@ none of which see a loose `.mjs`), not vitest (which never imports them):
 
 | Checked | Why it matters |
 |---|---|
-| `source/portal/scripts/*.mjs` + `environments/dev-harness/scripts/*.mjs` | The five headless smokes are the **only** end-to-end proof a transformed game boots. A typo here surfaces as a baffling failure 30 s into a browser run — or as a smoke that quietly stops asserting what its name claims. |
+| `source/portal/scripts/*.mjs` + `environments/dev-harness/scripts/*.mjs` | The headless smokes are the **only** end-to-end proof a transformed game boots. A typo here surfaces as a baffling failure 30 s into a browser run — or as a smoke that quietly stops asserting what its name claims. |
 | `tooling/mappings-pipeline/src/*.mjs` + `scripts/*.mjs` | Regenerates the symbol map on a game release. A mistake does not fail loudly; it produces a **plausible but wrong candidate map**, and the map is what every surface hash-gates against. |
 
 Run via the root script (`pnpm -r lint`), which before [#25] matched no package at all.
@@ -49,7 +49,7 @@ serialized and run in the **game frame's realm**, where the host installs the
 bridge at runtime — there is no static type to import, because the value does not
 exist in the Node process doing the checking.
 
-Typing it properly would make five smokes compile-time consumers of the bridge's
+Typing it properly would make every smoke a compile-time consumer of the bridge's
 internals, so refactoring `__tspml` would break the typecheck of scripts that do
 not care. `api.audio` / `api.tracks` already have real types in
 [`@tspml/api`](../../packages/api), and the api-bridge unit tests hold them.

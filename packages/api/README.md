@@ -38,11 +38,13 @@ See the [events & registries](https://github.com/roowus/TSPML/blob/main/docs/api
 
 ### Unreleased — per-car race events carry `{ carId, isReplay }` (breaking)
 
-`race.started`, `checkpoint.passed`, `checkpoint.respawn`, and `race.finished` are
-emitted **once per car** — the player's *and* every ghost/replay car on the track.
-That was always true; there was no way to tell the cars apart
+`race.started`, `checkpoint.passed`, and `race.finished` are emitted **once per
+car** — the player's *and* every ghost/replay car on the track. That was always
+true; there was no way to tell the cars apart
 ([#10](https://github.com/roowus/TSPML/issues/10)). Each payload now extends
-`CarRef`, a new exported type:
+`CarRef`, a new exported type (`checkpoint.respawn` shares `CheckpointInfo` but
+is typed-only — no emit is wired yet,
+[#64](https://github.com/roowus/TSPML/issues/64)):
 
 ```ts
 interface CarRef {

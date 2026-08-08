@@ -15,14 +15,14 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 - `render.preRender` / `render.postRender` (Three.js render loop)
 - `track.beforeLoad` / `track.afterLoad` / `track.unload`
 - `car.created` / `car.stateUpdate` / `car.styleChanged`
-- `checkpoint.passed` / `checkpoint.respawn` — **per-car**, payload `{ index, carId, isReplay }`
+- `checkpoint.passed` / `checkpoint.respawn` — **per-car**, payload `{ index, carId, isReplay }` (`respawn` typed only, no emit yet — [#64](https://github.com/roowus/TSPML/issues/64))
 - `race.started` / `race.finished` — **per-car**, payload `{ carId, isReplay }` / `{ frames, carId, isReplay }`
 - `input.keyDown` / `input.keyUp` (clean stream, self-gated — replaces PML's fires-on-every-match keybind surface)
 - `ui.render`
 - `network.message` / `network.connect` / `network.disconnect` (capability-gated)
 
 **Per-car attribution ([#10](https://github.com/roowus/TSPML/issues/10), fixed).** The
-four race events above are emitted by patches on methods of the car-controller class, so
+three wired race events above are emitted by patches on methods of the car-controller class, so
 they fire once per car — the player's *and* every ghost on the track. They now carry
 `{ carId, isReplay }` (`CarRef`) so a mod can filter instead of guessing. The issue
 recorded this as blocked on the controlled-car flag being "a private minified field";
