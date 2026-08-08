@@ -37,12 +37,20 @@ Returning nothing is fine — the mod is reported as `no-op` rather than
 other mod still tears down.
 
 The **host** (portal / dev harness) drives this: it calls `LoadResult.unload()`
-and emits `loader.onUnload` around it. Neither the loader nor a mod can emit:
-`TspmlApi.events` is typed `TspmlEventSubscriber` — `on`/`once`/`off`, no `emit`.
-That is enforced by the type since [#18](https://github.com/roowus/TSPML/issues/18)
-rather than merely documented; a mod calling `api.events.emit('race.finished', …)`
-now fails to compile. The concrete `EventBus` a host holds still implements the
-full `TspmlEventEmitter`, so one object serves both roles at runtime.
+and emits `loader.onUnload` around it. Neither the loader nor a mod is *typed* to
+emit: `TspmlApi.events` is `TspmlEventSubscriber` — `on`/`once`/`off`, no `emit`.
+Since [#18](https://github.com/roowus/TSPML/issues/18) a compiled mod calling
+`api.events.emit('race.finished', …)` fails to typecheck, instead of the promise
+living only in prose. Know the limit of that guarantee, though: it is
+**compile-time only**. The concrete `EventBus` a host holds implements the full
+`TspmlEventEmitter` (one object serves both roles), so a *runtime user mod* —
+pasted JavaScript no compiler ever sees ([#63]) — can reach `emit` and forge
+events to other mods. That is consistent with the trust model user mods already
+state in plain words: a mod is arbitrary code running unsandboxed in your
+browser; only add code you trust. A runtime-enforced subscriber facade would be
+the fix if that trade-off ever changes.
+
+[#63]: https://github.com/roowus/TSPML/pull/63
 
 In the portal that host logic is [`lib/teardown.ts`](../../source/portal/lib/teardown.ts),
 triggered on React unmount **and** `pagehide` (tab close and real navigation run no React
@@ -79,7 +87,7 @@ api.events.on('car.styleChanged', (car) => {});
 
 // checkpoints / race — all PER-CAR, all carrying `{ carId, isReplay }` (#10)
 api.events.on('checkpoint.passed',  ({ index, carId, isReplay }) => {});
-api.events.on('checkpoint.respawn', ({ index, carId, isReplay }) => {});
+api.events.on('checkpoint.respawn', ({ index, carId, isReplay }) => {}); // typed, NOT wired yet (#64)
 api.events.on('race.started',       ({ carId, isReplay }) => {});
 api.events.on('race.finished',      ({ frames, carId, isReplay }) => {});
 
@@ -100,10 +108,13 @@ api.events.on('network.disconnect', () => {});
 
 ### Per-car race events (#10)
 
-`race.started`, `checkpoint.passed`, `checkpoint.respawn`, and `race.finished` are
-emitted **once per car**, not once per race. A track you have a saved record on spawns
-a ghost, and the ghost is a car: it starts, passes checkpoints, and finishes exactly
-like yours does. A lap timer that ignores this double-counts.
+`race.started`, `checkpoint.passed`, and `race.finished` are emitted **once per
+car**, not once per race. (`checkpoint.respawn` shares the payload type but has no
+emit yet — [#64].) A track you have a saved record on spawns a ghost, and the ghost
+is a car: it starts, passes checkpoints, and finishes exactly like yours does. A lap
+timer that ignores this double-counts.
+
+[#64]: https://github.com/roowus/TSPML/issues/64
 
 Every one of those payloads therefore extends `CarRef`:
 

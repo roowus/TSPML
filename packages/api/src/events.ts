@@ -35,7 +35,7 @@ export interface CarCreatedInfo {
  *
  * ```ts
  * api.events.on('checkpoint.passed', ({ index, isReplay }) => {
- *   if (isReplay) return;         // a ghost passed it, not the player
+ *   if (isReplay !== false) return; // ghost, or unknown — only false is the player
  *   console.log('checkpoint', index);
  * });
  * ```
@@ -113,6 +113,9 @@ export interface TspmlEventMap {
   // All PER-CAR (player + ghosts): the payloads carry `CarRef` so a mod can tell
   // which car it heard from (#10).
   'checkpoint.passed': readonly [checkpoint: CheckpointInfo];
+  /** DECLARED, NOT WIRED (#64): no bridge patch emits this yet — subscribing is
+   *  legal but the listener never fires. The payload shape is settled so mods
+   *  written today keep compiling when the emit lands. */
   'checkpoint.respawn': readonly [checkpoint: CheckpointInfo];
   'race.started': readonly [car: CarRef];
   'race.finished': readonly [result: RaceFinishInfo];

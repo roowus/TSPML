@@ -143,8 +143,11 @@ surfaced as *skipped* ([#62](https://github.com/roowus/TSPML/issues/62)) → a r
 it back from localStorage → disable runs its disposer and drops it (bundled mods
 untouched) → remove clears the stored record.
 
-None of the smokes run in CI yet — they need the live upstream game
-([#25](https://github.com/roowus/TSPML/issues/25)).
+All four portal smokes run in CI (`.github/workflows/smoke.yml`, closing
+[#25](https://github.com/roowus/TSPML/issues/25)) — advisory on PRs plus a daily
+schedule, never merge-gating, because they fetch the live upstream game and can go
+red on a Kodub release rather than a commit. A `pinned-bundle` canary job runs first
+so a red smoke is interpretable: canary red = the game shipped a new build.
 
 > Both registry smokes read the captured game objects off the registry's TypeScript-`private`
 > `host` field, because the portal deliberately ships **no** dev-only inspection hook (the
