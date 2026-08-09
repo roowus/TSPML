@@ -115,12 +115,14 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   }
 
   // Dependency pre-gate. Like duplicate ids, RESOLUTION errors (missing
-  // `depends`, version conflict, `breaks`, cycle) are abortive in the loader —
-  // it cannot order a set it cannot resolve — so a pasted manifest declaring
+  // `depends`, version conflict, cycle) are abortive in the loader — it cannot
+  // order a set it cannot resolve — so a pasted manifest declaring
   // `depends: {"anything": "*"}` would otherwise take the bundled mods down
   // with it. Accept user mods against the resolved set to a fixpoint (so a mod
   // depending on another user mod loads regardless of paste order), and
   // pre-fail whatever never resolves — each with the resolver's own message.
+  // (`breaks` no longer throws (#6): a breaker passes this gate and load()
+  // soft-disables it, which the status loop below reports as failed-with-reason.)
   let accepted: Mod[];
   try {
     accepted = [demoHudManifest, checkpointCounterManifest].map((m) =>
@@ -176,6 +178,9 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   const failed: Array<{ id: string; reason: string }> = [...preFailed];
   for (const [id, s] of Object.entries(result.status)) {
     if (s.status === 'loaded') loaded.push(id);
+    // 'failed' and 'disabled' (#6 breaks soft-disable) both land here: the
+    // summary's contract is "not loaded, and here is the resolver's reason" —
+    // the reason text itself says which it was.
     else failed.push({ id, reason: s.reason ?? 'unknown' });
   }
 

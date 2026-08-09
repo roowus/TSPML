@@ -96,25 +96,149 @@ describe('resolveDependencies — version conflict', () => {
   });
 });
 
-describe('resolveDependencies — breaks', () => {
-  it('refuses (throws) when a broken target is present at a matching version', () => {
-    expect(() =>
-      resolveDependencies([
-        mod({ id: 'x', breaks: { y: '*' } }),
-        mod({ id: 'y', version: '1.0.0' }),
-      ]),
-    ).toThrow(
-      "mod 'x' declares 'breaks' on 'y@*' but 'y@1.0.0' is installed",
+// #6: Fabric-accurate soft-disable. `breaks` used to throw and abort the WHOLE
+// load — one incompatibility declaration took every unrelated mod down with it.
+// Now the DECLARING mod is disabled (excluded from `order`, reported in
+// `disabled` + as a `breaks-disabled` warning) and everything else loads,
+// including the broken target: `breaks` means "I can't run next to that",
+// not "that may not run".
+describe('resolveDependencies — breaks soft-disables the declaring mod (#6)', () => {
+  it('disables the declarer, loads the target and unrelated mods', () => {
+    const result = resolveDependencies([
+      mod({ id: 'x', breaks: { y: '*' } }),
+      mod({ id: 'y', version: '1.0.0' }),
+      mod({ id: 'bystander' }),
+    ]);
+    expect(ids(result.order).sort()).toEqual(['bystander', 'y']);
+    expect(result.disabled).toEqual([
+      {
+        id: 'x',
+        reason:
+          "mod 'x' declares 'breaks' on 'y@*' but 'y@1.0.0' is installed — 'x' is disabled; 'y' still loads",
+      },
+    ]);
+    const w = result.warnings.find((warn) => warn.kind === 'breaks-disabled');
+    expect(w).toMatchObject({ mod: 'x', other: 'y' });
+    // The message must say who is disabled and who still loads — "breaks"
+    // alone reads as if the TARGET were the one being stopped.
+    expect(w?.message).toMatch(/'x' is disabled/);
+    expect(w?.message).toMatch(/'y' still loads/);
+  });
+
+  it('does not disable when the target is present at a non-matching version', () => {
+    const result = resolveDependencies([
+      mod({ id: 'x', breaks: { y: '^2.0.0' } }),
+      mod({ id: 'y', version: '1.0.0' }),
+    ]);
+    expect(ids(result.order).sort()).toEqual(['x', 'y']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it('does not disable when the target is not installed at all', () => {
+    const result = resolveDependencies([mod({ id: 'x', breaks: { y: '*' } })]);
+    expect(ids(result.order)).toEqual(['x']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it('matches breaks against a special ambient id (polytrack)', () => {
+    const result = resolveDependencies(
+      [mod({ id: 'x', breaks: { polytrack: '0.6.2' } }), mod({ id: 'other' })],
+      { polytrackVersion: '0.6.2' },
+    );
+    expect(ids(result.order)).toEqual(['other']);
+    expect(result.disabled.map((d) => d.id)).toEqual(['x']);
+  });
+
+  it('disables once (one warning) when multiple breaks entries match', () => {
+    const result = resolveDependencies([
+      mod({ id: 'x', breaks: { y: '*', z: '*' } }),
+      mod({ id: 'y' }),
+      mod({ id: 'z' }),
+    ]);
+    expect(result.disabled.map((d) => d.id)).toEqual(['x']);
+    expect(result.warnings.filter((w) => w.kind === 'breaks-disabled')).toHaveLength(1);
+  });
+
+  it('cascades: a mod depending on a disabled mod is disabled too, naming the chain', () => {
+    const result = resolveDependencies([
+      mod({ id: 'breaker', breaks: { target: '*' } }),
+      mod({ id: 'target' }),
+      mod({ id: 'child', depends: { breaker: '*' } }),
+      mod({ id: 'grandchild', depends: { child: '*' } }),
+      mod({ id: 'bystander' }),
+    ]);
+    expect(ids(result.order).sort()).toEqual(['bystander', 'target']);
+    expect(result.disabled.map((d) => d.id)).toEqual(['breaker', 'child', 'grandchild']);
+    const child = result.disabled.find((d) => d.id === 'child');
+    expect(child?.reason).toBe(
+      "mod 'child' is disabled because it depends on 'breaker', which is disabled",
+    );
+    expect(
+      result.warnings.filter((w) => w.kind === 'disabled-dependency').map((w) => w.mod).sort(),
+    ).toEqual(['child', 'grandchild']);
+  });
+
+  it('cascades through provides, naming the provider', () => {
+    const result = resolveDependencies([
+      mod({ id: 'impl', provides: ['virtual-api'], breaks: { enemy: '*' } }),
+      mod({ id: 'enemy' }),
+      mod({ id: 'consumer', depends: { 'virtual-api': '*' } }),
+    ]);
+    expect(ids(result.order)).toEqual(['enemy']);
+    const consumer = result.disabled.find((d) => d.id === 'consumer');
+    expect(consumer?.reason).toBe(
+      "mod 'consumer' is disabled because it depends on 'virtual-api', provided by 'impl', which is disabled",
     );
   });
 
-  it('does not break when the target is present at a non-matching version', () => {
+  it("a disabled mod's own problems cannot abort the load", () => {
+    // The disabled mod has a missing dep AND a bad targets range — both would
+    // throw for an active mod. Disabled means out of the set entirely.
+    const result = resolveDependencies(
+      [
+        mod({
+          id: 'doomed',
+          breaks: { present: '*' },
+          depends: { 'never-installed': '*' },
+          targets: ['>=99.0.0'],
+        }),
+        mod({ id: 'present' }),
+      ],
+      { polytrackVersion: '0.6.2' },
+    );
+    expect(ids(result.order)).toEqual(['present']);
+    expect(result.disabled.map((d) => d.id)).toEqual(['doomed']);
+  });
+
+  it('a disabled mod does not emit conflict/recommend warnings (it is not loading)', () => {
+    const result = resolveDependencies([
+      mod({ id: 'x', breaks: { y: '*' }, conflicts: { y: '*' }, recommends: { nice: '*' } }),
+      mod({ id: 'y' }),
+    ]);
+    expect(result.warnings.map((w) => w.kind)).toEqual(['breaks-disabled']);
+  });
+
+  it('mutual breaks disables both — deterministic, no silent winner', () => {
+    // `a breaks b, b breaks a` has two "maximal" single-survivor answers;
+    // picking one would be order-dependent. One pass over the INSTALLED set
+    // disables both, and the fix is explicit: remove one.
+    const result = resolveDependencies([
+      mod({ id: 'a', breaks: { b: '*' } }),
+      mod({ id: 'b', breaks: { a: '*' } }),
+      mod({ id: 'c' }),
+    ]);
+    expect(ids(result.order)).toEqual(['c']);
+    expect(result.disabled.map((d) => d.id)).toEqual(['a', 'b']);
+  });
+
+  it('a missing dep on a mod nobody disabled still throws (unchanged)', () => {
     expect(() =>
       resolveDependencies([
-        mod({ id: 'x', breaks: { y: '^2.0.0' } }),
-        mod({ id: 'y', version: '1.0.0' }),
+        mod({ id: 'x', breaks: { y: '*' } }),
+        mod({ id: 'y' }),
+        mod({ id: 'needy', depends: { 'never-here': '*' } }),
       ]),
-    ).not.toThrow();
+    ).toThrow("mod 'needy' depends on 'never-here' which is not installed");
   });
 });
 

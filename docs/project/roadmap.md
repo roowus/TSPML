@@ -55,7 +55,11 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 |---|---|---|
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
 
-Closed since the last update: [#64](https://github.com/roowus/TSPML/issues/64)
+Closed since the last update: [#6](https://github.com/roowus/TSPML/issues/6)
+(`breaks` is now Fabric-accurate: the declaring mod is **soft-disabled** — excluded
+from the load order with a `breaks-disabled` warning and a per-mod `'disabled'`
+status, dependents cascading — instead of one incompatibility declaration aborting
+the entire load), [#64](https://github.com/roowus/TSPML/issues/64)
 (`checkpoint.respawn` is now emitted — on the reset-press **edge** read from the
 car controller's old-state WeakMap at `setCarState` HEAD, per-car with
 `{ carId, isReplay }`, silent rather than guessing when the state shape drifts;

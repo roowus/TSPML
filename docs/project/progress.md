@@ -15,7 +15,7 @@ Ran the mappings go/no-go experiment (0.6.0-renamed → 0.6.2-raw via webcrack +
 
 ## 2026-07-30 — M1 loader core: complete ✅
 
-Implemented the clean loader core (`source/loader`, TypeScript, strict): manifest parse/validate (`manifest.ts`), semver predicates (`semver.ts`), dependency resolution with topological sort + cycle detection + version-conflict / missing-dep / `breaks` errors + `conflicts` / `recommends` / `suggests` warnings + `provides` aliases (`dependency.ts`), and orchestration with per-mod error isolation + dependency-injected entrypoint loading (`loader.ts`). **47 unit tests passing** (vitest). Known refinement: `breaks` currently refuses the whole set (hard error) — Fabric-accurate soft-disable tracked in issue #6.
+Implemented the clean loader core (`source/loader`, TypeScript, strict): manifest parse/validate (`manifest.ts`), semver predicates (`semver.ts`), dependency resolution with topological sort + cycle detection + version-conflict / missing-dep / `breaks` errors + `conflicts` / `recommends` / `suggests` warnings + `provides` aliases (`dependency.ts`), and orchestration with per-mod error isolation + dependency-injected entrypoint loading (`loader.ts`). **47 unit tests passing** (vitest). ~~Known refinement: `breaks` currently refuses the whole set (hard error) — Fabric-accurate soft-disable tracked in issue #6.~~ *(Resolved 2026-08-08 — see the #6 entry below.)*
 
 **M1 complete.** Next: **M2** — mappings v1 (manual, cwcinc-seeded) + portal injection MVP (Vercel + `/api/proxy` + service worker that fetches the live game from `app-polytrack.kodub.com/<version>/`).
 
@@ -1604,3 +1604,48 @@ plain race, ghost respawn attribution, and silence when the old state is
 unreadable) — 42/42 in `@tspml/shared`. The portal smoke counts and reports
 `checkpoint.respawn` alongside `checkpoint.passed` (report-only: a respawn
 needs a passed checkpoint first, which the harness can't script).
+
+## 2026-08-08 — #6: `breaks` soft-disables the declaring mod (Fabric-accurate) ✅
+
+Since M1, a single `breaks` match threw `DependencyError` and aborted the
+ENTIRE load — one mod declaring an incompatibility took every unrelated mod
+down with it, the opposite of the fail-small principle and of what `breaks`
+means in Fabric ("I can't run next to that", not "that may not run").
+
+Now the **declaring** mod is soft-disabled: excluded from `order`, reported in
+a new `ResolveResult.disabled` channel and as a `breaks-disabled` warning,
+while the broken target and everything unrelated load normally. A mod whose
+`depends` is only satisfiable by a disabled mod cascades to disabled too
+(`disabled-dependency` warning naming the chain, through `provides` aliases
+included). `load()` records these as a new `ModLoadStatus` variant
+`{ status: 'disabled', reason }` and never invokes their entrypoints.
+
+Two semantics decisions worth recording:
+
+- **One pass over the INSTALLED set, no fixpoint re-enabling.** Iterating
+  ("x's break-target got disabled, so re-enable x") turns this into an
+  order-dependent maximization problem — `a breaks b, b breaks a` has two
+  "maximal" answers, and silently picking one is exactly the
+  ambiguous-first-match behavior TSPML exists to avoid. One pass is
+  deterministic: mutual breakers both disable, and the fix is explicit.
+  The dependency cascade IS a fixpoint, but a monotone one (mods only ever
+  become disabled), so iteration order can't change the final set.
+- **Every later check runs on the ACTIVE set only.** A disabled mod's own
+  problems — a missing dep, a `targets` range that doesn't match the running
+  game — must not abort a load it is no longer part of, and it must not emit
+  "both will load" conflict warnings when it isn't loading.
+
+The portal needed no behavior change: its dependency pre-gate fixpoint now
+ACCEPTS a breaker user mod (the resolver no longer throws), and `load()`'s
+`disabled` status flows into the summary's `failed` list with the resolver's
+reason — the `user-mods.test.ts` breaker contract (breaker reported with a
+`/breaks/` reason, bundled mods still load) passes unchanged.
+
+Tests: the old 2-case throw suite replaced by 11 soft-disable cases
+(declarer disabled + target/bystander load, non-matching version, absent
+target, ambient-id break, single warning for multi-entry breaks, dependency
+cascade incl. through `provides`, disabled mod's own missing-dep/bad-targets
+can't abort, no conflict/recommend warnings from a disabled mod, mutual
+breaks disables both, missing dep on an active mod still throws) + a `load()`
+case pinning "status entry, entrypoint never invoked". 75 loader tests green;
+`pnpm -r test` / build / lint green.
