@@ -49,6 +49,15 @@ export const SYNTHETIC_BUNDLE = `
         reset() {
           this.state = 0;
         }
+        clamp({ max }) {
+          return max;
+        }
+        limit(v) {
+          {
+            let v = 60;
+            return v;
+          }
+        }
       }
       function applyForce(x, g) {
         return x * g;

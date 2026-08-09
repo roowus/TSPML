@@ -95,8 +95,12 @@ export const CAR_CONTROLLER_BUNDLE = `
         start() {
           te.get(this).hasStarted = true;
         }
-        setCarState(e, t) {
-          te.set(this, e);
+        // Params DELIBERATELY named differently from the real bundle's (e, t):
+        // the #24 placeholders must resolve by ORDINAL against whatever names
+        // the located method declares, so the executable tests prove the
+        // patches are name-independent.
+        setCarState(newState, hardSet) {
+          te.set(this, newState);
         }
       }
 
