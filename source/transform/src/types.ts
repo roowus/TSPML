@@ -1,67 +1,21 @@
-// TODO: extract to @tspml/shared
-//
-// For M3 these types live inside @tspml/transform so the package stays
-// self-contained (no workspace dependency on a not-yet-existing @tspml/shared).
-// They are re-exported from the package entrypoint. (Mirrors the loader's
-// convention in source/loader/src/types.ts.)
-
 /**
- * Target spec / patch / result types for the JS-Mixin transform pipeline
- * (Tier-2 ops, docs/design/hook-system.md). A {@link Patch} declares a mixin
- * operation against a {@link TargetSpec}; the engine resolves the spec to a
- * concrete AST node and applies the op.
+ * Patch / result types for the JS-Mixin transform pipeline (Tier-2 ops,
+ * docs/design/hook-system.md). A {@link Patch} declares a mixin operation
+ * against a {@link TargetSpec}; the engine resolves the spec to a concrete AST
+ * node and applies the op.
  *
- * SELECTOR STRATEGY (docs/research/transform-spike.md — the authoritative M3
- * approach): a module is located by an ANCHOR of distinctive literals that
- * survive minification (NOT by webpack id — ids drift, see the M1 drift spike).
- * Within the module a node is located by a stable name (preserved method name
- * or property KEY, never a literal VALUE).
+ * The target-addressing types (`ModuleAnchor` / `TargetSelector` /
+ * `TargetSpec`) are owned by `@tspml/mappings` — the map STORES specs, this
+ * package CONSUMES them, and a single definition means the producer and
+ * consumer cannot drift apart (#30; this replaced an identical local copy and
+ * a stale "extract to @tspml/shared" TODO — `@tspml/shared` exists but owns
+ * injected-payload code, not schema types). Re-exported here so transform-only
+ * callers need no second import. The import is type-only: the packages stay
+ * decoupled at runtime, same as the engine's type-only `GameMap` import.
  */
+import type { ModuleAnchor, TargetSelector, TargetSpec } from "@tspml/mappings";
 
-/**
- * A module anchor: the set of enum/string literals unique to one webpack module
- * factory. The factory is the match if its body contains at least `minHits` of
- * them. This generalizes the spike's `CreateCar` ∧ `ControlCar` ∧
- * `TestDeterminism` anchor (which are TypeScript-compiled protocol enum members
- * — globally unique, minification-stable).
- */
-export interface ModuleAnchor {
-  /** ≥1 distinctive literals (enum members, magic strings, numeric constants). */
-  readonly literals: readonly (string | number)[];
-  /**
-   * Minimum literal hits required to consider a factory the match. Defaults to
-   * `literals.length` (all of them). Lowering it trades precision for resilience
-   * when an anchor literal is renamed in a future build.
-   */
-  readonly minHits?: number;
-}
-
-/**
- * Where to narrow WITHIN the found module. Exactly one `kind` is set.
- *
- *   - `method`   — a preserved class/object method name (survives minification;
- *                  terser keeps member names).
- *   - `property` — an `ObjectProperty` selected by KEY, never by value (the
- *                  value changes every release; the property name doesn't).
- *   - `factory`  — the webpack module factory itself (module-load intercept).
- *
- * TODO(M9 / issue #1): add an `invoke` variant — an INVOKE-style call-site
- *   locator analogous to Fabric's `@At("INVOKE", target=...)` — for
- *   `@ModifyArg`/`@Redirect` against a specific call site resolved structurally
- *   (callee name + ordinal). The drift spike flagged ~15% of modules need AST
- *   structural fingerprints; the in-method `modifyArg` op below covers the
- *   common case without a cross-module INVOKE locator.
- */
-export type TargetSelector =
-  | { readonly kind: "method"; readonly name: string }
-  | { readonly kind: "property"; readonly key: string }
-  | { readonly kind: "factory" };
-
-/** A stable target: module anchor + within-module selector. */
-export interface TargetSpec {
-  readonly anchor: ModuleAnchor;
-  readonly selector: TargetSelector;
-}
+export type { ModuleAnchor, TargetSelector, TargetSpec };
 
 /** The mixin operations (docs/design/hook-system.md, docs/api/mixin-reference.md). */
 export type MixinOp =

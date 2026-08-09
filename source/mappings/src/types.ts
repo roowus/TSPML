@@ -38,24 +38,52 @@ export interface ModuleLocator {
 }
 
 /**
- * A concrete transform target — the SAME shape @tspml/transform's locator
- * consumes (module by anchor literals, within-module by selector). Stored in
- * the map under `targets` so mods can address a STABLE NAME (e.g.
- * `Car.controlCar`) instead of hardcoding minified anchors (M5-C).
+ * A concrete transform target, stored in the map under `targets` so mods can
+ * address a STABLE NAME (e.g. `Car.controlCar`) instead of hardcoding minified
+ * anchors (M5-C). This is the CANONICAL definition — `@tspml/transform`
+ * re-exports these types rather than duplicating them (#30): the map stores a
+ * spec, the transform locator consumes it, and one definition means the two
+ * packages cannot drift apart.
+ *
+ * SELECTOR STRATEGY (docs/research/transform-spike.md — the authoritative M3
+ * approach): a module is located by an ANCHOR of distinctive literals that
+ * survive minification (NOT by webpack id — ids drift, see the M1 drift
+ * spike). Within the module a node is located by a stable name (preserved
+ * method name or property KEY, never a literal VALUE).
  */
 export interface ModuleAnchor {
   /** ≥1 distinctive literals (enum members / magic strings / numeric constants). */
   readonly literals: readonly (string | number)[];
-  /** Min literal hits required (defaults to literals.length). */
+  /**
+   * Minimum literal hits required to consider a factory the match. Defaults to
+   * `literals.length` (all of them). Lowering it trades precision for
+   * resilience when an anchor literal is renamed in a future build.
+   */
   readonly minHits?: number;
 }
-export interface TargetSelector {
-  readonly kind: 'method' | 'property' | 'factory';
-  /** Preserved method name (kind: 'method'). */
-  readonly name?: string;
-  /** Property key (kind: 'property'). */
-  readonly key?: string;
-}
+
+/**
+ * Where to narrow WITHIN the found module. Exactly one `kind` is set.
+ *
+ *   - `method`   — a preserved class/object method name (survives minification;
+ *                  terser keeps member names).
+ *   - `property` — an `ObjectProperty` selected by KEY, never by value (the
+ *                  value changes every release; the property name doesn't).
+ *   - `factory`  — the webpack module factory itself (module-load intercept).
+ *
+ * TODO(M9 / issue #1): add an `invoke` variant — an INVOKE-style call-site
+ *   locator analogous to Fabric's `@At("INVOKE", target=...)` — for
+ *   `@ModifyArg`/`@Redirect` against a specific call site resolved structurally
+ *   (callee name + ordinal). The drift spike flagged ~15% of modules need AST
+ *   structural fingerprints; the in-method `modifyArg` op covers the common
+ *   case without a cross-module INVOKE locator.
+ */
+export type TargetSelector =
+  | { readonly kind: 'method'; readonly name: string }
+  | { readonly kind: 'property'; readonly key: string }
+  | { readonly kind: 'factory' };
+
+/** A stable target: module anchor + within-module selector. */
 export interface TargetSpec {
   readonly anchor: ModuleAnchor;
   readonly selector: TargetSelector;

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Babel AST transform pipeline applying mappings-resolved patches to game bundles before they execute, plus runtime fallback patching.",
+  "description": "Babel AST transform pipeline applying mappings-resolved mixin patches (before/after/around/replace/modifyArg/modifyReturn/modifyConstant) to game bundles before they execute; fail-closed on bundle-hash mismatch.",
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

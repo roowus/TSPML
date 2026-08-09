@@ -267,8 +267,7 @@ describe('resolveTarget (M5-C) — stable name -> TargetSpec, fail-closed', () =
     const res = resolveTarget(map, 'Car.controlCar', { bundleHash: map.bundleHash });
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.target.selector.kind).toBe('method');
-      expect(res.target.selector.name).toBe('controlCar');
+      expect(res.target.selector).toEqual({ kind: 'method', name: 'controlCar' });
       expect(res.target.anchor.literals).toContain('ControlCar');
     }
   });

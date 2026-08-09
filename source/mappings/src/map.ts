@@ -115,19 +115,23 @@ function validateTargetSpec(raw: unknown, key: string): TargetSpec {
     raw.selector.kind === 'method' || raw.selector.kind === 'property' || raw.selector.kind === 'factory',
     `targets['${key}'].selector.kind must be method | property | factory`,
   );
+  let selector: TargetSpec['selector'];
   if (raw.selector.kind === 'method') {
     assert(typeof raw.selector.name === 'string' && raw.selector.name.length > 0, `targets['${key}'].selector.name must be a non-empty string`);
-  }
-  if (raw.selector.kind === 'property') {
+    selector = { kind: 'method', name: raw.selector.name };
+  } else if (raw.selector.kind === 'property') {
     assert(typeof raw.selector.key === 'string' && raw.selector.key.length > 0, `targets['${key}'].selector.key must be a non-empty string`);
+    selector = { kind: 'property', key: raw.selector.key };
+  } else {
+    selector = { kind: 'factory' };
   }
   return {
     anchor: {
-      literals: raw.anchor.literals,
-      ...(raw.anchor.minHits !== undefined ? { minHits: raw.anchor.minHits } : {}),
+      literals: raw.anchor.literals as readonly (string | number)[],
+      ...(raw.anchor.minHits !== undefined ? { minHits: raw.anchor.minHits as number } : {}),
     },
-    selector: raw.selector,
-  } as unknown as TargetSpec;
+    selector,
+  };
 }
 
 /**

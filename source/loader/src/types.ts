@@ -1,8 +1,10 @@
-// TODO: extract to @tspml/shared
-//
-// For M1 these types live inside the loader so the package stays self-contained
-// (no workspace dependency on @tspml/shared yet). They are re-exported from the
-// package entrypoint.
+// Manifest / dependency-resolution types. These live HERE on purpose: the
+// loader is their only producer and consumer (the portal and dev harness reach
+// them through the loader's entrypoint re-exports), so there is nothing to
+// share. An old "extract to @tspml/shared" TODO sat here from M1 until #30;
+// @tspml/shared exists now but owns injected-payload code (bridge patches /
+// early capture), not schema types — moving these there would add a workspace
+// edge for zero deduplication.
 
 import type { TspmlApi } from '@tspml/api';
 
