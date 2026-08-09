@@ -9,9 +9,10 @@ import { satisfies } from './semver.js';
 
 /**
  * Hard dependency-resolution failure (missing dep, version conflict, cycle,
- * `breaks` refusal, duplicate id). Resolution errors are abortive: the loader
- * cannot partially order a cyclic or conflicting set. This is distinct from
- * entrypoint failures, which are isolated per mod.
+ * duplicate id). Resolution errors are abortive: the loader cannot partially
+ * order a cyclic or conflicting set. This is distinct from entrypoint
+ * failures, which are isolated per mod — and from `breaks`, which since #6
+ * soft-disables the declaring mod instead of aborting anything.
  */
 export class DependencyError extends Error {
   constructor(message: string) {
@@ -80,9 +81,17 @@ function resolveVersion(
  * Resolve, validate and topologically order a set of mods.
  *
  * Hard failures (missing `depends`, unsatisfiable version requirements,
- * `breaks` matches, dependency cycles) throw {@link DependencyError}. Soft
- * signals (`conflicts`, missing `recommends`/`suggests`) are returned as
+ * dependency cycles) throw {@link DependencyError}. Soft signals
+ * (`conflicts`, missing `recommends`/`suggests`) are returned as
  * {@link Warning}s and never block loading.
+ *
+ * `breaks` is neither (#6, Fabric-accurate): the DECLARING mod is
+ * **soft-disabled** — excluded from `order`, reported in `disabled` and as a
+ * warning — while the broken mod and every unrelated mod load normally. A mod
+ * whose `depends` can only be satisfied by a disabled mod cascades to
+ * disabled too. Every later check runs on the remaining active set, so a
+ * disabled mod's own problems (a missing dep, a bad `targets` range) cannot
+ * abort a load it is no longer part of.
  *
  * `priority` is a tiebreak only — it orders mods that have no declared
  * relationship. It never overrides topological order (a dependency always
@@ -92,15 +101,79 @@ export function resolveDependencies(
   mods: Mod[],
   ctx: ResolveContext = {},
 ): ResolveResult {
-  const index = buildIndex(mods);
+  // Full-set index: duplicate-id check (still abortive — two mods with one
+  // name cannot be ordered) + the reference for what is INSTALLED.
+  const fullIndex = buildIndex(mods);
   const warnings: Warning[] = [];
+
+  // 0a. `breaks` soft-disable (#6). Evaluated against the INSTALLED set in a
+  //     single pass, deliberately: iterating to a fixpoint (re-enabling a mod
+  //     because its break-target was itself disabled) turns this into an
+  //     order-dependent maximization problem — `a breaks b, b breaks a` has
+  //     two "maximal" answers and picking one silently is exactly the
+  //     ambiguous-first-match behavior TSPML exists to avoid. One pass over
+  //     what is installed is deterministic and explainable: the fix is always
+  //     "remove or disable the named mod".
+  const disabled = new Map<string, string>();
+  for (const m of mods) {
+    for (const [breakId, range] of Object.entries(m.breaks)) {
+      const version = resolveVersion(breakId, ctx, fullIndex);
+      if (version !== undefined && satisfies(version, range)) {
+        const reason = `mod '${m.id}' declares 'breaks' on '${breakId}@${range}' but '${breakId}@${version}' is installed — '${m.id}' is disabled; '${breakId}' still loads`;
+        if (!disabled.has(m.id)) {
+          disabled.set(m.id, reason);
+          warnings.push({ kind: 'breaks-disabled', mod: m.id, other: breakId, message: reason });
+        }
+      }
+    }
+  }
+
+  // 0b. Cascade: a still-active mod whose `depends` was satisfiable in the
+  //     installed set but is NOT satisfiable among active mods lost its
+  //     provider to 0a — disable it too, naming the chain. (A dep that was
+  //     never satisfiable is not our case: step 2 below throws for it with
+  //     the established message.) Monotone fixpoint, so iteration order
+  //     cannot change the final set.
+  let cascading = disabled.size > 0;
+  while (cascading) {
+    cascading = false;
+    const activeMods = mods.filter((m) => !disabled.has(m.id));
+    const activeIdx = buildIndex(activeMods);
+    for (const m of activeMods) {
+      for (const depId of Object.keys(m.depends)) {
+        if (resolveVersion(depId, ctx, activeIdx) !== undefined) continue;
+        if (resolveVersion(depId, ctx, fullIndex) === undefined) continue;
+        const provider = resolveProviderId(depId, fullIndex);
+        const via =
+          provider !== undefined && provider !== depId
+            ? `'${depId}', provided by '${provider}', which is disabled`
+            : `'${depId}', which is disabled`;
+        const reason = `mod '${m.id}' is disabled because it depends on ${via}`;
+        disabled.set(m.id, reason);
+        warnings.push({
+          kind: 'disabled-dependency',
+          mod: m.id,
+          other: provider ?? depId,
+          message: reason,
+        });
+        cascading = true;
+        break;
+      }
+    }
+  }
+
+  // Everything below sees only the ACTIVE set: a disabled mod must not abort
+  // the load (its deps may be missing), must not warn (it isn't loading, so
+  // "both will load" would be false), and must not be ordered.
+  const active = mods.filter((m) => !disabled.has(m.id));
+  const index = buildIndex(active);
 
   // 1. Game-version targeting: if we know the running PolyTrack version, every
   //    mod's `targets` must accept it. Failing loudly here is the loader's
   //    "concentrate fragility" principle — a mod built for another game version
   //    is exactly the kind of thing worth refusing before entrypoints run.
   if (ctx.polytrackVersion !== undefined) {
-    for (const m of mods) {
+    for (const m of active) {
       if (m.targets.length === 0) continue;
       const range = m.targets.join(' || ');
       if (!satisfies(ctx.polytrackVersion, range)) {
@@ -120,7 +193,7 @@ export function resolveDependencies(
     range: string;
   }
   const violations: Violation[] = [];
-  for (const m of mods) {
+  for (const m of active) {
     for (const [depId, range] of Object.entries(m.depends)) {
       const version = resolveVersion(depId, ctx, index);
       if (version === undefined) {
@@ -144,21 +217,11 @@ export function resolveDependencies(
     );
   }
 
-  // 3. `breaks`: refuse (hard error) if a broken target is present at a
-  //    matching version.
-  for (const m of mods) {
-    for (const [breakId, range] of Object.entries(m.breaks)) {
-      const version = resolveVersion(breakId, ctx, index);
-      if (version !== undefined && satisfies(version, range)) {
-        throw new DependencyError(
-          `mod '${m.id}' declares 'breaks' on '${breakId}@${range}' but '${breakId}@${version}' is installed`,
-        );
-      }
-    }
-  }
+  // 3. (retired) `breaks` used to throw here. Since #6 it is handled by the
+  //    soft-disable pass (0a/0b) above — nothing left to check at this point.
 
   // 4. `conflicts`: both load, but warn.
-  for (const m of mods) {
+  for (const m of active) {
     for (const [conflictId, range] of Object.entries(m.conflicts)) {
       const version = resolveVersion(conflictId, ctx, index);
       if (version !== undefined && satisfies(version, range)) {
@@ -173,7 +236,7 @@ export function resolveDependencies(
   }
 
   // 5. `recommends` / `suggests` missing: soft warnings.
-  for (const m of mods) {
+  for (const m of active) {
     for (const [recId, range] of Object.entries(m.recommends)) {
       const version = resolveVersion(recId, ctx, index);
       if (version === undefined) {
@@ -211,7 +274,7 @@ export function resolveDependencies(
   // the published spec, and the field may be honoured later. But say plainly
   // that the nested mod will NOT be loaded, so this fails loudly at authoring
   // time instead of silently at runtime.
-  for (const m of mods) {
+  for (const m of active) {
     for (const [includedId, range] of Object.entries(m.includes)) {
       warnings.push({
         kind: 'unsupported-includes',
@@ -222,11 +285,17 @@ export function resolveDependencies(
     }
   }
 
-  // 7. Topological sort (depends-graph) with priority tiebreak.
-  const order = topoSort(mods, index);
+  // 7. Topological sort (depends-graph) with priority tiebreak — active only.
+  const order = topoSort(active, index);
 
   warnings.sort(compareWarnings);
-  return { order, warnings };
+  return {
+    order,
+    warnings,
+    disabled: [...disabled.entries()]
+      .map(([id, reason]) => ({ id, reason }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  };
 }
 
 function compareWarnings(a: Warning, b: Warning): number {
