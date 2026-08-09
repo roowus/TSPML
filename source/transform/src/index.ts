@@ -32,7 +32,7 @@
  * ```
  */
 export { sortPatchesByPriority, targetSignature, transform } from "./engine.js";
-export { applyOp } from "./ops.js";
+export { applyOp, paramPlaceholder } from "./ops.js";
 export { findModulePath, locateTarget } from "./locators.js";
 
 export type {

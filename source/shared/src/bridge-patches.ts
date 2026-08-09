@@ -8,15 +8,23 @@
  * harness gained the two custom-track capture patches (#12) that the portal
  * lacked — which is exactly the failure mode [#34] predicted. One copy now.
  *
- * ## Why the minified param names below are safe
+ * ## How injects reference the target's parameters ([#24])
  *
- * Several injects reference the bundle's minified parameters (`e`, `t`, `n`, `s`,
- * `a`). That is only sound because every caller HASH-GATES the transform to the
- * pinned bundle recorded in the mappings map: on a hash mismatch the engine
- * applies nothing and the surface serves vanilla, so an inject can never run
- * against a build it was not authored for. If you add a patch here, keep that
- * contract — see docs/design/mappings-system.md. Making these robust to renames
- * is tracked in [#24].
+ * Injects never name the bundle's minified parameters (`e`, `t`, …) directly.
+ * They use `__TSPML_PARAM<n>__` ordinal placeholders ({@link paramPlaceholder});
+ * the transform engine renames each one to the LOCATED function's actual nth
+ * parameter at apply time, and fails the patch (`param-unresolvable`) rather
+ * than guess when an ordinal is out of range, the parameter is a pattern, or a
+ * local would shadow the resolved name. Parameter ORDINALS are structural —
+ * they survive a re-minify that renames every identifier; bare names did not.
+ * The ordinals themselves are still verified against the pinned 0.6.2 bundle,
+ * and every caller HASH-GATES the transform to that bundle (a signature change
+ * that reorders parameters is a new-bundle event, which the gate catches).
+ *
+ * The exception is the module-scope WeakMap BINDINGS in
+ * {@link CAR_CONTROLLER_BINDINGS}: those are not parameters, so no ordinal can
+ * name them. They remain hash-gate-protected minified names, centralized in one
+ * constant and read only through the guarded {@link READ_BINDING}.
  *
  * ## Anchor discipline
  *
@@ -29,6 +37,10 @@
  * [#34]: https://github.com/roowus/TSPML/issues/34
  */
 import type { Patch } from "@tspml/transform";
+import { paramPlaceholder } from "@tspml/transform";
+
+/** Shorthand: the ordinal placeholder for the target's nth parameter. */
+const P = paramPlaceholder;
 
 const MARKER_ID = "tspml-live-marker";
 
@@ -42,19 +54,19 @@ const MARKER_INJECT = `
   try {
     if (typeof document === "undefined") return;
     if (document.getElementById(${JSON.stringify(MARKER_ID)})) return;
-    var b = document.createElement("div");
-    b.id = ${JSON.stringify(MARKER_ID)};
-    b.textContent = "TSPML transform ✔ LIVE";
-    b.style.cssText =
+    var __b = document.createElement("div");
+    __b.id = ${JSON.stringify(MARKER_ID)};
+    __b.textContent = "TSPML transform ✔ LIVE";
+    __b.style.cssText =
       "position:fixed;top:0;left:0;z-index:2147483647;background:#041408;" +
       "color:#39ff14;font:600 13px ui-monospace,Menlo,monospace;padding:6px 10px;" +
       "border-bottom-right-radius:6px;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.4)";
-    (document.body || document.documentElement).appendChild(b);
-  } catch (e) {}
+    (document.body || document.documentElement).appendChild(__b);
+  } catch (_e) {}
   try {
     if (typeof console !== "undefined")
       console.log("%c[TSPML] transform hook fired — Car module loaded", "color:#39ff14");
-  } catch (e) {}
+  } catch (_e) {}
 })();
 `.trim();
 
@@ -115,7 +127,8 @@ const EMIT = (body: string): string =>
  * `isReplay` is therefore its NEGATION, not the flag itself.
  *
  * ⚠️ These are minified identifiers, sound only under the hash gate every caller
- * applies — see the header note and [#24].
+ * applies. Unlike parameters they have no ordinal, so the #24 placeholders
+ * cannot cover them — see the header note.
  */
 export const CAR_CONTROLLER_BINDINGS = {
   /** WeakMap<car, boolean> — `true` when the car is driven, `false` for a ghost. */
@@ -194,18 +207,18 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
   {
     op: "before",
     target: { ...CAR_ANCHOR, selector: { kind: "method", name: "controlCar" } },
-    // controlCar(e=carId, t=up, n=right, i=down, a=left, s=reset)
+    // controlCar(carId, up, right, down, left, reset) — by ordinal.
     inject: EMIT(
-      `window.__tspml.events.emit("car.control", { carId: e, up: !!t, right: !!n, down: !!i, left: !!a, reset: !!s });`,
+      `window.__tspml.events.emit("car.control", { carId: ${P(0)}, up: !!${P(1)}, right: !!${P(2)}, down: !!${P(3)}, left: !!${P(4)}, reset: !!${P(5)} });`,
     ),
   },
   {
     op: "modifyReturn",
     target: { ...CAR_ANCHOR, selector: { kind: "method", name: "createCar" } },
     // createCar returns {id, carState}, so the carId is in the RETURN value:
-    // modifyReturn rewrites `return X` -> `return (wrap)(X)`. `s` (5th param =
+    // modifyReturn rewrites `return X` -> `return (wrap)(X)`. Param 4 (the
     // carRecording) is still in scope at the return; non-null => ghost/replay.
-    wrap: `((__v) => { try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.events.emit && __v && __v.id != null) window.__tspml.events.emit('car.created', { carId: __v.id, isReplay: s != null }); } catch (_e) {} return __v; })`,
+    wrap: `((__v) => { try { if (typeof window !== 'undefined' && window.__tspml && window.__tspml.events.emit && __v && __v.id != null) window.__tspml.events.emit('car.created', { carId: __v.id, isReplay: ${P(4)} != null }); } catch (_e) {} return __v; })`,
   },
   {
     op: "before",
@@ -229,9 +242,9 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
       },
       selector: { kind: "method", name: "loadTrackData" },
     },
-    // At the tail (before the return), `e` is the parsed track data.
+    // At the tail (before the return), param 0 is the parsed track data.
     inject: EMIT(
-      `var __tid = ''; try { __tid = (e && typeof e.getId === 'function') ? e.getId() : ''; } catch (_) {} window.__tspml.events.emit("track.afterLoad", __tid);`,
+      `var __tid = ''; try { __tid = (${P(0)} && typeof ${P(0)}.getId === 'function') ? ${P(0)}.getId() : ''; } catch (_) {} window.__tspml.events.emit("track.afterLoad", __tid);`,
     ),
   },
   {
@@ -240,7 +253,8 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
     // inside setCarState (a per-frame method), so ONE inject guards both
     // transitions (cheap: a couple of field reads on the hot path). At the HEAD
     // the instance still holds the OLD state — getNextCheckpointIndex() and
-    // hasFinished() read it — while `e` is the NEW carState.
+    // hasFinished() read it — while param 0 is the NEW carState (param 1 is the
+    // hard-set flag).
     target: { ...CAR_CONTROLLER_ANCHOR, selector: { kind: "method", name: "setCarState" } },
     // `__ref` is computed lazily INSIDE each transition branch, never once up
     // front: this runs every frame for every car, and the branches are false on
@@ -268,7 +282,7 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
     // `index` is the checkpoint respawned AT: checkpoints pass in order and a
     // respawn keeps progress, so that is nextCheckpointIndex - 1.
     inject: EMIT(
-      `if (e) { if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) { var __r1 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.passed', { index: this.getNextCheckpointIndex(), carId: __r1.carId, isReplay: __r1.isReplay }); } if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) { var __r2 = ${CAR_REF("this")}; window.__tspml.events.emit('race.finished', { frames: e.finishFrames, carId: __r2.carId, isReplay: __r2.isReplay }); } if (!t && e.controls && e.controls.reset === true && e.hasCheckpointToRespawnAt === true && typeof this.getNextCheckpointIndex === 'function' && this.getNextCheckpointIndex() > 0) { var __o = ${READ_BINDING(CAR_CONTROLLER_BINDINGS.carState, "this")}; if (__o && __o.controls && __o.controls.reset === false) { var __r3 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.respawn', { index: this.getNextCheckpointIndex() - 1, carId: __r3.carId, isReplay: __r3.isReplay }); } } }`,
+      `if (${P(0)}) { if (${P(0)}.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && ${P(0)}.nextCheckpointIndex > this.getNextCheckpointIndex()) { var __r1 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.passed', { index: this.getNextCheckpointIndex(), carId: __r1.carId, isReplay: __r1.isReplay }); } if (${P(0)}.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) { var __r2 = ${CAR_REF("this")}; window.__tspml.events.emit('race.finished', { frames: ${P(0)}.finishFrames, carId: __r2.carId, isReplay: __r2.isReplay }); } if (!${P(1)} && ${P(0)}.controls && ${P(0)}.controls.reset === true && ${P(0)}.hasCheckpointToRespawnAt === true && typeof this.getNextCheckpointIndex === 'function' && this.getNextCheckpointIndex() > 0) { var __o = ${READ_BINDING(CAR_CONTROLLER_BINDINGS.carState, "this")}; if (__o && __o.controls && __o.controls.reset === false) { var __r3 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.respawn', { index: this.getNextCheckpointIndex() - 1, carId: __r3.carId, isReplay: __r3.isReplay }); } } }`,
     ),
   },
 ];
@@ -310,16 +324,16 @@ export const REGISTRY_CAPTURE_PATCHES: readonly Patch[] = [
       },
       selector: { kind: "method", name: "constructor" },
     },
-    // The track-selection UI (module 8185): constructor(e,t,n,r,a,...). `a` is the
-    // TrackManager (saveCustomTrack / deleteCustomTrack / forEachCustomTrack); `n`
-    // is the AUDIO manager (context / getBuffer / playUIClick / load).
+    // The track-selection UI (module 8185): param 4 of the constructor is the
+    // TrackManager (saveCustomTrack / deleteCustomTrack / forEachCustomTrack);
+    // param 2 is the AUDIO manager (context / getBuffer / playUIClick / load).
     //
     // Both captures ride ONE inject because they come from the same constructor —
     // which is also why #11 needed no new anchor and no locator change: this module
     // was already a committed, verified target with exactly one constructor in it.
     // Verified against 0.6.2 at the three `new Sr.A(...)` call sites, where param 3
     // is the same private field the game's own `playUIClick()` calls go through.
-    inject: `try { if (typeof window !== "undefined" && window.__tspml) { if (window.__tspml.captureTrackManager) window.__tspml.captureTrackManager(a); if (window.__tspml.captureAudioManager) window.__tspml.captureAudioManager(n); } } catch (_e) {}`,
+    inject: `try { if (typeof window !== "undefined" && window.__tspml) { if (window.__tspml.captureTrackManager) window.__tspml.captureTrackManager(${P(4)}); if (window.__tspml.captureAudioManager) window.__tspml.captureAudioManager(${P(2)}); } } catch (_e) {}`,
   },
   {
     op: "after",
@@ -340,9 +354,9 @@ export const REGISTRY_CAPTURE_PATCHES: readonly Patch[] = [
       },
       selector: { kind: "factory" },
     },
-    // The module factory's `t` is the exports object; `t.A` is the track codec
-    // class (statics fromExportString / fromSaveString).
-    inject: `try { if (typeof window !== "undefined" && window.__tspml && window.__tspml.captureTrackCodec && t && t.A) window.__tspml.captureTrackCodec(t.A); } catch (_e) {}`,
+    // The module factory's param 1 is the exports object; its `.A` is the track
+    // codec class (statics fromExportString / fromSaveString).
+    inject: `try { if (typeof window !== "undefined" && window.__tspml && window.__tspml.captureTrackCodec && ${P(1)} && ${P(1)}.A) window.__tspml.captureTrackCodec(${P(1)}.A); } catch (_e) {}`,
   },
 ];
 
