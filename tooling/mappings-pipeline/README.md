@@ -218,25 +218,39 @@ because #1's claim is a **delta** between two rates, and two drifting copies of 
 would make that number unfalsifiable.
 
 ```sh
-node src/match.mjs <src> <tgt>              # baseline, tie-break OFF -> 0.848
-node src/match.mjs <src> <tgt> --structural # tie-break ON            -> 0.939
-GEN_STRUCTURAL=0 node ../../source/mappings/scripts/gen-map.mjs ...   # off in the generator
+node src/match.mjs <src> <tgt>                      # baseline, both OFF     -> 0.848
+node src/match.mjs <src> <tgt> --structural         # tie-break ON           -> 0.939
+node src/match.mjs <src> <tgt> --structural --edges # + edge pass            -> 0.97
+GEN_STRUCTURAL=0 / GEN_EDGES=0 node ../../source/mappings/scripts/gen-map.mjs ...  # off in the generator
 ```
 
-Full write-up — including the four cases that remain unresolved, the 24 byte-identical
-non-game-logic promotions, and the resolver-ordering defect the integration exposed:
+## Raising it again: call-graph edges (#1, second half)
+
+For the four modules where **both** content signals saturate (tiny enum/table-shaped
+modules fingerprint identically), `src/edges.mjs` uses the one signal minification
+cannot touch: webpack's `require("./N.js")` edges, translated through the pass-1
+matches. Unlike the structural tie-break it **generates** candidates from the graph —
+the two rescuable modules' correct targets never surfaced lexically at all — so its
+gates are stricter: exact forward+reverse agreement, no extra claimed edges, ≥ 2 edges,
+a unique qualifying target, and no cross-source contest. Failing any gate records a
+reason (`insufficient-edges` / `no-candidate` / `ambiguous` / `contested`) instead of
+guessing. Measured: **game-logic 0.939 → 0.97**, two rescues (hand-verified), two
+css-loader modules honestly refused with zero translatable neighbours.
+
+Full write-up — including the rescues' edge evidence, the refusals, and the resolver
+evidence ranking (`lexical > structural > edge` on stable-name collisions):
 [`docs/research/structural-fingerprints.md`](../../docs/research/structural-fingerprints.md).
 
 ## Tests
 
 ```sh
-pnpm test    # 107 unit tests — CI-runnable, no bundle needed
+pnpm test    # 123 unit tests — CI-runnable, no bundle needed
 ```
 
 Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
 webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
-Node-invocation helper (5, #25), `wasm-locate` (16, #43), `fingerprint` (20, #1) and
-`select` (17, #1).
+Node-invocation helper (5, #25), `wasm-locate` (16, #43), `fingerprint` (20, #1),
+`select` (17, #1) and `edges` (15, #1).
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.

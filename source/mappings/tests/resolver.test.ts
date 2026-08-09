@@ -159,6 +159,70 @@ describe('createResolver — stable-name collisions rank by evidence, not map or
     if (tieA.ok && tieB.ok) expect(tieA.locator.moduleId).toBe(tieB.locator.moduleId);
   });
 
+  it('ranks edge evidence below BOTH content signals', () => {
+    // An edge decision says nothing about the module's own body — it is relational
+    // evidence used precisely when content signals saturated. On a name collision it
+    // must lose to structural (weaker content evidence is still content evidence),
+    // and by transitivity to lexical, regardless of key order and matchWeight.
+    const base = toyMap();
+    const structural = {
+      concept: 'Structural Registry',
+      stableNames: ['sharedEnum'],
+      subsystem: 'Track',
+      subsystems: ['Track'],
+      moduleId: '1648',
+      matchWeight: 4, // deliberately LOWER weight — evidence kind must decide first
+      sharedAnchors: 2,
+      sourceModuleId: '5343',
+      decidedBy: 'structural' as const,
+    };
+    const edge = {
+      concept: 'Edge Registry',
+      stableNames: ['sharedEnum'],
+      subsystem: 'Track',
+      subsystems: ['Track'],
+      moduleId: '8734',
+      matchWeight: 99,
+      sharedAnchors: 40,
+      sourceModuleId: '7129',
+      decidedBy: 'edge' as const,
+      edgeConfirmed: 3,
+    };
+    for (const modules of [
+      { edge, structural, ...base.modules },
+      { structural, edge, ...base.modules },
+    ]) {
+      const res = createResolver({ ...base, modules }).resolve('sharedEnum', MATCHING);
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.locator.moduleId).toBe('1648');
+    }
+  });
+
+  it('still resolves a name only an edge-decided module carries', () => {
+    // Ranking is for collisions only. The whole point of the edge pass is that these
+    // modules' names were previously unresolvable — an uncontested edge entry must
+    // resolve like any other.
+    const base = toyMap();
+    const edge = {
+      concept: 'Part Grid List',
+      stableNames: ['rotatePartGridPosition'],
+      subsystem: 'Track',
+      subsystems: ['Track'],
+      moduleId: '8734',
+      matchWeight: 6,
+      sharedAnchors: 2,
+      sourceModuleId: '7129',
+      decidedBy: 'edge' as const,
+      edgeConfirmed: 3,
+    };
+    const res = createResolver({ ...base, modules: { edge, ...base.modules } }).resolve(
+      'rotatePartGridPosition',
+      MATCHING,
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.locator.moduleId).toBe('8734');
+  });
+
   it('treats an absent decidedBy as lexical (pre-#1 maps)', () => {
     // Backward compatibility is load-bearing here: a pre-#1 entry has no decidedBy, and
     // reading that as "unknown, therefore weaker" would demote every module in every
