@@ -207,6 +207,46 @@ so a red smoke is interpretable: canary red = the game shipped a new build.
 | `NEXT_PUBLIC_POLYTRACK_VERSION` | `0.6.2` | Same, exposed to the browser so the Play page knows which version to iframe. |
 | `TSPML_TRANSFORM` | _(unset)_ | `1` enables the AST rewrite of `main.bundle.js`. Off ⇒ the portal is a pure proxy. |
 
+## Deployment (tspml.vercel.app)
+
+The portal auto-deploys to **https://tspml.vercel.app** on every push to `main`,
+via Vercel's Git integration (project `tspml`, git-connected to `roowus/TSPML`,
+production branch `main`). No GitHub Actions workflow is involved — Vercel
+builds from its own clone, so CI stays the merge gate and Vercel is only the
+delivery vehicle.
+
+Project settings that make the pnpm monorepo build work (set once via
+`vercel project update` / the API; recorded here because they live in Vercel,
+not in the repo):
+
+| Setting | Value | Why |
+|---|---|---|
+| Root Directory | `source/portal` | The Next.js app lives here, not at the repo root. Vercel still uploads the whole repo, so workspace deps resolve. |
+| Install Command | `pnpm install --ignore-scripts` | Same as CI: skips webcrack's optional `isolated-vm` native build (#2). |
+| Build Command | `pnpm --filter @tspml/portal... build` | The `...` builds the portal **and** its workspace deps (they resolve to `./dist`), topologically. |
+| Framework | Next.js | Was auto-detected as "Other" at project creation (linked before the root directory was set), which produced a static-only deploy where every route 404'd. |
+| Env `TSPML_TRANSFORM=1` | Production | The whole point: serve the AST-transformed bundle. |
+| Env `PORTAL_ORIGIN=https://tspml.vercel.app` | Production | CORS allow-list for proxied responses (`/api/proxy` is localhost-only otherwise). |
+
+One repo-side requirement, in `next.config.mjs`: **`outputFileTracingRoot`**
+must point at the monorepo root. pnpm hoists dependencies to the root
+`node_modules/.pnpm`, two levels above this package; without the setting,
+Vercel's file trace resolves those paths relative to `source/portal` and the
+deploy fails with `File does not exist: "node_modules/.pnpm/@swc+helpers/..."`.
+
+SSO deployment protection is **disabled** for this project — the portal is a
+public site; the game content it proxies is fetched live per user (nothing is
+redistributed, same posture as everywhere else in this repo).
+
+For a manual deploy (e.g. testing settings changes without a push):
+
+```sh
+cd source/portal
+vercel pull --yes --environment=production
+vercel build --prod
+vercel deploy --prebuilt --prod
+```
+
 ## Known limitations & caveats
 
 - **ToS gray area (origin-forwarding).** The proxy sets `Origin`/`Referer` to
