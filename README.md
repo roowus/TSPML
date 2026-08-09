@@ -71,10 +71,13 @@ See [`docs/project/decision-log.md`](./docs/project/decision-log.md) (ADR-001 th
 
 ```
 docs/          research, design, API specs, project, contributing (docs-first)
-source/        loader, api-bridge, transform, mappings, portal, extension, shared
-tooling/       mappings-pipeline, create-tspml-mod, typecheck, cli
-environments/  dev-harness, demo-mods (@tspml/demo-hud)
+source/        loader, api-bridge, transform, mappings, portal, shared,
+               extension (gate-clear slice only — bundle rewriting not implemented)
+tooling/       mappings-pipeline, create-tspml-mod, typecheck,
+               cli (reserved name, NOT implemented)
+environments/  dev-harness (Vite dev server + smokes), demo-mods (@tspml/demo-hud, …)
 packages/      @tspml/api (publishable types)
+tests/ scripts/  empty on purpose — see their READMEs (#30)
 ```
 
 ## Documentation

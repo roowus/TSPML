@@ -3,6 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "MV3 browser extension (secondary delivery path) using declarativeNetRequest to rewrite game scripts at the network layer, immune to page CSP.",
+  "description": "MV3 browser extension (secondary delivery path, M8). Current slice: clears the unofficial-version gate on kodub.com via polytrackModConfiguration. Bundle rewriting / bridge / mod loading are planned, not implemented — see ./README.md.",
   "license": "MIT"
 }
