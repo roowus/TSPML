@@ -1782,3 +1782,31 @@ names share nothing with the real bundle's. A new static guard in
 new transform cases cover per-op substitution, factory targets, all five
 fail-closed paths, the string-literal exemption, and a `catch (e)` payload
 that must NOT false-positive the shadow check. 49 transform + 43 shared green.
+
+## 2026-08-09 — #30 closed: one TargetSpec definition, honest package descriptions ✅
+
+PR #77 (squash-merged). The last #30 items — the ones #49 deliberately left
+open — are done, and the issue is closed.
+
+`ModuleAnchor`/`TargetSelector`/`TargetSpec` existed twice (transform +
+mappings) and HAD drifted: mappings' `TargetSelector` was an all-optional
+property bag while transform's locator required the discriminated union. The
+map stores specs, the transform consumes them — a looser producer type is
+exactly the silent-drift risk the issue predicted. `@tspml/mappings` is now
+the canonical owner (union tightened; `validateTargetSpec` builds each variant
+explicitly, dropping an `as unknown as` double cast), and `@tspml/transform`
+re-exports the types via a type-only import, so every existing
+`import { TargetSpec } from "@tspml/transform"` still compiles and runtime
+coupling stays zero. NOT extracted to `@tspml/shared` despite the old TODOs:
+that package owns injected-payload code and depends on transform — moving
+schema types there would invert the dependency for zero deduplication. Both
+stale `// TODO: extract to @tspml/shared` headers (loader M1, transform M3)
+now explain the actual ownership instead.
+
+Truth-in-labeling: transform's package description claimed "runtime fallback
+patching" (doesn't exist anywhere); extension's claimed declarativeNetRequest
+bundle rewriting (a planned slice — implemented is only the
+`polytrackModConfiguration` gate-clear); the root README layout block now
+marks extension/cli/tests/scripts status inline. 466 tests + build + lint
+green; the resolver test that read `selector.name` without narrowing was
+updated to assert the whole selector object.
