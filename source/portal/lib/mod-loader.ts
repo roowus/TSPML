@@ -12,7 +12,7 @@
  * isolation, safety classification, and unload.
  */
 import type { TspmlApi } from '@tspml/api';
-import type { Mod, ModDescriptor } from '@tspml/loader';
+import type { Mod, ModDescriptor, ResolveContext } from '@tspml/loader';
 import { classifySafety, load, modFromManifest, parseVersionManifest, resolveDependencies } from '@tspml/loader';
 import type { SafetyReport } from '@tspml/loader';
 // Statically imported so the bundler includes the demo mod; `importEntry` below
@@ -23,6 +23,7 @@ import checkpointCounterFactory from '@tspml/checkpoint-counter';
 import checkpointCounterManifest from '@tspml/checkpoint-counter/mod.json';
 import type { UserModRecord } from './user-mods';
 import { importFromSource, USER_ENTRY_PREFIX, userEntrySpecifier, userModId } from './user-mods';
+import { mixinEnvironmentAppliesToHost, PORTAL_HOST_ENVIRONMENT } from './mixin-env';
 
 export interface ModSafetyEntry {
   readonly id: string;
@@ -59,7 +60,25 @@ export interface LoadModsOptions {
    * can't feed `import()`.
    */
   readonly importUserMod?: (record: UserModRecord) => Promise<unknown>;
+  /**
+   * Ambient host facts (#21): the game version (drives `targets` soft-disable)
+   * and the environment (drives `environment` soft-disable). Defaults to
+   * {@link PORTAL_RESOLVE_CONTEXT} — overridable so tests can pin a version.
+   */
+  readonly context?: ResolveContext;
 }
+
+/**
+ * What the portal IS, stated once (#21): a web host running the pinned game
+ * version. `NEXT_PUBLIC_POLYTRACK_VERSION` is inlined at build time in the
+ * page too — reading it here keeps the two in lockstep. `tspml`/`tspml-api`
+ * dep resolution stays version-less for now (#73: the packages report 0.x
+ * placeholders, so pinning them would reject honest `depends` ranges).
+ */
+export const PORTAL_RESOLVE_CONTEXT: ResolveContext = {
+  hostEnvironment: PORTAL_HOST_ENVIRONMENT,
+  polytrackVersion: process.env.NEXT_PUBLIC_POLYTRACK_VERSION ?? '0.6.2',
+};
 
 /**
  * Load the bundled demo mods + any user mods against the given (bridge) api.
@@ -69,6 +88,7 @@ export interface LoadModsOptions {
 export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Promise<ModLoadSummary> {
   const userMods = (options.userMods ?? []).filter((m) => m.enabled);
   const importUserMod = options.importUserMod ?? ((record: UserModRecord) => importFromSource(record.code));
+  const context = options.context ?? PORTAL_RESOLVE_CONTEXT;
 
   // A user mod is addressed as `user:<id>`; anything else is a bundled specifier.
   const userById = new Map<string, UserModRecord>();
@@ -121,8 +141,10 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   // with it. Accept user mods against the resolved set to a fixpoint (so a mod
   // depending on another user mod loads regardless of paste order), and
   // pre-fail whatever never resolves — each with the resolver's own message.
-  // (`breaks` no longer throws (#6): a breaker passes this gate and load()
-  // soft-disables it, which the status loop below reports as failed-with-reason.)
+  // (`breaks` (#6), environment and targets mismatches (#21) no longer throw:
+  // those mods pass this gate and load() soft-disables them, which the status
+  // loop below reports as failed-with-reason. The gate resolves with the SAME
+  // context as load() so the two passes cannot disagree about what throws.)
   let accepted: Mod[];
   try {
     accepted = [demoHudManifest, checkpointCounterManifest].map((m) =>
@@ -140,7 +162,7 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
     for (let i = 0; i < pending.length; ) {
       const c = pending[i]!;
       try {
-        resolveDependencies([...accepted, c.mod]);
+        resolveDependencies([...accepted, c.mod], context);
         accepted.push(c.mod);
         descriptors.push({ manifest: c.record.manifest, entry: userEntrySpecifier(c.id) });
         pending.splice(i, 1);
@@ -153,7 +175,7 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   for (const c of pending) {
     let reason = `mod '${c.id}' has unresolvable dependencies`;
     try {
-      resolveDependencies([...accepted, c.mod]);
+      resolveDependencies([...accepted, c.mod], context);
     } catch (e) {
       reason = e instanceof Error ? e.message : String(e);
     }
@@ -172,7 +194,7 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
     return await import(/* webpackIgnore: true */ /* @vite-ignore */ specifier);
   };
 
-  const result = await load(descriptors, { api, importEntry });
+  const result = await load(descriptors, { api, importEntry, context });
 
   const loaded: string[] = [];
   const failed: Array<{ id: string; reason: string }> = [...preFailed];
@@ -196,7 +218,13 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
       const manifest = parseVersionManifest(desc.manifest);
       safety.push({ id: manifest.id, report: classifySafety(manifest) });
       const record = userById.get(manifest.id);
-      if (record !== undefined && record.mixins === undefined && (manifest.mixins?.length ?? 0) > 0) {
+      // Only descriptors applicable to THIS host count (#21): "paste your
+      // mixins.json" is bad advice for a config declared desktop/worker-only —
+      // pasting it would change nothing here (the plan builder gates it too).
+      const declaresHostMixins = (manifest.mixins ?? []).some((d) =>
+        mixinEnvironmentAppliesToHost(d.environment),
+      );
+      if (record !== undefined && record.mixins === undefined && declaresHostMixins) {
         mixinsSkipped.push(manifest.id);
       }
     } catch {

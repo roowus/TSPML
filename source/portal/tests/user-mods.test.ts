@@ -280,6 +280,19 @@ describe('loadMods with user mods', () => {
     expect(summary.mixinsSkipped).not.toContain('tspml-example-hud');
   });
 
+  it('does NOT nag for unpasted mixins declared for another environment — pasting them would change nothing here (#21)', async () => {
+    const desktopMixins = record({ id: 'desktop-mixin-mod' });
+    (desktopMixins.manifest as Record<string, unknown>).mixins = [
+      { config: 'mixins.json', environment: 'desktop' },
+    ];
+    const summary = await loadMods(fakeApi(), {
+      userMods: [desktopMixins],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.loaded).toContain('desktop-mixin-mod');
+    expect(summary.mixinsSkipped).toEqual([]);
+  });
+
   it('does NOT report a mod whose mixins.json WAS pasted — those ride the patch plan (#62)', async () => {
     const pasted = record({
       id: 'pasted-mod',
@@ -292,6 +305,44 @@ describe('loadMods with user mods', () => {
     });
     expect(summary.loaded).toContain('pasted-mod');
     expect(summary.mixinsSkipped).toEqual([]);
+  });
+
+  it("reports a desktop-only user mod as failed-with-reason on this web host, never invoked (#21)", async () => {
+    const desktopOnly = record({ id: 'desktop-mod' });
+    (desktopOnly.manifest as Record<string, unknown>).environment = 'desktop';
+    const importUserMod = vi.fn(async () => ({ default: () => {} }));
+    const summary = await loadMods(fakeApi(), { userMods: [desktopOnly], importUserMod });
+    const failure = summary.failed.find((f) => f.id === 'desktop-mod');
+    expect(failure?.reason).toMatch(/environment 'desktop'/);
+    expect(importUserMod).not.toHaveBeenCalled();
+    // Soft, not abortive: the bundled mods are untouched.
+    expect(summary.loaded).toContain('tspml-example-hud');
+    expect(summary.loaded).toContain('tspml-checkpoint-counter');
+  });
+
+  it('reports a stale-targets user mod as failed-with-reason against the pinned game version (#21)', async () => {
+    const stale = record({ id: 'stale-mod' });
+    (stale.manifest as Record<string, unknown>).targets = ['>=0.7.0'];
+    const summary = await loadMods(fakeApi(), {
+      userMods: [stale],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.failed.find((f) => f.id === 'stale-mod')?.reason).toMatch(/targets '>=0\.7\.0'/);
+    expect(summary.loaded).toContain('tspml-example-hud');
+  });
+
+  it('the context is overridable — a pinned desktop context flips which mods fit (#21)', async () => {
+    const desktopOnly = record({ id: 'desktop-mod' });
+    (desktopOnly.manifest as Record<string, unknown>).environment = 'desktop';
+    const summary = await loadMods(fakeApi(), {
+      userMods: [desktopOnly],
+      importUserMod: async () => ({ default: () => {} }),
+      context: { hostEnvironment: 'desktop', polytrackVersion: '0.6.2' },
+    });
+    // The user mod fits now; the bundled demo mods (environment unset = '*')
+    // still load — '*' means anywhere, including a desktop host.
+    expect(summary.loaded).toContain('desktop-mod');
+    expect(summary.loaded).toContain('tspml-example-hud');
   });
 
   it('unloads a user mod via the standard disposer path (#17)', async () => {

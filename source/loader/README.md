@@ -23,7 +23,9 @@ name the offending field), the `semver` predicate wrappers, `resolveDependencies
 (throws `DependencyError` for cycles / missing deps / version conflicts, returns
 `{ order, warnings, disabled }` with `conflicts`/`missing-recommendation`
 warnings; `breaks` soft-disables the declaring mod — and, cascading, its
-dependents — instead of throwing, #6), and `load()` orchestration with
-dependency-injectable entrypoint loading for tests (soft-disabled mods get
+dependents — instead of throwing, #6; `environment` and `targets` mismatches
+soft-disable the same way when the host states `hostEnvironment` /
+`polytrackVersion` in the `ResolveContext`, #21), and `load()` orchestration
+with dependency-injectable entrypoint loading for tests (soft-disabled mods get
 status `'disabled'` and are never invoked). See `src/index.ts` for the full
 export list.
