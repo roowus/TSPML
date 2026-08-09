@@ -115,14 +115,21 @@ export interface ModuleEntry {
    * `'structural'` — anchors could not separate the leaders and an AST shape comparison
    * broke the tie. Circumstantial evidence, and the entry to re-verify first after a
    * game update.
+   * `'edge'` — both content signals saturated and the target was chosen by exact,
+   * unique agreement of its translated require-graph neighbourhood (forward AND
+   * reverse, through the pass-1 matches). Purely relational evidence: it says nothing
+   * about the module's own body, so it ranks below both content signals when a stable
+   * name collides (see resolver.ts).
    *
    * Optional for backward compatibility: maps generated before #1 was wired into
    * `gen-map.mjs` have no such field, and an absent value means "lexical" (it is the
    * only decision the old generator could make).
    */
-  readonly decidedBy?: 'lexical' | 'structural';
+  readonly decidedBy?: 'lexical' | 'structural' | 'edge';
   /** Cosine shape similarity that won a `'structural'` decision. Absent otherwise. */
   readonly structuralSimilarity?: number;
+  /** Confirmed translated require edges that won an `'edge'` decision. Absent otherwise. */
+  readonly edgeConfirmed?: number;
 }
 
 /** A game-logic module the spike could not confidently relocate this build. */

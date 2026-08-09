@@ -44,10 +44,13 @@ function normalizeHash(h: string): string {
  *
  * **Resolution order, strongest evidence first** — NOT map insertion order:
  *
- *   1. `decidedBy: 'lexical'` beats `'structural'`. Anchors are direct evidence about a
- *      module's own literals; shape similarity is circumstantial. `adjudicate()` already
- *      refuses to let structure override a decisive lexical win *within* one module's
- *      decision, and this applies the same ordering *across* modules.
+ *   1. `decidedBy: 'lexical'` beats `'structural'` beats `'edge'`. Anchors are direct
+ *      evidence about a module's own literals; shape similarity is circumstantial but
+ *      still about the module's own body; a require-graph neighbourhood says nothing
+ *      about the body at all — it is the signal of last resort, used precisely when
+ *      both content signals saturated. `adjudicate()` already refuses to let structure
+ *      override a decisive lexical win *within* one module's decision, and this
+ *      applies the same ordering *across* modules.
  *   2. Then higher `matchWeight` — more shared anchor evidence.
  *   3. Then `moduleId`, purely so the result is deterministic.
  *
@@ -75,12 +78,22 @@ function buildIndex(map: GameMap): Map<string, Locator> {
   return index;
 }
 
-/** Absent `decidedBy` means lexical — the only decision the pre-#1 generator could make. */
-const isStructural = (e: ModuleEntry): boolean => e.decidedBy === 'structural';
+/**
+ * Evidence strength for collision ranking; lower is stronger. Absent `decidedBy`
+ * means lexical — the only decision the pre-#1 generator could make — so every
+ * pre-#1 map keeps outranking structural and edge newcomers exactly as before.
+ */
+function evidenceRank(e: ModuleEntry): number {
+  if (e.decidedBy === 'edge') return 2;
+  if (e.decidedBy === 'structural') return 1;
+  return 0;
+}
 
 /** Does `challenger` hold stronger evidence for a shared stable name than `held`? */
 function beatsForIndex(challenger: ModuleEntry, held: ModuleEntry): boolean {
-  if (isStructural(challenger) !== isStructural(held)) return !isStructural(challenger);
+  const cr = evidenceRank(challenger);
+  const hr = evidenceRank(held);
+  if (cr !== hr) return cr < hr;
   if (challenger.matchWeight !== held.matchWeight) return challenger.matchWeight > held.matchWeight;
   return challenger.moduleId < held.moduleId;
 }

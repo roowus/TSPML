@@ -59,12 +59,15 @@ describe('loadDefaultMap (the bundled 0.6.2 map)', () => {
     }
     // 66 game-logic modules in the 0.6.0-renamed corpus, each one either matched or
     // explicitly unresolved. The split was 56/10 on lexical anchors alone; the #1
-    // structural tie-break promoted six of the residual ten, all hand-verified against
-    // both module bodies (docs/research/structural-fingerprints.md). Exact counts
-    // rather than a floor: they are the tripwire for an unreviewed regeneration, which
-    // is the one way a wrong target reaches a shipped mod.
-    expect(Object.keys(map.modules).length).toBe(62);
-    expect(map.unresolved.length).toBe(4);
+    // structural tie-break promoted six of the residual ten, and the #1 edge pass
+    // rescued two more (7129->8734, 8739->8482) by unique exact require-graph
+    // agreement — all hand-verified against both module bodies
+    // (docs/research/structural-fingerprints.md). The last two (3025, 6979) are
+    // css-loader modules with no pass-1-matched neighbours; honestly unresolved.
+    // Exact counts rather than a floor: they are the tripwire for an unreviewed
+    // regeneration, which is the one way a wrong target reaches a shipped mod.
+    expect(Object.keys(map.modules).length).toBe(64);
+    expect(map.unresolved.length).toBe(2);
     expect(Object.keys(map.modules).length + map.unresolved.length).toBe(66);
   });
 });
@@ -100,6 +103,26 @@ describe('validateMap', () => {
 
   it('rejects a non-array unresolved', () => {
     expect(() => validateMap(baseMap({ unresolved: {} }))).toThrowError(/unresolved/);
+  });
+
+  it("accepts decidedBy 'edge' and preserves edgeConfirmed", () => {
+    const raw = baseMap();
+    Object.assign((raw.modules as Record<string, Record<string, unknown>>)['car-protocol']!, {
+      decidedBy: 'edge',
+      edgeConfirmed: 3,
+    });
+    const map = validateMap(raw);
+    expect(map.modules['car-protocol']!.decidedBy).toBe('edge');
+    expect(map.modules['car-protocol']!.edgeConfirmed).toBe(3);
+  });
+
+  it('rejects an unrecognised decidedBy — fail closed, not "not structural"', () => {
+    // The resolver ranks evidence kinds on stable-name collisions. A typo'd or
+    // future value tolerated as "unknown" would default to the strongest rank and
+    // quietly win collisions it should lose.
+    const raw = baseMap();
+    (raw.modules as Record<string, Record<string, unknown>>)['car-protocol']!.decidedBy = 'edgy';
+    expect(() => validateMap(raw)).toThrowError(/decidedBy/);
   });
 
   it('rejects a non-object root', () => {

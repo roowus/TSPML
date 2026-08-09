@@ -4,7 +4,7 @@
   "bundleHash": "sha256:8495e6a31cfb66b55861188bd8041b38479ee5b50bd412cc1f6c2b17229f6488",
   "generated": {
     "from": "M1 drift spike (tooling/mappings-pipeline)",
-    "matcher": "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, + #1 AST structural tie-break)",
+    "matcher": "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, + #1 AST structural tie-break) + edges.mjs pass 2 (unique exact require-graph agreement, >=2 edges)",
     "granularity": "module + targets (M5-C)",
     "note": "v1 module-level map. `targets` (stable name -> TargetSpec) are hand-curated + carried forward on regen; verify against the new build."
   },
@@ -1286,6 +1286,46 @@
       "sharedAnchors": 6,
       "sourceModuleId": "9681",
       "decidedBy": "lexical"
+    },
+    "meshmatrix": {
+      "concept": "Mesh Matrix",
+      "stableNames": [
+        "meshMatrix",
+        "MeshBasicMaterial",
+        "InstancedMesh",
+        "renderOrder",
+        "getMatrixAt",
+        "multiplyMatrices"
+      ],
+      "subsystem": "Render",
+      "subsystems": [
+        "Render"
+      ],
+      "moduleId": "8482",
+      "matchWeight": 7,
+      "sharedAnchors": 2,
+      "sourceModuleId": "8739",
+      "decidedBy": "edge",
+      "edgeConfirmed": 2
+    },
+    "trackparttransform": {
+      "concept": "Track Part Transform",
+      "stableNames": [
+        "TrackPartTransform",
+        "rotatePartGridPosition",
+        "forEach"
+      ],
+      "subsystem": "Track",
+      "subsystems": [
+        "Track",
+        "Network"
+      ],
+      "moduleId": "8734",
+      "matchWeight": 7,
+      "sharedAnchors": 2,
+      "sourceModuleId": "7129",
+      "decidedBy": "edge",
+      "edgeConfirmed": 3
     }
   },
   "unresolved": [
@@ -1298,7 +1338,7 @@
         "Records",
         "UI"
       ],
-      "reason": "no confident match (best shared anchors: 9/10)"
+      "reason": "no confident match (best shared anchors: 9/10); edges: insufficient-edges (0 translated neighbour(s))"
     },
     {
       "sourceModuleId": "6979",
@@ -1309,24 +1349,7 @@
         "Network",
         "UI"
       ],
-      "reason": "no confident match (best shared anchors: 8/9)"
-    },
-    {
-      "sourceModuleId": "7129",
-      "subsystem": "Track",
-      "subsystems": [
-        "Track",
-        "Network"
-      ],
-      "reason": "no confident match (best shared anchors: 2/4)"
-    },
-    {
-      "sourceModuleId": "8739",
-      "subsystem": "Render",
-      "subsystems": [
-        "Render"
-      ],
-      "reason": "no confident match (best shared anchors: 2/2)"
+      "reason": "no confident match (best shared anchors: 8/9); edges: insufficient-edges (0 translated neighbour(s))"
     }
   ],
   "targets": {

@@ -4,6 +4,11 @@
 > 0.6.0 → 0.6.2 pair, six modules promoted, zero regressions, all six hand-verified.
 > **This corrects [#1](https://github.com/roowus/TSPML/issues/1)'s stated diagnosis** and,
 > with it, a claim in [`mappings-drift-spike.md`](mappings-drift-spike.md).
+>
+> **Follow-up, 2026-08-09:** the call-graph edge pass this document predicted (["The
+> four still open"](#the-four-still-open)) is built and measured — **0.939 → 0.97**,
+> two more modules rescued, two honestly refused. See
+> [the edge pass](#the-edge-pass-1-second-half) below.
 
 ## The premise was wrong
 
@@ -112,6 +117,10 @@ catches cleanly.
 
 ### The four still open
 
+> **Resolved 2026-08-09** — two rescued, two honestly refused; see
+> [the edge pass](#the-edge-pass-1-second-half). The paragraph below is kept as
+> written, because its prediction is what the edge pass was built against.
+
 `3025.js`, `6979.js`, `7129.js`, `8739.js`. All are small and enum//table-shaped, where the
 histogram saturates. `3025` and `6979` are the frustrating ones: their correct target is
 lexically first *and* structurally 1.00000, but so are two or three other candidates.
@@ -196,14 +205,67 @@ The four still open are a strict subset of the ten, with byte-identical `reason`
 (9/10, 8/9, 2/4, 2/2). That subset relation is worth keeping as a check: a regressed
 `bestShared` would show up here as 0/10.
 
+## The edge pass (#1, second half)
+
+> **Date: 2026-08-09. Result: game-logic 0.939 → 0.97** (62 → 64 of 66), two modules
+> rescued by require-graph agreement, two honestly refused. Lives in
+> [`src/edges.mjs`](../../tooling/mappings-pipeline/src/edges.mjs); `match.mjs --edges`
+> measures it, `GEN_EDGES=0` turns it off in the generator (default on).
+
+The prediction above held, with one correction. For the four saturated modules both
+content signals genuinely run out of bits — and for `7129`/`8739`, the correct target
+**never surfaced in the lexical top-K at all**, so no adjudication between surfaced
+candidates could reach them. The edge pass therefore differs from `adjudicate()` in
+kind: it *generates* candidates from the require graph instead of re-ranking lexical
+ones. A signal allowed to invent matches needs stricter gates, not looser ones.
+
+webpack's `require("./N.js")` edges survive minification verbatim — only the ids
+change. For each pass-1-unresolved module, its source edges are translated through the
+pass-1 matches, and a target is accepted only when **(1)** every translated edge is
+present on the target, forward *and* reverse; **(2)** the target has no extra edge to a
+pass-1-claimed module; **(3)** ≥ 2 edges agree — one shared import is how "everything
+requires the math helper" becomes a match; **(4)** exactly one target qualifies; and
+**(5)** no other unresolved source claims the same target. Edges to unmatched modules
+are ignored symmetrically on both sides: an untranslatable source edge cannot be
+checked, and a target edge to an unclaimed module is the mirror image of one.
+
+The two rescues, hand-verified by reading both neighbourhoods:
+
+| src | → | evidence |
+|---|---|---|
+| `7129.js` | `8734.js` | fwd `{1635, 5735→5494}`, rev `{405→2600}` — 3/3 exact; rival `7929` has an extra claimed edge (gate 2), rival `9117` is already claimed |
+| `8739.js` | `8482.js` | fwd `{4922}`, rev `{8971→6762}` — 2/2 exact, unique |
+
+Both targets were unclaimed in the committed map, so the rescues are purely additive.
+`matchWeight`/`sharedAnchors` for edge entries are measured against the *chosen* target
+and are honestly low (7/2 both) — the whole point is that content evidence was
+insufficient; `edgeConfirmed` records the evidence that actually decided.
+
+**The two refusals are the correct answer, not a shortfall.** `3025` and `6979` are
+css-loader modules whose only sibling imports are the two css helpers (`1601`, `6314`)
+— which pass 1 itself never matched — and whose only consumers sit inside the excluded
+>1MB aggregate. Zero translatable neighbours, gate 3, `insufficient-edges`. Their
+`reason` strings in the map now carry the refusal:
+`no confident match (best shared anchors: 9/10); edges: insufficient-edges (0 translated neighbour(s))`.
+(Had the helpers matched, the twins would still tie at gate 4 — they import exactly the
+same pair, which is the `ambiguous` fixture in `tests/edges.test.mjs`.)
+
+`decidedBy: "edge"` ranks **below both content signals** on stable-name collisions —
+lexical > structural > edge — because an edge decision says nothing about the module's
+own body; it is relational evidence used precisely when content saturated. Same
+promotion discipline as before: resolution compared name-by-name, committed vs
+candidate — **245 unchanged, 6 newly resolvable** (all on `8734`/`8482`), **0
+re-pointed, 0 lost**.
+
 ## Reproducing
 
 ```bash
 cd tooling/mappings-pipeline
-pnpm test                        # 107 unit tests, no bundle needed (20 fingerprint, 17 select)
-# the measured rate needs the gitignored cached bundles. Both rates, one command each:
-node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw              # 0.848
-node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw --structural # 0.939
+pnpm test           # 123 unit tests, no bundle needed (20 fingerprint, 17 select, 15 edges)
+# the measured rates need the gitignored cached bundles. Each flag is one measurable delta:
+node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw                      # 0.848
+node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw --structural         # 0.939
+node src/match.mjs .cache/webcrack/v060-renamed .cache/webcrack/v062-raw --structural --edges # 0.97
 ```
 
 Every guard in `fingerprint.mjs` was mutation-checked before being trusted — the defect
@@ -241,3 +303,25 @@ the floor — leader 8 clears it, promoted candidate 7 does not — and asserts 
 candidate's own weight and `accepted: false`. It goes red as intended. A mutation that
 survives is as often a weak test as a redundant guard, and the two are worth telling apart
 before writing either off.
+
+The edge pass's gates were checked the same way — `edges.mjs` against its own 15 tests,
+the resolver/validator additions against `source/mappings`' 32:
+
+| mutation | result |
+|---|---|
+| tolerate a subset — a missing translated edge stops disagreeing (gate 1) | 5 failed / 118 passed |
+| tolerate an extra edge to a claimed module (gate 2) | 1 failed — **after a fixture fix, see below** |
+| drop the ≥2-edge floor to 1 (gate 3) | 1 failed / 122 passed |
+| pick the first qualifier instead of requiring uniqueness (gate 4) | 1 failed / 122 passed |
+| let multiple sources keep the same target (gate 5) | 1 failed / 122 passed |
+| rank `edge` evidence equal to `structural` in the resolver | 1 failed / 31 passed |
+| accept any string as `decidedBy` in the validator | 1 failed / 31 passed |
+| restored | 123 and 32 passed |
+
+**The gate-2 mutation survived its first run, and again the test was at fault.** The
+fixture's decoy `W` required `{A, B, C}` — an extra edge to claimed `C`, yes, but `C` also
+requires `u`'s counterpart in the source, so `W` *additionally* failed the reverse-edge
+requirement of gate 1. Two gates rejected it; deleting one changed nothing. The fixture now
+gives `W` the full translated neighbourhood (fwd `{A, B}` and rev `{C}`) plus one extra edge
+to a claimed `D` that no other gate can see — gate 2 alone rejects it, and the mutation
+goes red.

@@ -44,7 +44,8 @@ Source module `1223.js` (identifiers `controlCar`, `carState`, `createCar`, `car
   regressions. Note that simply lowering the margin is *not* the fix — it would admit the
   exact ties on coin-flip evidence. The four still-unresolved cases are small enum-shaped
   modules where a shape histogram saturates; separating them needs call-graph edges between
-  already-matched modules, which is the open remainder of #1.
+  already-matched modules — built 2026-08-09 as `edges.mjs` (**0.939 → 0.97**, two rescued,
+  two honestly refused), closing the remainder of #1.
 
 ## Caveats / what was NOT tested
 

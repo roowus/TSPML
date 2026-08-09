@@ -1810,3 +1810,41 @@ bundle rewriting (a planned slice — implemented is only the
 marks extension/cli/tests/scripts status inline. 466 tests + build + lint
 green; the resolver test that read `selector.name` without narrowing was
 updated to assert the whole selector object.
+
+## 2026-08-09 — #1 second half: call-graph edges (0.939 -> 0.97), map promoted 62 -> 64 ✅
+
+The signal `structural-fingerprints.md` predicted for "the four still open" is
+built, measured, and shipped. For modules where **both** content signals
+saturate — tiny enum/table modules that fingerprint identically — the one thing
+minification cannot touch is the require graph: `require("./N.js")` edges
+survive verbatim, only the ids change. `src/edges.mjs` translates an unresolved
+module's edges through the pass-1 matches and accepts a target only under five
+gates: exact agreement forward AND reverse, no extra edge to a claimed module,
+>= 2 agreeing edges, a unique qualifying target, and no other unresolved source
+claiming the same one. Any failure returns a *reason*, not a guess.
+
+The design point worth recording: this pass **generates** candidates from the
+graph, where `adjudicate()` only re-ranks lexically surfaced ones — necessary
+because the two rescuable modules' correct targets (`8734`, `8482`) never
+appeared in the lexical top-K at all. A signal allowed to invent matches needs
+stricter gates, not looser ones; that is why "unique exact agreement" rather
+than "best agreement".
+
+**Rescued (hand-verified):** `7129 -> 8734` (fwd `{1635, 5735->5494}`, rev
+`{405->2600}`, 3/3; the rival has an extra claimed edge, gate 2) and
+`8739 -> 8482` (fwd `{4922}`, rev `{8971->6762}`, 2/2, unique). **Refused,
+correctly:** `3025`/`6979` — css-loader modules whose only imports are the two
+css helpers pass 1 itself never matched, consumers only inside the excluded
+aggregate: zero translatable neighbours, `insufficient-edges`, recorded in the
+map's `reason` strings.
+
+`decidedBy: "edge"` ranks below BOTH content signals on stable-name collisions
+(lexical > structural > edge) — relational evidence must not outrank content
+evidence, however confident. The validator still fails closed on unrecognised
+values. Map promoted with the same discipline as last time: resolution compared
+name-by-name — **245 unchanged, 6 newly resolvable, 0 re-pointed, 0 lost**; the
+`map.test.ts` tripwire moved 62/4 -> 64/2 deliberately, in the same commit.
+
+Also fixed en route: `match.mjs`'s unmatched-sample `bestShared` had the same
+read-off-`chooseTarget` defect gen-map fixed earlier (null on decline -> "0
+shared anchors"); it now reads the lexical leader via `topCandidates`.
