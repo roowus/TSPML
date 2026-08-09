@@ -21,6 +21,8 @@
 //
 // Structural tie-breaking (#1) is ON by default and can be disabled with
 // `GEN_STRUCTURAL=0` for an apples-to-apples diff against a pre-#1 map.
+// The call-graph edge pass (#1, second half) is likewise ON by default;
+// `GEN_EDGES=0` disables it.
 //
 // Usage: node scripts/gen-map.mjs
 //   (paths are hardcoded to the pipeline cache; run from the package root.)
@@ -29,6 +31,7 @@ import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chooseTarget, makeFpCache, topCandidates } from "../../../tooling/mappings-pipeline/src/select.mjs";
+import { buildGraphs, resolveByEdges } from "../../../tooling/mappings-pipeline/src/edges.mjs";
 
 const PKG_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CACHE = join(PKG_DIR, "../../../tooling/mappings-pipeline/.cache");
@@ -47,6 +50,9 @@ const PREV_MAP = process.env.GEN_PREV_MAP ?? OUT;
 // Structural tie-breaking (#1). On by default; `GEN_STRUCTURAL=0` reproduces the
 // lexical-only map the pre-#1 generator produced.
 const STRUCTURAL = process.env.GEN_STRUCTURAL !== "0";
+// Call-graph edge pass (#1, second half). On by default; `GEN_EDGES=0` reproduces
+// the content-signals-only map.
+const EDGES = process.env.GEN_EDGES !== "0";
 
 // ---------------------------------------------------------------------------
 // Matcher (verbatim from tooling/mappings-pipeline/src/match.mjs)
@@ -306,7 +312,56 @@ for (const m of srcMods) {
       subs: subs.length ? subs : ["Unknown"],
       anchors: m.anchors.size,
       bestShared: lexLeader ? lexLeader.count : 0,
+      mod: m, // pass 2 needs the module back (names, direct-evidence measurement)
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2 (#1, second half): call-graph edges, for modules where BOTH content
+// signals saturate. Candidates are GENERATED from the translated require graph,
+// not re-ranked from the lexical top-K — measured on the real pair, the correct
+// targets for the rescuable modules never surfaced lexically at all. Only
+// pass-1-unresolved modules are touched, so pass 2 cannot re-point anything
+// pass 1 matched: additivity holds by construction, not by diffing.
+// ---------------------------------------------------------------------------
+const edgeReasons = new Map(); // srcId -> refusal detail, surfaced in `unresolved`
+if (EDGES && unresolved.length > 0) {
+  const srcGraphs = buildGraphs(srcMods);
+  const tgtGraphs = buildGraphs(tgtMods);
+  // The landmark set is the pass-1 matches: every edge an edge-decision rests on
+  // connects two modules the content signals already placed with full evidence.
+  const translation = new Map(matched.map((p) => [p.srcId, p.tgtId]));
+  const results = resolveByEdges(
+    unresolved.map((u) => u.srcId),
+    srcGraphs,
+    tgtGraphs,
+    translation,
+  );
+  for (let i = unresolved.length - 1; i >= 0; i -= 1) {
+    const u = unresolved[i];
+    const res = results.get(u.srcId);
+    if (res?.ok) {
+      const m = u.mod;
+      // matchWeight/sharedAnchors are measured against the CHOSEN target with the
+      // same metric as pass 1 — honestly low (that is why pass 1 failed here), and
+      // that is fine: 'edge' ranks below both content signals on name collisions.
+      const tgt = tgtMods.find((t) => t.name === `${res.tgtId}.js`);
+      const direct = tgt ? sharedWeight(m, tgt) : { w: 0, count: 0 };
+      matched.push({
+        srcId: u.srcId,
+        tgtId: res.tgtId,
+        count: direct.count,
+        w: Math.round(direct.w),
+        subs: u.subs,
+        names: stableNames(m.idents, identDocFreq),
+        decidedBy: "edge",
+        edgeConfirmed: res.confirmed,
+      });
+      unresolved.splice(i, 1);
+    } else if (res) {
+      edgeReasons.set(u.srcId, res.detail ? `${res.reason} (${res.detail})` : res.reason);
+    }
   }
 }
 
@@ -331,6 +386,7 @@ for (const m of matched) {
     sourceModuleId: m.srcId,
     decidedBy: m.decidedBy,
     ...(m.structural !== undefined ? { structuralSimilarity: m.structural } : {}),
+    ...(m.edgeConfirmed !== undefined ? { edgeConfirmed: m.edgeConfirmed } : {}),
   };
   for (const n of m.names) {
     const k = n.toLowerCase();
@@ -346,7 +402,15 @@ const unresolvedOut = unresolved.map((u) => ({
   sourceModuleId: u.srcId,
   subsystem: u.subs[0],
   subsystems: u.subs,
-  reason: `no confident match (best shared anchors: ${u.bestShared}/${u.anchors})`,
+  // The edge refusal is appended, not substituted: `bestShared` documents why the
+  // content signals failed, the edge reason documents why the graph could not step
+  // in. For the css-loader modules the latter reads `ambiguous` — their imports are
+  // the same two helpers every css module has, and their only consumers are numeric
+  // requires inside the excluded >1MB aggregate, so no non-aggregate edge separates
+  // the twins.
+  reason:
+    `no confident match (best shared anchors: ${u.bestShared}/${u.anchors})` +
+    (edgeReasons.has(u.srcId) ? `; edges: ${edgeReasons.get(u.srcId)}` : ""),
 }));
 
 const bundle = await readFile(BUNDLE);
@@ -358,9 +422,11 @@ const map = {
   bundleHash,
   generated: {
     from: "M1 drift spike (tooling/mappings-pipeline)",
-    matcher: STRUCTURAL
-      ? "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, + #1 AST structural tie-break)"
-      : "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, lexical only)",
+    matcher:
+      (STRUCTURAL
+        ? "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, + #1 AST structural tie-break)"
+        : "shared select.mjs (margin 1.25, >=2 anchors w>=8 | 1 anchor w>=5, lexical only)") +
+      (EDGES ? " + edges.mjs pass 2 (unique exact require-graph agreement, >=2 edges)" : ""),
     granularity: "module + targets (M5-C)",
     note: "v1 module-level map. `targets` (stable name -> TargetSpec) are hand-curated + carried forward on regen; verify against the new build.",
   },
@@ -392,9 +458,11 @@ const verify = ["1196", "1223", "1312", "1635", "1728", "1882", "2108", "2203", 
 const seen = new Set(matched.map((m) => m.srcId));
 const missing = verify.filter((id) => !seen.has(id));
 const promoted = matched.filter((m) => m.decidedBy === "structural");
+const edgeWins = matched.filter((m) => m.decidedBy === "edge");
 console.error(`bundleHash      : ${bundleHash}`);
 console.error(`matched modules : ${matched.length}`);
 console.error(`structural      : ${STRUCTURAL ? `on, ${promoted.length} tie-breaks (${promoted.map((m) => `${m.srcId}->${m.tgtId}`).join(", ") || "none"})` : "off (lexical only)"}`);
+console.error(`edges           : ${EDGES ? `on, ${edgeWins.length} rescued (${edgeWins.map((m) => `${m.srcId}->${m.tgtId}`).join(", ") || "none"})` : "off"}`);
 console.error(`unresolved      : ${unresolved.length}`);
 console.error(`stable names    : ${Object.keys(stableIndex).length} (collisions: ${collisions.length})`);
 console.error(`example pairs   : ${verify.length - missing.length}/${verify.length} reproduced${missing.length ? ` (missing: ${missing.join(",")})` : ""}`);

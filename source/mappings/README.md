@@ -74,8 +74,9 @@ Tests do not require a build — vitest runs the TS sources directly.
   stateless `resolve(map, stableName, ctx)`.
 - The `GameMap` / `ModuleEntry` / `Locator` / `ResolveResult` types and
   `MAP_FORMAT_VERSION`.
-- The bundled `maps/polytrack-0.6.2.json` (62 modules, 4 unresolved — 56/10 before the #1
-  structural tie-break promoted six; promotion re-pointed **0** existing stable names).
+- The bundled `maps/polytrack-0.6.2.json` (64 modules, 2 unresolved — 56/10 on lexical
+  anchors alone, +6 from the #1 structural tie-break, +2 from the #1 call-graph edge
+  pass; both promotions re-pointed **0** existing stable names).
 
 ## Regenerating the map
 

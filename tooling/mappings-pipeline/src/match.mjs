@@ -7,22 +7,28 @@
 //   - a curated GAME-LOGIC metric (modules the rename gave real game names) as the
 //     primary go/no-go signal, since broad buckets catch CSS/utility chaff
 //
-// Usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json] [--structural]
+// Usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json] [--structural] [--edges]
 //
 // `--structural` enables the #1 AST tie-breaker. It is OFF by default so this stays the
 // baseline measurement it has always been, and so the two rates are producible from one
 // command with one flag — the delta is the entire claim of #1, and it should not require
 // checking out an older commit to see the other half of it.
+//
+// `--edges` additionally enables the pass-2 call-graph rescue (#1, second half) over the
+// modules pass 1 left unresolved. Also off by default, for the same reason: each flag is
+// one measurable delta.
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join, basename } from "node:path";
-import { chooseTarget, makeFpCache } from "./select.mjs";
+import { chooseTarget, makeFpCache, topCandidates } from "./select.mjs";
+import { buildGraphs, resolveByEdges } from "./edges.mjs";
 
 const argv = process.argv.slice(2);
 const STRUCTURAL = argv.includes("--structural");
+const EDGES = argv.includes("--edges");
 const positional = argv.filter((a) => !a.startsWith("--"));
 const [SRC, TGT, OUT] = positional;
 if (!SRC || !TGT) {
-  console.error("usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json] [--structural]");
+  console.error("usage: node src/match.mjs <src-unpacked> <tgt-unpacked> [report.json] [--structural] [--edges]");
   process.exit(2);
 }
 
@@ -151,6 +157,10 @@ let promotions = 0;
 // `.code` for shapes), so adapt rather than changing the scorer's signature.
 const weighOf = (a, b) => sharedWeight(a.anchors, b.anchors);
 
+// Pass 1: per-module content decision. Wins are recorded as the translation the
+// optional edge pass steps through; losses are carried so pass 2 can retry them.
+const translation = new Map(); // src id -> tgt id, accepted pass-1 picks only
+const leftovers = []; // { m, gl, subs, pick } — pass-1 rejects, pass-2 input
 for (const m of srcMods) {
   if (m.anchors.size === 0) continue;
   total += 1;
@@ -163,13 +173,16 @@ for (const m of srcMods) {
     structural: STRUCTURAL,
   });
   const ok = !!pick?.accepted;
+  const subs = classify(m);
   if (ok) {
     matched += 1;
     if (gl) glMatched += 1;
     if (pick.decidedBy === "structural") promotions += 1;
     tgtWins.set(pick.name, (tgtWins.get(pick.name) || 0) + 1);
+    translation.set(m.name.replace(/\.js$/, ""), pick.name.replace(/\.js$/, ""));
+  } else {
+    leftovers.push({ m, gl, subs, pick });
   }
-  const subs = classify(m);
   for (const s of subs) {
     (perSub[s] ??= { total: 0, matched: 0 });
     perSub[s].total += 1;
@@ -177,8 +190,47 @@ for (const m of srcMods) {
   }
   if (ok && examples.length < 15 && gl)
     examples.push({ src: m.name, tgt: pick.name, shared: pick.count, w: Math.round(pick.w), subs, decidedBy: pick.decidedBy });
-  else if (!ok && unmatched.length < 15 && gl)
-    unmatched.push({ src: m.name, subs, anchors: m.anchors.size, bestShared: pick ? pick.count : 0 });
+}
+
+// Pass 2 (--edges): rescue pass-1 rejects by unique exact require-graph agreement,
+// stepped through the pass-1 translation. Runs over the SAME population pass 1
+// counted, so the rates stay comparable — a rescue moves a module from unmatched to
+// matched, it never widens the denominator.
+let edgeRescues = 0;
+const edgeRescued = new Set();
+if (EDGES && leftovers.length > 0) {
+  const srcGraphs = buildGraphs(srcMods);
+  const tgtGraphs = buildGraphs(tgtMods);
+  const results = resolveByEdges(
+    leftovers.map((l) => l.m.name.replace(/\.js$/, "")),
+    srcGraphs,
+    tgtGraphs,
+    translation,
+  );
+  for (const l of leftovers) {
+    const srcId = l.m.name.replace(/\.js$/, "");
+    const res = results.get(srcId);
+    if (!res?.ok) continue;
+    edgeRescues += 1;
+    edgeRescued.add(srcId);
+    matched += 1;
+    if (l.gl) glMatched += 1;
+    tgtWins.set(`${res.tgtId}.js`, (tgtWins.get(`${res.tgtId}.js`) || 0) + 1);
+    for (const s of l.subs) perSub[s].matched += 1;
+    if (examples.length < 15 && l.gl)
+      examples.push({ src: l.m.name, tgt: `${res.tgtId}.js`, edgeConfirmed: res.confirmed, subs: l.subs, decidedBy: "edge" });
+  }
+}
+for (const l of leftovers) {
+  if (edgeRescued.has(l.m.name.replace(/\.js$/, ""))) continue;
+  if (unmatched.length < 15 && l.gl) {
+    // `bestShared` must come from the lexical leader, not from `pick` — chooseTarget
+    // returns null exactly when it declines (tie / sub-margin), which would report 0
+    // shared anchors for a module that shares plenty. Same defect gen-map already
+    // fixed; it survived here because this sample was diagnostic-only.
+    const [lexLeader] = topCandidates(l.m, tgtMods, weighOf, 1);
+    unmatched.push({ src: l.m.name, subs: l.subs, anchors: l.m.anchors.size, bestShared: lexLeader ? lexLeader.count : 0 });
+  }
 }
 
 const perSubOut = Object.fromEntries(
@@ -191,6 +243,8 @@ const report = {
   tgt: TGT,
   structural: STRUCTURAL,
   structuralPromotions: promotions,
+  edges: EDGES,
+  edgeRescues,
   srcModules: srcMods.length,
   tgtModules: tgtMods.length,
   srcWithAnchors: total,
