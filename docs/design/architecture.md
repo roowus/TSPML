@@ -29,7 +29,7 @@
 
 ## The three layers
 
-1. **Loader core** (`source/loader`) — clean TS, no minification coupling. Discovers mod packages, parses `mod.json`, resolves semver dependencies (`depends`/`recommends`/`suggests`/`conflicts`/`breaks`), topologically orders mods (cycle detection + explicit conflict errors), and invokes entrypoints `mod.default(api, game)`. This is a near 1:1 port of Fabric Loader and is the most transferable part.
+1. **Loader core** (`source/loader`) — clean TS, no minification coupling. Discovers mod packages, parses `mod.json`, resolves semver dependencies (`depends`/`recommends`/`suggests`/`conflicts`/`breaks` — `breaks` soft-disables the declaring mod rather than aborting, #6), topologically orders mods (cycle detection + explicit conflict errors), and invokes entrypoints `mod.default(api, game)`. This is a near 1:1 port of Fabric Loader and is the most transferable part.
 
 2. **Mappings file** (`source/mappings`) — the Yarn/Intermediary analog and TSPML's moat. A versioned JSON, one per PolyTrack build, mapping stable names (`Car.controlCar`, `Track.afterLoad`, `physics.postStep`) → concrete locators (`exportRef` / `prototypeFn` / `callExpression` anchor). Mods target **stable names only**; the resolver maps stable → concrete at bind time. See [mappings-system.md](./mappings-system.md).
 

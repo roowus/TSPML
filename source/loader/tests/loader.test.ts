@@ -119,6 +119,37 @@ describe('load — error isolation', () => {
       }),
     ).rejects.toBeInstanceOf(DependencyError);
   });
+
+  it("soft-disables a mod declaring 'breaks' on an installed mod: status entry, never invoked (#6)", async () => {
+    const ran: string[] = [];
+    const factory = (id: string) => () => {
+      ran.push(id);
+    };
+    const result = await load(
+      [
+        descriptor('breaker', { breaks: { victim: '*' } }),
+        descriptor('victim'),
+        descriptor('bystander'),
+      ],
+      {
+        importEntry: fakeImportEntry({
+          breaker: factory('breaker'),
+          victim: factory('victim'),
+          bystander: factory('bystander'),
+        }),
+        api: noopApi,
+      },
+    );
+
+    // The breaker never ran — soft-disabled is a resolution outcome, not an
+    // entrypoint failure — while the target and the bystander loaded.
+    expect(ran.sort()).toEqual(['bystander', 'victim']);
+    expect(result.status['victim']).toEqual({ status: 'loaded' });
+    expect(result.status['bystander']).toEqual({ status: 'loaded' });
+    expect(result.status['breaker']).toMatchObject({ status: 'disabled' });
+    expect((result.status['breaker'] as { reason: string }).reason).toMatch(/breaks/);
+    expect(result.order.map((m) => m.id)).not.toContain('breaker');
+  });
 });
 
 describe('load — entrypoint contract', () => {

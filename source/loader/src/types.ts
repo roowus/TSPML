@@ -107,7 +107,11 @@ export type WarningKind =
   | 'missing-suggests'
   | 'incompatible-target'
   /** `includes` is validated but not implemented — the nested mod won't load (#16). */
-  | 'unsupported-includes';
+  | 'unsupported-includes'
+  /** The mod declared `breaks` on something installed — the DECLARING mod is soft-disabled (#6). */
+  | 'breaks-disabled'
+  /** The mod's `depends` is only satisfiable by a disabled mod — it cascades to disabled (#6). */
+  | 'disabled-dependency';
 
 export interface Warning {
   kind: WarningKind;
@@ -123,11 +127,23 @@ export interface Warning {
  */
 export type ModLoadStatus =
   | { status: 'loaded' }
-  | { status: 'failed'; reason: string };
+  | { status: 'failed'; reason: string }
+  /**
+   * Soft-disabled by dependency resolution (#6): the mod declared `breaks` on
+   * something installed, or depends on a mod that did. Its entrypoint was
+   * never invoked — this is a resolution outcome, not an execution failure.
+   */
+  | { status: 'disabled'; reason: string };
 
 export interface ResolveResult {
   order: Mod[];
   warnings: Warning[];
+  /**
+   * Mods soft-disabled by `breaks` (#6) — the declaring mods plus any mod
+   * whose `depends` only a disabled mod could satisfy. Excluded from `order`;
+   * sorted by id. Each reason also appears as a warning.
+   */
+  disabled: Array<{ id: string; reason: string }>;
 }
 
 /** What happened to one mod's cleanup during {@link LoadResult.unload}. */

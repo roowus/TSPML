@@ -11,7 +11,7 @@ import type {
 } from './types.js';
 import { stubApi } from './types.js';
 import { ManifestError, parseVersionManifest } from './manifest.js';
-import { DependencyError, modFromManifest, resolveDependencies } from './dependency.js';
+import { modFromManifest, resolveDependencies } from './dependency.js';
 
 /**
  * A mod awaiting load. `manifest` is the raw `mod.json`-shaped object; the
@@ -74,9 +74,12 @@ function isClass(fn: Function): boolean {
  *
  * - Manifest failures and entrypoint failures are isolated per mod (fail small,
  *   never boot-abort — a core TSPML principle vs PML).
- * - Resolution failures (missing `depends`, version conflict, `breaks`, cycle)
- *   are abortive and propagate as a {@link DependencyError}; a partially
- *   cyclic/ conflicting set genuinely cannot be ordered.
+ * - Resolution failures (missing `depends`, version conflict, cycle) are
+ *   abortive and propagate as a `DependencyError`; a partially cyclic/
+ *   conflicting set genuinely cannot be ordered.
+ * - `breaks` is NOT abortive (#6, Fabric-accurate): the declaring mod (and any
+ *   mod depending on it) is soft-disabled — reported with status `'disabled'`,
+ *   its entrypoint never invoked — while everything else loads.
  *
  * @returns the ordered mods, per-mod status, and dependency warnings.
  */
@@ -108,10 +111,17 @@ export async function load(
   }
 
   // 2. Resolve + order. Resolution errors abort the whole load (see jsdoc).
-  const { order, warnings } = resolveDependencies(
+  const { order, warnings, disabled } = resolveDependencies(
     prepared.map((p) => p.mod),
     options.context,
   );
+
+  // 2b. Soft-disabled mods (#6): status entry with the resolver's reason, no
+  //     invocation. A mod the resolver excluded must still be visible in the
+  //     report — an id silently absent from `status` reads as "we forgot it".
+  for (const d of disabled) {
+    status[d.id] = { status: 'disabled', reason: d.reason };
+  }
 
   // 3. Invoke entrypoints in dependency order, isolated per mod.
   const entryByMod = new Map(prepared.map((p) => [p.mod.id, p.entrySpecifier]));
