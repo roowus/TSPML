@@ -13,7 +13,8 @@
     "smoke:tracks": "node scripts/smoke-tracks.mjs",
     "smoke:audio": "node scripts/smoke-audio.mjs",
     "smoke:usermods": "node scripts/smoke-user-mods.mjs",
-    "smoke:ui": "node scripts/smoke-ui.mjs"
+    "smoke:ui": "node scripts/smoke-ui.mjs",
+    "shot:check": "node scripts/shot-check.mjs"
   },
   "dependencies": {
     "@tspml/api": "workspace:*",
