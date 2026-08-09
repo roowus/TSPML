@@ -1,0 +1,377 @@
+/*
+ * Portal styles. The Play page used to carry everything as inline style
+ * objects; hover states, media queries, and :fullscreen rules cannot be
+ * expressed that way, so the layout revamp moved the styling here.
+ *
+ * Smoke contract note: the headless smokes assert on innerText and structural
+ * selectors (aside[aria-label="Mods"], li > code + span, the Add form's
+ * <summary>). Pure-presentation changes here are safe; changes that hide
+ * content (display:none, collapsed <details>) are not.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: #14171f;
+  --panel-deep: #0d1117;
+  --border: #21262d;
+  --border-strong: #30363d;
+  --text: #e6e8ee;
+  --text-body: #c9d1d9;
+  --muted: #9aa4b2;
+  --green: #3fb950;
+  --red: #f85149;
+  --amber: #d29922;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ---- Page frame: slim top bar, game fills the rest ---- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: 10px 14px 14px;
+  gap: 10px;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 19px;
+  display: inline;
+}
+
+.tagline {
+  margin: 0 0 0 10px;
+  display: inline;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.sw-badge {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sw-badge .sw-error {
+  color: var(--muted);
+  font-weight: 400;
+  white-space: normal;
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  min-height: 0; /* lets the stage/sidebar shrink instead of overflowing */
+}
+
+/* ---- Game stage ---- */
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.stage:fullscreen {
+  border-radius: 0;
+}
+
+.game-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.fs-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  background: rgba(13, 17, 23, 0.72);
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 5px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.55;
+  backdrop-filter: blur(4px);
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.fs-btn:hover,
+.fs-btn:focus-visible {
+  opacity: 1;
+  background: rgba(13, 17, 23, 0.92);
+}
+
+.stage-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.stage-hint {
+  font-size: 12px;
+  max-width: 320px;
+  text-align: center;
+  line-height: 1.5;
+  opacity: 0.8;
+}
+
+/* ---- Sidebar ---- */
+
+.sidebar {
+  width: 340px;
+  flex: none;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.side-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar > .side-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.side-section > h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rows li {
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+}
+
+.rows li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.row-head code {
+  font-size: 13px;
+}
+
+.row-buttons {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.status-pill {
+  display: inline-block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex: none;
+}
+
+.meta {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.warn {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--amber);
+  line-height: 1.5;
+}
+
+.restart-banner {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(210, 153, 34, 0.12);
+  border: 1px solid rgba(210, 153, 34, 0.55);
+  border-radius: 8px;
+  color: var(--amber);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* ---- Buttons ---- */
+
+.btn {
+  background: #21262d;
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #2b313a;
+  border-color: #3d444d;
+}
+
+.btn-small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.btn-primary {
+  margin-top: 10px;
+  padding: 6px 14px;
+  background: #238636;
+  border-color: #2ea043;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: #2ea043;
+}
+
+/* ---- Add-a-mod form ---- */
+
+.add-form {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.add-form summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.add-form summary:hover {
+  color: #fff;
+}
+
+.add-label {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.add-form textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px;
+  background: var(--panel-deep);
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+
+/* ---- Status rows ---- */
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--text-body);
+}
+
+.status-row:first-of-type {
+  margin-top: 0;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* ---- Narrow screens: stack, game keeps a 16:9 box ---- */
+
+@media (max-width: 900px) {
+  .app {
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .content {
+    flex-direction: column;
+  }
+
+  .stage {
+    flex: none;
+    aspect-ratio: 16 / 9;
+  }
+
+  .sidebar {
+    width: auto;
+    overflow-y: visible;
+  }
+}

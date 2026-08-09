@@ -6,7 +6,7 @@ Vercel-hosted Next.js web app — TSPML's **flagship delivery surface**. It play
 bridge the mods bind to. The architecture is described in
 [`docs/design/injection-and-delivery.md`](../../docs/design/injection-and-delivery.md).
 
-> **Status:** run-validated end to end by four committed headless smokes (below). A real
+> **Status:** run-validated end to end by five committed headless smokes (below). A real
 > mod loads, six Tier-1 events fire during a real race, a mod-declared mixin applies,
 > `api.tracks` puts a mod's track in the game's own Custom tracks list, `api.audio`
 > replaces one of the game's own sounds, and a **pasted user mod's mixins.json** is
@@ -124,6 +124,7 @@ surface a **restart banner** rather than pretending to apply live.
 | --- | --- |
 | `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the demo mods + the user's added mods, and renders the live sidebar (including the "Add a mod" form). |
 | `app/layout.tsx` | Root layout (App Router). |
+| `app/globals.css` | All page styling (the page used to inline it; hover/fullscreen/media-query rules can't be inline). The smokes assert on rendered text + structure, so presentation-only changes here are safe. |
 | `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/POST/OPTIONS) + the three `<head>` injections + the bundle transform. POST is the SW's plan-carrying bundle fetch (#62) — the upstream fetch is always GET, the body never leaves the route. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
 | `lib/rewrite.ts` | Canonical pure `rewriteGameUrl()` + `isGameHost()` — the only place the rewrite rules live (unit-tested). |
 | `lib/demo-transform.ts` | Mappings `{symbol}` resolution + the hash-gated application of `@tspml/shared`'s patches, composed with user patch sets (#62: base all-or-nothing, user per-mod isolated, replace pre-screen). Never throws: on any mismatch the bundle is served untouched. |
@@ -133,7 +134,7 @@ surface a **restart banner** rather than pretending to apply live.
 | `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener + the #62 plan-to-POST replay for the bundle fetch. |
 | `tests/rewrite.test.ts` | vitest unit tests for the rewrite. |
 | `tests/user-mods.test.ts` / `tests/user-patches.test.ts` / `tests/demo-transform.test.ts` | vitest unit tests for the user-mod storage layer + loader path (injected import — node can't feed a Blob URL to `import()`), the #62 plan mechanism, and the compose contracts (driven with a synthetic bundle + map). |
-| `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs`, `scripts/smoke-user-mods.mjs` | Playwright headless proofs against the live game (see below). |
+| `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs`, `scripts/smoke-user-mods.mjs`, `scripts/smoke-ui.mjs` | Playwright headless proofs against the live game (see below). |
 
 ## Commands
 
@@ -157,6 +158,7 @@ pnpm --filter @tspml/portal smoke                   # terminal 2: boot + mods + 
 pnpm --filter @tspml/portal smoke:tracks            # terminal 2: the api.tracks registry
 pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio registry
 pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user mods + pasted mixins
+pnpm --filter @tspml/portal smoke:ui                # terminal 2: fullscreen + responsive layout
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -187,7 +189,12 @@ transform's LIVE badge survive (per-mod isolation) → disable runs its disposer
 it (bundled mods untouched) → remove clears the stored records. Unlike the other smokes
 it **requires** `TSPML_TRANSFORM=1` — the mixin legs assert on the transformed bundle.
 
-All four portal smokes run in CI (`.github/workflows/smoke.yml`, closing
+`smoke-ui.mjs` covers the page as a surface rather than the sidebar's claims: the
+stage's fullscreen button enters/exits fullscreen on the stage wrapper (so the exit
+control stays visible), the label flips, and at phone width the sidebar stacks below
+the game. It is the only smoke that does not need `TSPML_TRANSFORM`.
+
+All five portal smokes run in CI (`.github/workflows/smoke.yml`, closing
 [#25](https://github.com/roowus/TSPML/issues/25)) — advisory on PRs plus a daily
 schedule, never merge-gating, because they fetch the live upstream game and can go
 red on a Kodub release rather than a commit. A `pinned-bundle` canary job runs first
