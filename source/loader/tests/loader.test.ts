@@ -150,6 +150,36 @@ describe('load — error isolation', () => {
     expect((result.status['breaker'] as { reason: string }).reason).toMatch(/breaks/);
     expect(result.order.map((m) => m.id)).not.toContain('breaker');
   });
+
+  it('soft-disables environment and targets mismatches when the context states them (#21)', async () => {
+    const ran: string[] = [];
+    const factory = (id: string) => () => {
+      ran.push(id);
+    };
+    const result = await load(
+      [
+        descriptor('desktop-only', { environment: 'desktop' }),
+        descriptor('stale', { targets: ['>=0.7.0'] }),
+        descriptor('fits', { environment: 'web', targets: ['0.6.x'] }),
+      ],
+      {
+        importEntry: fakeImportEntry({
+          'desktop-only': factory('desktop-only'),
+          stale: factory('stale'),
+          fits: factory('fits'),
+        }),
+        api: noopApi,
+        context: { hostEnvironment: 'web', polytrackVersion: '0.6.2' },
+      },
+    );
+
+    expect(ran).toEqual(['fits']);
+    expect(result.status['fits']).toEqual({ status: 'loaded' });
+    expect(result.status['desktop-only']).toMatchObject({ status: 'disabled' });
+    expect((result.status['desktop-only'] as { reason: string }).reason).toMatch(/environment 'desktop'/);
+    expect(result.status['stale']).toMatchObject({ status: 'disabled' });
+    expect((result.status['stale'] as { reason: string }).reason).toMatch(/targets '>=0\.7\.0'/);
+  });
 });
 
 describe('load — entrypoint contract', () => {

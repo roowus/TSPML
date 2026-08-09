@@ -55,7 +55,14 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 |---|---|---|
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
 
-Closed since the last update: [#67](https://github.com/roowus/TSPML/issues/67)
+Closed since the last update: [#21](https://github.com/roowus/TSPML/issues/21)
+(`environment` and `targets` are now enforced: mismatches **soft-disable** the mod via
+the #6 machinery — excluded from the order with `environment-mismatch` /
+`incompatible-target` warnings, dependents cascading — when the host states
+`hostEnvironment` / `polytrackVersion` in the new `ResolveContext` fields; the portal
+states both, honors mixin-descriptor `environment` in the patch plan and demo mixins,
+and the spec now tells the truth about capabilities/vanillaSafe/special ids),
+[#67](https://github.com/roowus/TSPML/issues/67)
 (mod keybinds now survive game-frame reloads — `Keybinds.retarget(window)` moves the
 listeners to the new frame window while keeping every registered binding; previously
 only the FIRST frame's window ever got listeners, so any in-place iframe reload or

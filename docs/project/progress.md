@@ -1676,3 +1676,47 @@ Tests: 5 new cases in `keybinds.test.ts` (fires on new window / not old with
 bindings kept, same-window no-op, dead-realm detach throw survived, re-attach
 after dispose, dispose-after-retarget). 46 api-bridge tests; `pnpm -r test` /
 build / lint green.
+
+## 2026-08-08 — #21: `environment` and `targets` are enforced (soft-disable), spec truthed up ✅
+
+Issue [#21](https://github.com/roowus/TSPML/issues/21): several documented
+`mod.json` fields were parsed, validated, copied onto `Mod` — and then consulted
+by nothing. `environment` filtered no mods and no mixins; mixin-descriptor
+`environment` was ignored by the portal; `WarningKind` declared
+`'incompatible-target'` but nothing emitted it, because `targets` mismatches
+hard-threw and aborted the whole load — the exact failure mode #6 removed for
+`breaks`.
+
+Loader: two new resolver passes ride #6's soft-disable machinery, after the
+`breaks` pass and before the cascade. When the host states `hostEnvironment`
+(new `ResolveContext` field), a mod declaring a *different concrete*
+`environment` is disabled with an `'environment-mismatch'` warning — `'*'` on
+either side means no constraint. When the host states `polytrackVersion`, a mod
+whose non-empty `targets` (ranges OR'd) don't match is disabled with the revived
+`'incompatible-target'` warning. First matching reason wins (breaks →
+environment → targets); dependents cascade through the existing 0b pass; the
+old step-1 hard-throw is gone. A host stating neither fact filters nothing —
+resolution behaves exactly as before.
+
+Portal: `PORTAL_RESOLVE_CONTEXT` states what the portal IS — `{ hostEnvironment:
+'web', polytrackVersion }` — once, threaded through both the pre-gate fixpoint
+and `load()` so the two passes cannot disagree about what throws
+(`tspml`/`tspml-api` stay version-less until the packages carry honest versions,
+#73). Mixin-descriptor `environment` is honored end-to-end: `demo-mods.ts` only
+contributes a bundled config's patches when its descriptor applies to the web
+host, `buildUserPatchPlan` skips pasted mixins whose manifest declares them all
+for another environment (reported via new `envSkipped` + a UI notice, never
+silently), and `mixinsSkipped` stops nagging for unpasted configs that wouldn't
+apply here anyway. One predicate (`lib/mixin-env.ts`) and one host constant
+serve all three call sites plus the resolve context.
+
+Spec truth-up: `mod-json-spec.md` now documents the soft-disable semantics for
+`environment`/`targets`, the honored mixin-descriptor environment, capabilities
+as "warn-only shipped, consent/scoping reserved", and the real state of the
+special dep ids. Loader README + architecture.md updated to match.
+
+Tests: 11 new/rewritten loader cases (env mismatch/match/unknown-host/`'*'`-host,
+targets unknown-version/empty/OR-ranges, cascades, first-reason-wins, plus the
+end-to-end `load()` soft-disable) and 13 new portal cases (mixin-env predicate,
+plan `envSkipped`, desktop-only/stale-targets user mods failed-with-reason while
+bundled mods load, context override). 86 loader + 80 portal tests green.

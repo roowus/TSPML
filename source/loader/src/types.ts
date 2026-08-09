@@ -81,6 +81,9 @@ export interface Mod {
   version: string;
   /** Higher = loads earlier. Tiebreak only; never overrides topo order. */
   priority: number;
+  /** Where the mod runs; `'*'` = anywhere. Checked against
+   *  {@link ResolveContext.hostEnvironment} — a mismatch soft-disables (#21). */
+  environment: Environment;
   targets: string[];
   depends: DependencyMap;
   recommends: DependencyMap;
@@ -92,20 +95,32 @@ export interface Mod {
 }
 
 /**
- * Ambient versions used to resolve the special dependency ids
- * `polytrack`, `tspml`, and `tspml-api`.
+ * Ambient facts about the host: versions used to resolve the special
+ * dependency ids `polytrack`, `tspml`, and `tspml-api`, plus which
+ * environment is running (#21). Every field is optional — an omitted fact
+ * means the corresponding check simply doesn't run, never that it fails.
  */
 export interface ResolveContext {
   polytrackVersion?: string;
   loaderVersion?: string;
   apiVersion?: string;
+  /**
+   * The environment the host IS ('web' for the portal/dev-harness). When set,
+   * a mod declaring a different concrete `environment` is soft-disabled (#21).
+   * `'*'` here would be meaningless (a host is always something concrete) and
+   * is treated the same as omitting the field: no filtering.
+   */
+  hostEnvironment?: Environment;
 }
 
 export type WarningKind =
   | 'conflict'
   | 'missing-recommendation'
   | 'missing-suggests'
+  /** The mod's `targets` ranges don't accept the running PolyTrack version — soft-disabled (#21). */
   | 'incompatible-target'
+  /** The mod declares a concrete `environment` that isn't the host's — soft-disabled (#21). */
+  | 'environment-mismatch'
   /** `includes` is validated but not implemented — the nested mod won't load (#16). */
   | 'unsupported-includes'
   /** The mod declared `breaks` on something installed — the DECLARING mod is soft-disabled (#6). */
@@ -129,9 +144,11 @@ export type ModLoadStatus =
   | { status: 'loaded' }
   | { status: 'failed'; reason: string }
   /**
-   * Soft-disabled by dependency resolution (#6): the mod declared `breaks` on
-   * something installed, or depends on a mod that did. Its entrypoint was
-   * never invoked — this is a resolution outcome, not an execution failure.
+   * Soft-disabled by dependency resolution: the mod declared `breaks` on
+   * something installed or depends on a disabled mod (#6), doesn't run in the
+   * host's environment, or doesn't target the running game version (#21). Its
+   * entrypoint was never invoked — this is a resolution outcome, not an
+   * execution failure.
    */
   | { status: 'disabled'; reason: string };
 
@@ -139,9 +156,10 @@ export interface ResolveResult {
   order: Mod[];
   warnings: Warning[];
   /**
-   * Mods soft-disabled by `breaks` (#6) — the declaring mods plus any mod
-   * whose `depends` only a disabled mod could satisfy. Excluded from `order`;
-   * sorted by id. Each reason also appears as a warning.
+   * Mods soft-disabled by resolution — `breaks` declarers and their dependents
+   * (#6), environment mismatches, targets mismatches (#21), plus any mod whose
+   * `depends` only a disabled mod could satisfy. Excluded from `order`; sorted
+   * by id. Each reason also appears as a warning.
    */
   disabled: Array<{ id: string; reason: string }>;
 }

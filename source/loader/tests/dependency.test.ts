@@ -7,6 +7,7 @@ function mod(overrides: Partial<Mod> & { id: string }): Mod {
   return {
     version: '1.0.0',
     priority: 0,
+    environment: '*',
     targets: [],
     depends: {},
     recommends: {},
@@ -192,8 +193,9 @@ describe('resolveDependencies — breaks soft-disables the declaring mod (#6)', 
   });
 
   it("a disabled mod's own problems cannot abort the load", () => {
-    // The disabled mod has a missing dep AND a bad targets range — both would
-    // throw for an active mod. Disabled means out of the set entirely.
+    // The disabled mod has a missing dep (throws for an active mod) AND a bad
+    // targets range (soft-disables, #21) — being breaks-disabled first means
+    // neither fires: out of the set entirely, one reason, one warning.
     const result = resolveDependencies(
       [
         mod({
@@ -239,6 +241,114 @@ describe('resolveDependencies — breaks soft-disables the declaring mod (#6)', 
         mod({ id: 'needy', depends: { 'never-here': '*' } }),
       ]),
     ).toThrow("mod 'needy' depends on 'never-here' which is not installed");
+  });
+});
+
+// #21: environment + targets enforcement, riding the #6 soft-disable machinery.
+// Both are "wrong place / wrong version" resolution outcomes: the mod is
+// excluded from `order`, reported in `disabled` + as a warning, and everything
+// else loads. Neither check runs when the host doesn't state the fact.
+describe('resolveDependencies — environment filtering (#21)', () => {
+  it('soft-disables a mod declaring a different concrete environment', () => {
+    const result = resolveDependencies(
+      [mod({ id: 'desktop-only', environment: 'desktop' }), mod({ id: 'bystander' })],
+      { hostEnvironment: 'web' },
+    );
+    expect(ids(result.order)).toEqual(['bystander']);
+    const d = result.disabled.find((e) => e.id === 'desktop-only');
+    expect(d?.reason).toBe(
+      "mod 'desktop-only' declares environment 'desktop' but the host is 'web' — 'desktop-only' is disabled",
+    );
+    expect(result.warnings).toContainEqual({
+      kind: 'environment-mismatch',
+      mod: 'desktop-only',
+      message: d?.reason,
+    });
+  });
+
+  it("loads a matching or '*' mod", () => {
+    const result = resolveDependencies(
+      [mod({ id: 'web-mod', environment: 'web' }), mod({ id: 'anywhere', environment: '*' })],
+      { hostEnvironment: 'web' },
+    );
+    expect(ids(result.order).sort()).toEqual(['anywhere', 'web-mod']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it('does not filter when the host environment is unknown', () => {
+    const result = resolveDependencies([mod({ id: 'desktop-only', environment: 'desktop' })]);
+    expect(ids(result.order)).toEqual(['desktop-only']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it("does not filter when the host claims '*' (treated as unstated)", () => {
+    const result = resolveDependencies(
+      [mod({ id: 'desktop-only', environment: 'desktop' })],
+      { hostEnvironment: '*' },
+    );
+    expect(ids(result.order)).toEqual(['desktop-only']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it('cascades: a mod depending on an environment-disabled mod is disabled too', () => {
+    const result = resolveDependencies(
+      [
+        mod({ id: 'worker-lib', environment: 'worker' }),
+        mod({ id: 'consumer', depends: { 'worker-lib': '*' } }),
+      ],
+      { hostEnvironment: 'web' },
+    );
+    expect(ids(result.order)).toEqual([]);
+    expect(result.disabled.map((d) => d.id)).toEqual(['consumer', 'worker-lib']);
+    expect(result.disabled.find((d) => d.id === 'consumer')?.reason).toBe(
+      "mod 'consumer' is disabled because it depends on 'worker-lib', which is disabled",
+    );
+  });
+
+  it('a breaks-disabled mod keeps its breaks reason (first matching reason wins)', () => {
+    const result = resolveDependencies(
+      [mod({ id: 'x', environment: 'desktop', breaks: { y: '*' } }), mod({ id: 'y' })],
+      { hostEnvironment: 'web' },
+    );
+    expect(result.disabled.find((d) => d.id === 'x')?.reason).toMatch(/breaks/);
+    expect(result.warnings.filter((w) => w.mod === 'x')).toHaveLength(1);
+  });
+});
+
+describe('resolveDependencies — targets soft-disable (#21)', () => {
+  it('does not check targets when the game version is unknown', () => {
+    const result = resolveDependencies([mod({ id: 'x', targets: ['>=0.7.0'] })]);
+    expect(ids(result.order)).toEqual(['x']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it('empty targets means no constraint', () => {
+    const result = resolveDependencies([mod({ id: 'x', targets: [] })], {
+      polytrackVersion: '0.6.2',
+    });
+    expect(ids(result.order)).toEqual(['x']);
+  });
+
+  it('any one matching range keeps the mod active (ranges OR together)', () => {
+    const result = resolveDependencies(
+      [mod({ id: 'x', targets: ['>=0.7.0', '0.6.x'] })],
+      { polytrackVersion: '0.6.2' },
+    );
+    expect(ids(result.order)).toEqual(['x']);
+    expect(result.disabled).toEqual([]);
+  });
+
+  it('cascades: a mod depending on a stale-targets mod is disabled too', () => {
+    const result = resolveDependencies(
+      [
+        mod({ id: 'stale', targets: ['<0.6.0'] }),
+        mod({ id: 'consumer', depends: { stale: '*' } }),
+        mod({ id: 'bystander' }),
+      ],
+      { polytrackVersion: '0.6.2' },
+    );
+    expect(ids(result.order)).toEqual(['bystander']);
+    expect(result.disabled.map((d) => d.id)).toEqual(['consumer', 'stale']);
   });
 });
 
@@ -298,13 +408,24 @@ describe('resolveDependencies — advanced semantics', () => {
     ).not.toThrow();
   });
 
-  it('fails loudly when a mod does not target the running game version', () => {
-    expect(() =>
-      resolveDependencies(
-        [mod({ id: 'x', targets: ['>=0.7.0'] })],
-        { polytrackVersion: '0.6.2' },
-      ),
-    ).toThrow("mod 'x' targets '>=0.7.0' but polytrack is 0.6.2");
+  it('soft-disables a mod that does not target the running game version (#21)', () => {
+    // This used to hard-throw and abort the WHOLE load — one stale mod took
+    // every unrelated mod down, the failure mode #6 removed for `breaks`.
+    const result = resolveDependencies(
+      [mod({ id: 'x', targets: ['>=0.7.0'] }), mod({ id: 'bystander' })],
+      { polytrackVersion: '0.6.2' },
+    );
+    expect(ids(result.order)).toEqual(['bystander']);
+    const d = result.disabled.find((e) => e.id === 'x');
+    expect(d?.reason).toBe(
+      "mod 'x' targets '>=0.7.0' but polytrack is 0.6.2 — 'x' is disabled",
+    );
+    expect(result.warnings).toContainEqual({
+      kind: 'incompatible-target',
+      mod: 'x',
+      other: 'polytrack',
+      message: d?.reason,
+    });
   });
 
   it('warns about a missing recommendation', () => {

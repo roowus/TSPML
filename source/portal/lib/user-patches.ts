@@ -34,6 +34,7 @@
 
 import type { UserModRecord } from './user-mods';
 import { userModId } from './user-mods';
+import { modMixinsApplyToHost } from './mixin-env';
 
 /** One enabled mod's pasted mixin patches, keyed by its claimed manifest id. */
 export interface UserPatchSet {
@@ -106,20 +107,28 @@ function withinInjectCap(patch: Record<string, unknown>): boolean {
 
 /**
  * Project the stored mods into a plan: enabled ∧ has a manifest id ∧ has pasted
- * mixins. Mods exceeding a cap are EXCLUDED from the plan and returned in
- * `overCap` so the page can pre-report them honestly instead of shipping a
- * plan the server would reject wholesale.
+ * mixins ∧ the manifest's mixin descriptors apply to this (web) host (#21).
+ * Mods exceeding a cap are EXCLUDED from the plan and returned in `overCap`;
+ * mods whose declared mixins all name another environment land in `envSkipped`
+ * — both so the page can pre-report them honestly instead of shipping a plan
+ * the server would reject or the author believing patches ran that didn't.
  */
 export function buildUserPatchPlan(mods: readonly UserModRecord[]): {
   plan: UserPatchPlan;
   overCap: string[];
+  envSkipped: string[];
 } {
   const sets: UserPatchSet[] = [];
   const overCap: string[] = [];
+  const envSkipped: string[] = [];
   for (const mod of mods) {
     if (!mod.enabled || mod.mixins === undefined || mod.mixins.length === 0) continue;
     const modId = userModId(mod);
     if (modId === null) continue; // id-less mods pre-fail in the loader anyway
+    if (!modMixinsApplyToHost(mod.manifest)) {
+      envSkipped.push(modId);
+      continue;
+    }
     if (mod.mixins.length > USER_PATCH_LIMITS.maxPatchesPerMod || !mod.mixins.every(withinInjectCap)) {
       overCap.push(modId);
       continue;
@@ -131,7 +140,7 @@ export function buildUserPatchPlan(mods: readonly UserModRecord[]): {
     const dropped = sets.pop();
     if (dropped) overCap.push(dropped.modId);
   }
-  return { plan: { v: 1, sets }, overCap };
+  return { plan: { v: 1, sets }, overCap, envSkipped };
 }
 
 /**

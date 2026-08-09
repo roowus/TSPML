@@ -96,9 +96,10 @@ async function parkUserPatchPlan(mods: readonly UserModRecord[]): Promise<{
   fingerprint: string | null;
   sets: number;
   overCap: string[];
+  envSkipped: string[];
   cacheOk: boolean;
 }> {
-  const { plan, overCap } = buildUserPatchPlan(mods);
+  const { plan, overCap, envSkipped } = buildUserPatchPlan(mods);
   const fingerprint = plan.sets.length > 0 ? planFingerprint(plan) : null;
   let cacheOk = true;
   try {
@@ -114,7 +115,7 @@ async function parkUserPatchPlan(mods: readonly UserModRecord[]): Promise<{
   } catch {
     cacheOk = false;
   }
-  return { fingerprint, sets: plan.sets.length, overCap, cacheOk };
+  return { fingerprint, sets: plan.sets.length, overCap, envSkipped, cacheOk };
 }
 
 export default function PlayPage(): ReactElement {
@@ -148,6 +149,9 @@ export default function PlayPage(): ReactElement {
   const [planReady, setPlanReady] = useState(false);
   const [mixinReport, setMixinReport] = useState<UserMixinReport | null>(null);
   const [mixinOverCap, setMixinOverCap] = useState<readonly string[]>([]);
+  // #21: enabled mods with pasted mixins whose manifest declares them for a
+  // DIFFERENT environment (desktop/worker) — left out of the plan, said out loud.
+  const [mixinEnvSkipped, setMixinEnvSkipped] = useState<readonly string[]>([]);
   const [mixinNotice, setMixinNotice] = useState<string | null>(null);
   const [needsRestart, setNeedsRestart] = useState(false);
   const parkedFingerprintRef = useRef<string | null>(null);
@@ -223,6 +227,7 @@ export default function PlayPage(): ReactElement {
       servedFingerprintRef.current = r.fingerprint; // the first frame loads THIS plan
       planSetsRef.current = r.sets;
       setMixinOverCap(r.overCap);
+      setMixinEnvSkipped(r.envSkipped);
       if (!r.cacheOk) {
         setMixinNotice('Storage for mixin plans is unavailable — user-mod mixins will not be applied this session.');
       }
@@ -285,6 +290,7 @@ export default function PlayPage(): ReactElement {
       parkedFingerprintRef.current = r.fingerprint;
       planSetsRef.current = r.sets;
       setMixinOverCap(r.overCap);
+      setMixinEnvSkipped(r.envSkipped);
       setNeedsRestart(r.fingerprint !== servedFingerprintRef.current);
     });
     const api = apiRef.current;
@@ -642,6 +648,13 @@ export default function PlayPage(): ReactElement {
             <p style={warnNoteStyle}>
               ⚠ <code>{mixinOverCap.join(', ')}</code>: mixins exceed the
               per-request limits and were left out of the patch plan.
+            </p>
+          ) : null}
+          {mixinEnvSkipped.length > 0 ? (
+            <p style={warnNoteStyle}>
+              ⚠ <code>{mixinEnvSkipped.join(', ')}</code>: the manifest declares
+              its mixins for a different environment (this portal is{' '}
+              <code>web</code>) — they were <strong>not applied</strong>.
             </p>
           ) : null}
           {mixinReport && mixinReport.mods.length > 0 ? (

@@ -29,6 +29,7 @@ export function modFromManifest(manifest: VersionManifest, priority = 0): Mod {
     id: manifest.id,
     version: manifest.version,
     priority,
+    environment: manifest.environment ?? '*',
     targets: manifest.targets,
     depends: manifest.depends ?? {},
     recommends: manifest.recommends ?? {},
@@ -87,11 +88,13 @@ function resolveVersion(
  *
  * `breaks` is neither (#6, Fabric-accurate): the DECLARING mod is
  * **soft-disabled** — excluded from `order`, reported in `disabled` and as a
- * warning — while the broken mod and every unrelated mod load normally. A mod
- * whose `depends` can only be satisfied by a disabled mod cascades to
- * disabled too. Every later check runs on the remaining active set, so a
- * disabled mod's own problems (a missing dep, a bad `targets` range) cannot
- * abort a load it is no longer part of.
+ * warning — while the broken mod and every unrelated mod load normally.
+ * Environment mismatches (`ctx.hostEnvironment` set, mod declares a different
+ * concrete environment) and targets mismatches (`ctx.polytrackVersion` set,
+ * no `targets` range accepts it) soft-disable the same way (#21). A mod whose
+ * `depends` can only be satisfied by a disabled mod cascades to disabled too.
+ * Every later check runs on the remaining active set, so a disabled mod's own
+ * problems (a missing dep) cannot abort a load it is no longer part of.
  *
  * `priority` is a tiebreak only — it orders mods that have no declared
  * relationship. It never overrides topological order (a dependency always
@@ -124,6 +127,42 @@ export function resolveDependencies(
           disabled.set(m.id, reason);
           warnings.push({ kind: 'breaks-disabled', mod: m.id, other: breakId, message: reason });
         }
+      }
+    }
+  }
+
+  // 0a2. Environment filtering (#21): a mod declaring a concrete environment
+  //      that is not the host's cannot run here — same soft-disable shape as
+  //      `breaks`, because "wrong place" is a resolution outcome, not a bug in
+  //      the mod. `'*'` on either side means "no constraint". First matching
+  //      reason wins (a breaks-disabled mod keeps its breaks reason).
+  const host = ctx.hostEnvironment;
+  if (host !== undefined && host !== '*') {
+    for (const m of mods) {
+      if (disabled.has(m.id)) continue;
+      if (m.environment !== '*' && m.environment !== host) {
+        const reason = `mod '${m.id}' declares environment '${m.environment}' but the host is '${host}' — '${m.id}' is disabled`;
+        disabled.set(m.id, reason);
+        warnings.push({ kind: 'environment-mismatch', mod: m.id, message: reason });
+      }
+    }
+  }
+
+  // 0a3. Game-version targeting (#21): if we know the running PolyTrack
+  //      version, a mod whose `targets` ranges all reject it is soft-disabled.
+  //      This used to be a hard THROW after the active set was built — which
+  //      meant one stale mod aborted every other mod's load, the exact
+  //      all-or-nothing failure #6 removed for `breaks`. The mismatch is still
+  //      loud (warning + disabled status + never invoked); it just stops being
+  //      collective punishment. No declared targets = no constraint.
+  if (ctx.polytrackVersion !== undefined) {
+    for (const m of mods) {
+      if (disabled.has(m.id) || m.targets.length === 0) continue;
+      const range = m.targets.join(' || ');
+      if (!satisfies(ctx.polytrackVersion, range)) {
+        const reason = `mod '${m.id}' targets '${range}' but polytrack is ${ctx.polytrackVersion} — '${m.id}' is disabled`;
+        disabled.set(m.id, reason);
+        warnings.push({ kind: 'incompatible-target', mod: m.id, other: 'polytrack', message: reason });
       }
     }
   }
@@ -168,21 +207,10 @@ export function resolveDependencies(
   const active = mods.filter((m) => !disabled.has(m.id));
   const index = buildIndex(active);
 
-  // 1. Game-version targeting: if we know the running PolyTrack version, every
-  //    mod's `targets` must accept it. Failing loudly here is the loader's
-  //    "concentrate fragility" principle — a mod built for another game version
-  //    is exactly the kind of thing worth refusing before entrypoints run.
-  if (ctx.polytrackVersion !== undefined) {
-    for (const m of active) {
-      if (m.targets.length === 0) continue;
-      const range = m.targets.join(' || ');
-      if (!satisfies(ctx.polytrackVersion, range)) {
-        throw new DependencyError(
-          `mod '${m.id}' targets '${range}' but polytrack is ${ctx.polytrackVersion}`,
-        );
-      }
-    }
-  }
+  // 1. (moved) Game-version targeting used to hard-throw here. Since #21 it is
+  //    the soft-disable pass 0a3 above — a mod built for another game version
+  //    is still refused before its entrypoint runs, it just no longer aborts
+  //    every OTHER mod's load.
 
   // 2. `depends`: must be present at a satisfying version. Collect version
   //    violations so a conflict can name every demanding mod + range.

@@ -79,7 +79,9 @@ function isClass(fn: Function): boolean {
  *   conflicting set genuinely cannot be ordered.
  * - `breaks` is NOT abortive (#6, Fabric-accurate): the declaring mod (and any
  *   mod depending on it) is soft-disabled — reported with status `'disabled'`,
- *   its entrypoint never invoked — while everything else loads.
+ *   its entrypoint never invoked — while everything else loads. Environment
+ *   mismatches and stale `targets` soft-disable the same way when the context
+ *   states `hostEnvironment` / `polytrackVersion` (#21).
  *
  * @returns the ordered mods, per-mod status, and dependency warnings.
  */
