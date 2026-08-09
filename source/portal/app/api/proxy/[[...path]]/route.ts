@@ -5,6 +5,7 @@ import { EARLY_CAPTURE_SCRIPT_TAG } from '@tspml/shared';
 
 import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
 import { applyDemoTransform } from '@/lib/demo-transform';
+import { getBaseTransformedBundle } from '@/lib/bundle-cache';
 import { parseUserPatchPlan, reportPrelude, USER_PATCH_LIMITS } from '@/lib/user-patches';
 import type { UserMixinReport, UserPatchSet } from '@/lib/user-patches';
 
@@ -160,6 +161,37 @@ async function proxyGet(
   reqHeaders.set('origin', DESKTOP_ORIGIN);
   reqHeaders.set('referer', DESKTOP_ORIGIN + '/');
 
+  // ── Demo transform mode, plain-GET path: memoized ──────────────────────────
+  // The base transform is deterministic per upstream bundle (no user data), so
+  // a warm instance serves it from the in-process memo instead of re-fetching
+  // 1.8 MB from Kodub and re-running the babel pass (~7s → ~0.1s). The POST
+  // path below stays per-request: it embeds this user's report (#62).
+  if (shouldTransform(host, segments) && user === null) {
+    const r = await getBaseTransformedBundle(upstream, reqHeaders);
+    const h = new Headers();
+    corsHeaders(request, h);
+    if (!r.ok) {
+      if (r.failure.status === null) {
+        return NextResponse.json(
+          { error: 'upstream fetch failed', upstream },
+          { status: 502, headers: h },
+        );
+      }
+      return NextResponse.json(
+        { error: 'upstream error', upstream },
+        { status: r.failure.status, headers: h },
+      );
+    }
+    const { bundle } = r;
+    h.set('content-type', 'text/javascript; charset=utf-8');
+    h.set('cache-control', 'no-cache');
+    h.set('x-tspml-transformed', bundle.transformed ? '1' : '0');
+    h.set('x-tspml-vanilla-hash', bundle.vanillaHash);
+    h.set('x-tspml-bundle-cache', r.cacheHit ? 'hit' : 'miss');
+    if (bundle.detail) h.set('x-tspml-detail', bundle.detail.slice(0, 200));
+    return new NextResponse(bundle.body, { status: bundle.status, headers: h });
+  }
+
   let upstreamRes: Response;
   try {
     upstreamRes = await fetch(upstream, { headers: reqHeaders, redirect: 'follow' });
@@ -172,32 +204,31 @@ async function proxyGet(
     );
   }
 
-  // ── Demo transform mode ───────────────────────────────────────────────────
-  // When TSPML_TRANSFORM is set and this is the game's main bundle on the
-  // default host, rewrite it with a visible marker so a browser load proves a
-  // *transformed* bundle still boots & plays. See lib/demo-transform.ts.
-  // On the POST path (#62) `user` additionally carries the parsed patch plan:
-  // its sets compose into the same pass, and the per-mod report is prepended to
-  // the served bundle as the `window.__tspmlUserMixins` prelude.
-  if (shouldTransform(host, segments)) {
+  // ── Demo transform mode, POST path (#62) ───────────────────────────────────
+  // `user` carries the parsed patch plan: its sets compose into the same pass
+  // as the base patches, and the per-mod report is prepended to the served
+  // bundle as the `window.__tspmlUserMixins` prelude. Never memoized — the
+  // response is per-request (it embeds this user's report; see lib/bundle-cache
+  // for the boundary).
+  if (shouldTransform(host, segments) && user !== null) {
     const src = await upstreamRes.text();
     const { code, transformed, detail, vanillaHash, userReport } = await applyDemoTransform(
       src,
-      user?.sets ?? [],
+      user.sets,
     );
     // A refused plan (bad shape / oversized body) still gets an honest prelude:
     // plan-level status, no per-mod rows (the mods were never parsed out).
-    const report: UserMixinReport | null = user
-      ? user.degradedStatus !== null
+    const report: UserMixinReport | null =
+      user.degradedStatus !== null
         ? { v: 1, planStatus: user.degradedStatus, mods: [] }
-        : userReport
-      : null;
+        : userReport;
     const body = report ? `${reportPrelude(report)}${code}` : code;
     const h = new Headers();
     h.set('content-type', 'text/javascript; charset=utf-8');
-    // GET keeps the pre-#62 policy; a POST-carried plan makes the response
-    // per-request (it embeds this user's report) — no-store, never shared.
-    h.set('cache-control', user ? 'no-store' : 'no-cache');
+    // A POST-carried plan makes the response per-request (it embeds this
+    // user's report) — no-store, never shared. (The plain GET is served by the
+    // memoized branch above.)
+    h.set('cache-control', 'no-store');
     corsHeaders(request, h);
     h.set('x-tspml-transformed', transformed ? '1' : '0');
     h.set('x-tspml-vanilla-hash', vanillaHash);
