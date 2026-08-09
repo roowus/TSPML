@@ -59,6 +59,48 @@ describe('create-tspml-mod — modFiles', () => {
   });
 });
 
+// #72: the old marker interpolated the id into a global NAME
+// (`window.__my-cool-modMixin=true`), which for hyphenated ids parses as
+// subtraction → ReferenceError → eaten by the inject's own try/catch → silent
+// no-op. Shape-checking the JSON passed the whole time; only EXECUTING the
+// inject catches this class of bug.
+describe('create-tspml-mod — the starter mixin marker actually lands (#72)', () => {
+  /** Run the generated inject against a stub window; return the stub. */
+  function runInject(id) {
+    const inject = JSON.parse(modFiles(id)['mixins.json']).patches[0].inject;
+    const stub = {};
+    // `window` resolves to the parameter, standing in for the game frame's
+    // global. NO surrounding try/catch here: a parse error must fail the test.
+    new Function('window', inject)(stub);
+    return stub;
+  }
+
+  it('sets the marker for a hyphenated id (the case the old code silently dropped)', () => {
+    const w = runInject('my-cool-mod');
+    expect(w.__tspmlMixinMarkers).toEqual({ 'my-cool-mod': true });
+  });
+
+  it('sets the marker for a plain id and composes with an existing marker object', () => {
+    expect(runInject('speedometer').__tspmlMixinMarkers).toEqual({ speedometer: true });
+    // Two mods' markers share the namespace object instead of clobbering it.
+    const w = { __tspmlMixinMarkers: { earlier: true } };
+    const inject = JSON.parse(modFiles('later-mod')['mixins.json']).patches[0].inject;
+    new Function('window', inject)(w);
+    expect(w.__tspmlMixinMarkers).toEqual({ earlier: true, 'later-mod': true });
+  });
+
+  it('the committed checkpoint-counter demo mixin passes the same evaluation', async () => {
+    // We shipped #72 ourselves in this file — keep it pinned to the fixed shape.
+    const src = await readFile(
+      join(REPO, 'environments/demo-mods/tspml-checkpoint-counter/mixins.json'),
+      'utf8',
+    );
+    const stub = {};
+    new Function('window', JSON.parse(src).patches[0].inject)(stub);
+    expect(stub.__tspmlMixinMarkers).toEqual({ 'tspml-checkpoint-counter': true });
+  });
+});
+
 describe('create-tspml-mod — scaffoldMod (disk)', () => {
   it('writes all files to the target dir', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'tspml-scaffold-'));

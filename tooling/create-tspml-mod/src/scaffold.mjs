@@ -60,7 +60,10 @@ export function modFiles(id) {
       {
         op: "after",
         symbol: "Car",
-        inject: `(function(){try{if(typeof window!=='undefined'){window.__${id}Mixin=true;}}catch(e){}})();`,
+        // Marker via bracket access into ONE namespaced object, id as a string
+        // literal: ids may contain hyphens (#72), and `window.__my-cool-modMixin`
+        // parses as subtraction — a ReferenceError the try/catch silently eats.
+        inject: `(function(){try{if(typeof window!=='undefined'){(window.__tspmlMixinMarkers=window.__tspmlMixinMarkers||{})[${JSON.stringify(id)}]=true;}}catch(e){}})();`,
       },
     ],
   };

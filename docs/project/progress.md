@@ -1720,3 +1720,25 @@ targets unknown-version/empty/OR-ranges, cascades, first-reason-wins, plus the
 end-to-end `load()` soft-disable) and 13 new portal cases (mixin-env predicate,
 plan `envSkipped`, desktop-only/stale-targets user mods failed-with-reason while
 bundled mods load, context override). 86 loader + 80 portal tests green.
+
+## 2026-08-08 — #72: scaffold mixin marker is syntax-safe for every legal id ✅
+
+`create-tspml-mod`'s starter mixin interpolated the mod id into a global
+variable NAME (`window.__${id}Mixin=true`). Ids allow hyphens — so for
+`my-cool-mod` the generated code parsed as `(window.__my) - (cool) -
+(modMixin = true)`: a ReferenceError, swallowed by the inject's own
+try/catch. The mixin applied and ran, and did nothing, silently — the exact
+failure mode the marker exists to disprove. We shipped it ourselves: the
+committed `tspml-checkpoint-counter/mixins.json` carried the broken inject.
+
+Fix: bracket access into one namespaced object with the id as a
+`JSON.stringify`'d string literal —
+`(window.__tspmlMixinMarkers=window.__tspmlMixinMarkers||{})[<id>]=true` — no
+legal (or future) id charset can change the parse, and multiple mods' markers
+compose in one object instead of minting a global each. The committed
+checkpoint-counter mixin is fixed the same way.
+
+The regression test EXECUTES the generated inject (`new Function` against a
+stub window) with a hyphenated id and asserts the marker landed — the prior
+tests shape-checked the JSON, which passed the whole time. A second case pins
+the committed demo mixin to the same evaluation. 12 scaffold tests green.
