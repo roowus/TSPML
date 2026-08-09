@@ -64,6 +64,23 @@ describe('buildUserPatchPlan', () => {
     expect(plan.sets[0]!.modId).toBe('mod-00');
     expect(overCap.sort()).toEqual([`mod-${USER_PATCH_LIMITS.maxMods}`, `mod-${USER_PATCH_LIMITS.maxMods + 1}`]);
   });
+
+  it('excludes mods whose declared mixins are all for another environment, reported in envSkipped (#21)', () => {
+    const desktopOnly = record({ id: 'desktop-mixins', mixins: [PATCH] });
+    (desktopOnly.manifest as Record<string, unknown>).mixins = [
+      { config: 'mixins.json', environment: 'desktop' },
+    ];
+    const webToo = record({ id: 'web-mixins', mixins: [PATCH] });
+    (webToo.manifest as Record<string, unknown>).mixins = [
+      { config: 'desktop.json', environment: 'desktop' },
+      { config: 'web.json', environment: 'web' },
+    ];
+    const undeclared = record({ id: 'undeclared', mixins: [PATCH] }); // no manifest mixins field
+    const { plan, overCap, envSkipped } = buildUserPatchPlan([desktopOnly, webToo, undeclared]);
+    expect(plan.sets.map((s) => s.modId)).toEqual(['web-mixins', 'undeclared']);
+    expect(envSkipped).toEqual(['desktop-mixins']);
+    expect(overCap).toEqual([]);
+  });
 });
 
 describe('planFingerprint', () => {

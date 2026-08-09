@@ -9,11 +9,31 @@
  * A declared patch may target an inline anchor OR (M5-C) a STABLE NAME
  * (`{ symbol: "Car.controlCar", op, inject }`) resolved fail-closed via
  * `@tspml/mappings`. Untyped here (JSON); demo-transform resolves/validates.
+ *
+ * #21: the descriptor's `environment` is honored — the portal is a web host,
+ * so a config declared for `desktop`/`worker` contributes nothing here. The
+ * demo mod declares `environment: "web"`, so this changes nothing for it; the
+ * gate exists so the declared field is TRUE, not decorative.
  */
 import demoHudMixins from '@tspml/demo-hud/mixins.json';
+import demoHudManifest from '@tspml/demo-hud/mod.json';
+import { mixinEnvironmentAppliesToHost } from './mixin-env';
 
-const raw = (demoHudMixins as { patches?: unknown[] }).patches ?? [];
+/** The environment declared for a named config in a raw mod.json, if any. */
+function declaredEnvironment(manifest: unknown, config: string): unknown {
+  const mixins = (manifest as { mixins?: unknown }).mixins;
+  if (!Array.isArray(mixins)) return undefined;
+  const d = mixins.find(
+    (m) => typeof m === 'object' && m !== null && (m as { config?: unknown }).config === config,
+  );
+  return d === undefined ? undefined : (d as { environment?: unknown }).environment;
+}
 
-/** All mixin patches declared by the portal's bundled demo mods. */
+const raw = mixinEnvironmentAppliesToHost(declaredEnvironment(demoHudManifest, 'mixins.json'))
+  ? ((demoHudMixins as { patches?: unknown[] }).patches ?? [])
+  : [];
+
+/** All mixin patches declared by the portal's bundled demo mods that apply to
+ *  THIS (web) host. */
 export const MOD_MIXIN_PATCHES: readonly Record<string, unknown>[] =
   raw as readonly Record<string, unknown>[];
