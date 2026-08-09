@@ -308,6 +308,26 @@ export default function PlayPage(): ReactElement {
           ? `mixin plan parked (${r.sets} mod${r.sets === 1 ? '' : 's'} with patches)`
           : 'mixin plan parked (empty — no user mixins)',
       );
+      // Prewarm the transformed bundle: the serverless babel pass costs
+      // seconds, and without this it only starts AFTER the SW dance + iframe
+      // mount + game HTML parse. Firing the GET now runs it in parallel —
+      // the server memoizes the in-flight promise, so the game's real request
+      // piggybacks on this one instead of recomputing. Only when no mixin
+      // plan is parked: with a plan the SW replays bundle GETs as per-request
+      // POST composes (#62), so this would double the server work for an
+      // output that gets discarded, while the base memo it warms is not the
+      // path the game will take. The body is drained (not cancelled): an
+      // aborted body shows up as a failed request in devtools/smokes, and the
+      // extra parallel download is trivial next to the transform time saved.
+      if (r.sets === 0) {
+        log('prewarming the game bundle…');
+        void fetch(`/api/proxy/main.bundle.js?version=${GAME_VERSION}`, { credentials: 'omit' })
+          .then(async (res) => {
+            await res.arrayBuffer();
+            log(`game bundle prewarmed (server cache: ${res.headers.get('x-tspml-bundle-cache') ?? 'n/a'})`);
+          })
+          .catch(() => log('game bundle prewarm failed (non-fatal)'));
+      }
     });
     return () => {
       cancelled = true;
