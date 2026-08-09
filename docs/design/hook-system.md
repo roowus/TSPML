@@ -15,7 +15,7 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 - `render.preRender` / `render.postRender` (Three.js render loop)
 - `track.beforeLoad` / `track.afterLoad` / `track.unload`
 - `car.created` / `car.stateUpdate` / `car.styleChanged`
-- `checkpoint.passed` / `checkpoint.respawn` — **per-car**, payload `{ index, carId, isReplay }` (`respawn` typed only, no emit yet — [#64](https://github.com/roowus/TSPML/issues/64))
+- `checkpoint.passed` / `checkpoint.respawn` — **per-car**, payload `{ index, carId, isReplay }` (`respawn` fires once per reset press, at the checkpoint respawned **at** — [#64](https://github.com/roowus/TSPML/issues/64))
 - `race.started` / `race.finished` — **per-car**, payload `{ carId, isReplay }` / `{ frames, carId, isReplay }`
 - `input.keyDown` / `input.keyUp` (clean stream, self-gated — replaces PML's fires-on-every-match keybind surface)
 - `ui.render`

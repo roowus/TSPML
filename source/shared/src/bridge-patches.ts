@@ -122,7 +122,25 @@ export const CAR_CONTROLLER_BINDINGS = {
   isControlled: "ie",
   /** WeakMap<car, number|null> — the physics-worker car id (`null` if none). */
   carId: "ee",
+  /**
+   * WeakMap<car, CarState> — the car's CURRENT state. At the HEAD of
+   * `setCarState` (where the `before` inject runs) it still holds the
+   * PREVIOUS frame's state — the method overwrites it later — which is what
+   * lets the respawn emit (#64) diff `controls.reset` across frames.
+   */
+  carState: "te",
 } as const;
+
+/**
+ * A guarded read of a module-scope WeakMap binding for `car`: `null` on ANY
+ * failure (renamed binding, non-WeakMap, throw). `typeof` (not truthiness)
+ * because a renamed binding is a ReferenceError in module scope, not
+ * `undefined`. Shared by {@link CAR_REF} and the respawn edge-detect (#64);
+ * exported ONLY so the binding-constants test can regenerate an instantiation
+ * and hold "the minified names never appear outside this helper".
+ */
+export const READ_BINDING = (binding: string, car: string): string =>
+  `(function(__car){ try { return (typeof ${binding} !== "undefined" && ${binding} && typeof ${binding}.get === "function") ? ${binding}.get(__car) : null; } catch (_e) { return null; } })(${car})`;
 
 /**
  * A JS expression yielding `CarRef` (`{ carId, isReplay }`) for a given car.
@@ -141,32 +159,31 @@ export const CAR_CONTROLLER_BINDINGS = {
  */
 const CAR_REF = (receiver: string): string => {
   const { isControlled, carId } = CAR_CONTROLLER_BINDINGS;
-  const read = (binding: string): string =>
-    `(function(){ try { return (typeof ${binding} !== "undefined" && ${binding} && typeof ${binding}.get === "function") ? ${binding}.get(__car) : null; } catch (_e) { return null; } })()`;
   // `ie` holds "is controlled", so isReplay is its negation — and a non-boolean
   // (only reachable if the game's shape changed) stays `null` rather than
   // collapsing to a guess via `!`.
   return (
-    `(function(__car){ var __c = ${read(isControlled)}; var __i = ${read(carId)};` +
+    `(function(__car){ var __c = ${READ_BINDING(isControlled, "__car")}; var __i = ${READ_BINDING(carId, "__car")};` +
     ` return { carId: typeof __i === "number" ? __i : null,` +
     ` isReplay: typeof __c === "boolean" ? !__c : null }; })(${receiver})`
   );
 };
 
 /**
- * Badge + the six Tier-1 event emits.
+ * Badge + the seven Tier-1 event emits.
  *
  * `car.control` and `car.created` come from the Car module; `race.started`,
- * `checkpoint.passed` and `race.finished` from the car-controller;
- * `track.afterLoad` from the track-data loader.
+ * `checkpoint.passed`, `checkpoint.respawn` and `race.finished` from the
+ * car-controller; `track.afterLoad` from the track-data loader.
  *
- * PER-CAR ([#10], fixed): `race.started`, `checkpoint.passed` and `race.finished`
- * fire for ghost/replay cars as well as the player. They stay per-car — a
- * ghost-comparison mod needs the ghosts' events — but each now carries
- * `{ carId, isReplay }` ({@link CAR_REF}) so a mod can filter. The events are
- * unchanged in WHEN they fire; only the payloads grew.
+ * PER-CAR ([#10], fixed): `race.started`, `checkpoint.passed`,
+ * `checkpoint.respawn` ([#64]) and `race.finished` fire for ghost/replay cars
+ * as well as the player (a ghost's recording replays its resets too). They
+ * stay per-car — a ghost-comparison mod needs the ghosts' events — but each
+ * carries `{ carId, isReplay }` ({@link CAR_REF}) so a mod can filter.
  *
  * [#10]: https://github.com/roowus/TSPML/issues/10
+ * [#64]: https://github.com/roowus/TSPML/issues/64
  */
 export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
   {
@@ -226,11 +243,32 @@ export const TIER1_BRIDGE_PATCHES: readonly Patch[] = [
     // hasFinished() read it — while `e` is the NEW carState.
     target: { ...CAR_CONTROLLER_ANCHOR, selector: { kind: "method", name: "setCarState" } },
     // `__ref` is computed lazily INSIDE each transition branch, never once up
-    // front: this runs every frame for every car, and the two branches are
-    // false on almost all of them. Two WeakMap reads per frame per car would be
-    // a real cost on a 60fps hot path for a value nothing reads.
+    // front: this runs every frame for every car, and the branches are false on
+    // almost all of them. WeakMap reads per frame per car would be a real cost
+    // on a 60fps hot path for a value nothing reads.
+    //
+    // checkpoint.respawn (#64) is the RISING EDGE of `controls.reset` — the same
+    // edge the game's own reset callbacks fire on (`setCarState` runs
+    // `if (t || !old.controls.reset && new.controls.reset) …` right after
+    // swapping the state). The reset flag only reaches carState on the
+    // checkpoint-respawn path: when no checkpoint is available the scene
+    // full-restarts by RECREATING the car (and forces the flag false), which
+    // never passes through here. `e.hasCheckpointToRespawnAt === true` is the
+    // game's own "reset means respawn" flag (the scene's availability check
+    // reads the same field), asserted anyway for ghost recordings that could
+    // replay a stray reset frame. The OLD state comes from the carState
+    // WeakMap, still un-swapped at the method HEAD. Deliberately silent — no
+    // emit, no guess — when:
+    //   · `t` is set (a hard state-set: replay scrub / discontinuous jump — the
+    //     game resets cameras there, but nothing respawned),
+    //   · the old state is unreadable or lacks a boolean-false reset (renamed
+    //     binding / changed shape — emitting every held-reset frame would be
+    //     worse than missing the event),
+    //   · no checkpoint was ever passed (index would be -1).
+    // `index` is the checkpoint respawned AT: checkpoints pass in order and a
+    // respawn keeps progress, so that is nextCheckpointIndex - 1.
     inject: EMIT(
-      `if (e) { if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) { var __r1 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.passed', { index: this.getNextCheckpointIndex(), carId: __r1.carId, isReplay: __r1.isReplay }); } if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) { var __r2 = ${CAR_REF("this")}; window.__tspml.events.emit('race.finished', { frames: e.finishFrames, carId: __r2.carId, isReplay: __r2.isReplay }); } }`,
+      `if (e) { if (e.nextCheckpointIndex != null && typeof this.getNextCheckpointIndex === 'function' && e.nextCheckpointIndex > this.getNextCheckpointIndex()) { var __r1 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.passed', { index: this.getNextCheckpointIndex(), carId: __r1.carId, isReplay: __r1.isReplay }); } if (e.finishFrames != null && typeof this.hasFinished === 'function' && !this.hasFinished()) { var __r2 = ${CAR_REF("this")}; window.__tspml.events.emit('race.finished', { frames: e.finishFrames, carId: __r2.carId, isReplay: __r2.isReplay }); } if (!t && e.controls && e.controls.reset === true && e.hasCheckpointToRespawnAt === true && typeof this.getNextCheckpointIndex === 'function' && this.getNextCheckpointIndex() > 0) { var __o = ${READ_BINDING(CAR_CONTROLLER_BINDINGS.carState, "this")}; if (__o && __o.controls && __o.controls.reset === false) { var __r3 = ${CAR_REF("this")}; window.__tspml.events.emit('checkpoint.respawn', { index: this.getNextCheckpointIndex() - 1, carId: __r3.carId, isReplay: __r3.isReplay }); } } }`,
     ),
   },
 ];

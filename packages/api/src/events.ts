@@ -113,9 +113,10 @@ export interface TspmlEventMap {
   // All PER-CAR (player + ghosts): the payloads carry `CarRef` so a mod can tell
   // which car it heard from (#10).
   'checkpoint.passed': readonly [checkpoint: CheckpointInfo];
-  /** DECLARED, NOT WIRED (#64): no bridge patch emits this yet — subscribing is
-   *  legal but the listener never fires. The payload shape is settled so mods
-   *  written today keep compiling when the emit lands. */
+  /** Emitted when a car respawns at its last checkpoint (#64). `index` is the
+   *  checkpoint respawned AT. Fires on the reset-press edge, once per press —
+   *  not for full restarts (those recreate the car) and not before the first
+   *  checkpoint. */
   'checkpoint.respawn': readonly [checkpoint: CheckpointInfo];
   'race.started': readonly [car: CarRef];
   'race.finished': readonly [result: RaceFinishInfo];

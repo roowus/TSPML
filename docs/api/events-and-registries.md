@@ -87,7 +87,7 @@ api.events.on('car.styleChanged', (car) => {});
 
 // checkpoints / race — all PER-CAR, all carrying `{ carId, isReplay }` (#10)
 api.events.on('checkpoint.passed',  ({ index, carId, isReplay }) => {});
-api.events.on('checkpoint.respawn', ({ index, carId, isReplay }) => {}); // typed, NOT wired yet (#64)
+api.events.on('checkpoint.respawn', ({ index, carId, isReplay }) => {}); // once per reset press (#64)
 api.events.on('race.started',       ({ carId, isReplay }) => {});
 api.events.on('race.finished',      ({ frames, carId, isReplay }) => {});
 
@@ -108,11 +108,16 @@ api.events.on('network.disconnect', () => {});
 
 ### Per-car race events (#10)
 
-`race.started`, `checkpoint.passed`, and `race.finished` are emitted **once per
-car**, not once per race. (`checkpoint.respawn` shares the payload type but has no
-emit yet — [#64].) A track you have a saved record on spawns a ghost, and the ghost
-is a car: it starts, passes checkpoints, and finishes exactly like yours does. A lap
-timer that ignores this double-counts.
+`race.started`, `checkpoint.passed`, `checkpoint.respawn`, and `race.finished` are
+emitted **once per car**, not once per race. A track you have a saved record on
+spawns a ghost, and the ghost is a car: it starts, passes checkpoints, respawns, and
+finishes exactly like yours does. A lap timer that ignores this double-counts.
+
+`checkpoint.respawn` ([#64]) fires on the reset-press **edge** (once per press, not
+per held frame); its `index` is the checkpoint respawned **at**. It does not fire
+for a full restart — the game recreates the car for those — nor before the first
+checkpoint, and it degrades to silence (never a guess) if a game update changes the
+state shape it reads.
 
 [#64]: https://github.com/roowus/TSPML/issues/64
 
