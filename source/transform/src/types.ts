@@ -200,7 +200,8 @@ export interface PatchResult {
     | "hash-mismatch"
     | "conflict-replace-single-winner"
     | "bad-inject-source"
-    | "op-not-applicable";
+    | "op-not-applicable"
+    | "param-unresolvable";
   /** Human-readable detail (target description, parse error text, ...). */
   readonly detail?: string;
 }

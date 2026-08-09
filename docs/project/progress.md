@@ -1742,3 +1742,43 @@ The regression test EXECUTES the generated inject (`new Function` against a
 stub window) with a hyphenated id and asserts the marker landed — the prior
 tests shape-checked the JSON, which passed the whole time. A second case pins
 the committed demo mixin to the same evaluation. 12 scaffold tests green.
+
+## 2026-08-08 — #24: injects reference target params by ordinal, not minified name ✅
+
+Every bridge inject that read a target function's parameter did it by the
+0.6.2 bundle's minified name (`e`, `t`, `n`, `i`, `a`, `s`). Sound only under
+the hash gate — and exactly as fragile as #24 said: a re-terser of the *same
+game version* renames every parameter, and a payload that names them either
+breaks or (worse) silently binds to the wrong variable.
+
+The transform engine now supports `__TSPML_PARAM<n>__` ordinal placeholders in
+all six function-payload ops (`before`/`after`/`around`/`replace`/`modifyArg`/
+`modifyReturn`): at apply time each placeholder is renamed to the LOCATED
+function's actual nth parameter. Substitution is AST-based (Identifier nodes
+only — placeholder-shaped text in string literals is data and survives
+verbatim), and resolution is fail-closed with a new `param-unresolvable`
+reason: out-of-range ordinal, pattern parameter (destructuring/rest), a
+no-param target (`modifyConstant`), a payload-local binding that would shadow
+the resolved name, or a block around an injection site that shadows the param
+(`after`/`modifyArg`/`modifyReturn` check every site before mutating any —
+all-or-nothing). The portal treats reasons as opaque strings, so the new slug
+flows through mixin reports unchanged.
+
+All six param-reading payloads in `@tspml/shared` migrated (controlCar,
+createCar's wrap, loadTrackData, setCarState, the registry constructor, the
+codec factory — spanning TIER1 + REGISTRY_CAPTURE), with ordinals
+verified against the real cached 0.6.2 bundle (`controlCar(e,t,n,i,a,s)`,
+`createCar(e,t,n,i,s,l)`, `setCarState(e,t)`, `loadTrackData(e)`). The
+module-scope WeakMap bindings (`ee`/`ie`/`te`) are NOT parameters — no ordinal
+can express them — so they stay hash-gate-protected behind
+`CAR_CONTROLLER_BINDINGS`/`READ_BINDING`, and the file header now says why.
+
+Proof of name-independence: the car-controller fixture's `setCarState(e, t)`
+was renamed to `setCarState(newState, hardSet)` and the executable per-car
+suite still passes — the same patches now apply to a fixture whose parameter
+names share nothing with the real bundle's. A new static guard in
+`bridge-patches.test.ts` bans bare single-letter identifiers in every payload
+(string literals stripped), so the fragile shape cannot come back quietly. 14
+new transform cases cover per-op substitution, factory targets, all five
+fail-closed paths, the string-literal exemption, and a `catch (e)` payload
+that must NOT false-positive the shadow check. 49 transform + 43 shared green.

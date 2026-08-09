@@ -258,6 +258,186 @@ describe("ops — around on the webpack factory (module-load intercept, spike op
   });
 });
 
+describe("ops — __TSPML_PARAMn__ parameter placeholders (#24)", () => {
+  it("before: PARAM0 resolves to the located method's actual first param name", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "before",
+        target: CAR_CONTROL_CAR,
+        inject: "console.log(__TSPML_PARAM0__);",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.outputValid).toBe(true);
+    // controlCar(input) — the placeholder must become `input`, and no
+    // placeholder text may survive into the output bundle.
+    expect(r.code).toContain("console.log(input)");
+    expect(r.code).not.toContain("__TSPML_PARAM");
+  });
+
+  it("after: placeholder resolves at the pre-return injection site", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "after",
+        target: CAR_CONTROL_CAR,
+        inject: "console.log('[mod]', __TSPML_PARAM0__);",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toContain("console.log('[mod]', input)");
+  });
+
+  it("around: placeholders resolve, and proceed still forwards the original params", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "around",
+        target: CAR_CONTROL_CAR,
+        inject: "return proceed(__TSPML_PARAM0__) * 2;",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toContain("return proceed(input) * 2");
+  });
+
+  it("replace: placeholder resolves inside the replacement body", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      { op: "replace", target: CAR_CONTROL_CAR, inject: "return __TSPML_PARAM0__;" },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toContain("return input;");
+  });
+
+  it("modifyArg: placeholder resolves inside the replacement expression", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "modifyArg",
+        target: CAR_CONTROL_CAR,
+        callee: "applyForce",
+        index: 1,
+        replaceWith: "__TSPML_PARAM0__ + 1",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toContain("applyForce(input, input + 1)");
+  });
+
+  it("modifyReturn: placeholder resolves inside the wrap expression", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "modifyReturn",
+        target: CAR_CONTROL_CAR,
+        wrap: "(v) => v + __TSPML_PARAM0__",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toMatch(/v \+ input/);
+  });
+
+  it("factory target: placeholders resolve against the factory's own params", () => {
+    // The fixture factory declares (module, exports, __webpack_require__) —
+    // names that differ from the real bundle's (e,t,n). Placeholders make that
+    // difference irrelevant, which is the whole point of #24.
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "after",
+        target: CAR_FACTORY,
+        inject: "console.log(__TSPML_PARAM1__.Car);",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toContain("console.log(exports.Car)");
+  });
+
+  it("fails param-unresolvable on an out-of-range ordinal", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      { op: "before", target: CAR_CONTROL_CAR, inject: "console.log(__TSPML_PARAM5__);" },
+    ]);
+    expect(r.applied).toEqual([]);
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]!.reason).toBe("param-unresolvable");
+    expect(r.failed[0]!.detail).toContain("out of range");
+    // Fail means fail: the bundle is untouched by this patch.
+    expect(r.code).not.toContain("__TSPML_PARAM");
+  });
+
+  it("fails param-unresolvable when the target param is a destructuring pattern", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "before",
+        target: { anchor: { literals: [...CAR_ANCHOR] }, selector: { kind: "method", name: "clamp" } },
+        inject: "console.log(__TSPML_PARAM0__);",
+      },
+    ]);
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]!.reason).toBe("param-unresolvable");
+    expect(r.failed[0]!.detail).toContain("ObjectPattern");
+  });
+
+  it("fails param-unresolvable on modifyConstant (an ObjectProperty has no params)", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      { op: "modifyConstant", target: CAR_VERSION, replaceWith: "__TSPML_PARAM0__" },
+    ]);
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]!.reason).toBe("param-unresolvable");
+  });
+
+  it("fails param-unresolvable when the payload declares a binding that would shadow the resolved name", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "before",
+        target: CAR_CONTROL_CAR,
+        // PARAM0 resolves to `input`, but the payload declares its own `input`.
+        inject: "let input = 1; console.log(__TSPML_PARAM0__ + input);",
+      },
+    ]);
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]!.reason).toBe("param-unresolvable");
+    expect(r.failed[0]!.detail).toContain("shadow");
+  });
+
+  it("fails param-unresolvable when a block around a return shadows the param (after)", () => {
+    // Car.limit(v) returns from inside `{ let v = 60; ... }` — injecting a
+    // reference to `v` there would read the block-local 60, not the parameter.
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "after",
+        target: { anchor: { literals: [...CAR_ANCHOR] }, selector: { kind: "method", name: "limit" } },
+        inject: "console.log(__TSPML_PARAM0__);",
+      },
+    ]);
+    expect(r.failed).toHaveLength(1);
+    expect(r.failed[0]!.reason).toBe("param-unresolvable");
+    expect(r.failed[0]!.detail).toContain("shadow");
+  });
+
+  it("leaves placeholder-shaped text inside string literals untouched", () => {
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "before",
+        target: CAR_CONTROL_CAR,
+        inject: 'console.log("__TSPML_PARAM0__");',
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    // The literal is data, not a reference — it must survive verbatim.
+    expect(r.code).toContain('console.log("__TSPML_PARAM0__")');
+  });
+
+  it("a `catch (e)` inside the payload does not false-positive the shadow check for other statements", () => {
+    // The catch param only scopes its own block; a placeholder OUTSIDE the
+    // catch must still resolve even when it resolves to the same name.
+    const r = transform(SYNTHETIC_BUNDLE, [
+      {
+        op: "before",
+        target: CAR_CONTROL_CAR,
+        inject: "try { void 0; } catch (input) {} console.log(__TSPML_PARAM0__);",
+      },
+    ]);
+    expect(r.failed).toEqual([]);
+    expect(r.code).toContain("console.log(input)");
+  });
+});
+
 describe("engine — not-found is reported, not thrown", () => {
   it("records a missing method target in `failed` with reason not-found", () => {
     const r = transform(SYNTHETIC_BUNDLE, [

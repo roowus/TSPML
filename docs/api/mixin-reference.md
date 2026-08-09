@@ -54,6 +54,29 @@ There is **no** runtime `api.mixin.before(...)` on `TspmlApi` today. A future ru
 
 Payloads are **JS source strings** (`inject` / `wrap` / `replaceWith`), parsed by Babel and inserted into the AST.
 
+### Parameter placeholders (`__TSPML_PARAM<n>__`)
+
+A payload can reference the target function's parameters **by ordinal** instead of by name: `__TSPML_PARAM0__` is the first parameter, `__TSPML_PARAM1__` the second, and so on. At apply time the engine renames each placeholder to the located function's *actual* nth parameter name ([#24](https://github.com/roowus/TSPML/issues/24)):
+
+```jsonc
+// controlCar(e, t, ...) in one build, controlCar(a, b, ...) in a re-minified one —
+// the ordinal reference survives both.
+{ "op": "before", "symbol": "Car.controlCar",
+  "inject": "console.log('carId', __TSPML_PARAM0__);" }
+```
+
+Never write a bundle's minified parameter names (`e`, `t`, `n`, …) into a payload: they are an artifact of one specific minifier run, and a payload that names them breaks — or worse, silently reads the wrong variable — on any re-minify of the same game version. Ordinals are structural and survive renames; a signature change that *reorders* parameters is a new-bundle event, which the hash gate catches.
+
+Resolution is **fail-closed** with reason `param-unresolvable` — the patch fails (and is reported per-patch, like any other miss) rather than guessing when:
+
+- the ordinal is out of range for the located function,
+- the parameter is not a plain identifier (destructuring or rest pattern),
+- the target has no parameter list (`modifyConstant`'s object property),
+- the payload declares a local binding that would shadow the resolved name, or
+- a block around an injection site shadows the parameter (e.g. an `after` inject next to a `return` inside `{ let e = …; return e; }`).
+
+Placeholder-shaped text inside **string literals** is data, not a reference — it is left untouched. In `around` payloads, placeholders resolve against the wrapped function's own parameter list, so `proceed(__TSPML_PARAM0__)` forwards the real first argument. (`paramPlaceholder(n)` in `@tspml/transform` builds the token for TypeScript-authored patch tables.)
+
 ## Targets
 
 A patch targets either:
@@ -82,7 +105,7 @@ Module anchors use **string/numeric literals only** (not identifiers). INVOKE-st
 
 ## Failure behavior
 
-A per-patch miss (target not found) is reported, never thrown — it does **not** block other patches (per-patch isolation, tested).
+A per-patch miss (target not found) is reported, never thrown — it does **not** block other patches (per-patch isolation, tested). The reported reasons: `not-found`, `hash-mismatch`, `conflict-replace-single-winner`, `bad-inject-source`, `op-not-applicable`, `param-unresolvable`.
 
 On `bundleHash` mismatch the engine **fails closed**: no AST patches from a non-matching map (silent-mis-target risk). See [mappings-system.md](../design/mappings-system.md).
 

@@ -194,6 +194,32 @@ describe("inject payloads", () => {
     expect(badge?.source).toContain("getElementById");
   });
 
+  /**
+   * #24: target parameters are referenced ONLY through `__TSPML_PARAMn__`
+   * ordinal placeholders, never by the 0.6.2 bundle's minified names. A bare
+   * `e`/`t`/`n`/… would apply cleanly today and silently read the wrong
+   * variable after any re-minify. The module-scope WeakMap bindings (`ee`,
+   * `ie`, `te`) are two-letter names read via READ_BINDING and are exempt —
+   * they are not parameters, so no ordinal can express them.
+   */
+  it("reference target params only via __TSPML_PARAMn__ placeholders (#24)", () => {
+    const placeholderUsers = sources.filter((s) => s.source.includes("__TSPML_PARAM"));
+    // Every param-reading payload migrated: controlCar, createCar wrap,
+    // track.afterLoad, setCarState, the registry constructor, and the codec
+    // factory. (The badge and race.started read no params.)
+    expect(placeholderUsers).toHaveLength(6);
+    for (const { label, source } of sources) {
+      // String literals are data (`"%c[TSPML]…"`), not references — strip them
+      // before scanning. No payload uses escaped quotes or template literals.
+      const code = source.replace(/"[^"]*"|'[^']*'/g, '""');
+      // A standalone single-letter identifier (not part of a longer word, not
+      // a property access) is exactly the fragile shape #24 removed.
+      expect(code, `${label} references a bare single-letter identifier`).not.toMatch(
+        /(?<![\w$.])[a-z](?![\w$])/,
+      );
+    }
+  });
+
   it("never reference a bare global the game does not define", () => {
     for (const { label, source } of sources) {
       // `window.__tspml`, never a bare `__tspml` — the latter is a ReferenceError in
