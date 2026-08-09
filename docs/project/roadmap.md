@@ -54,9 +54,14 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 | # | Title | Scope |
 |---|---|---|
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
-| [#64](https://github.com/roowus/TSPML/issues/64) | `checkpoint.respawn` typed but never emitted | The event map declares it; no bridge patch fires it — a subscriber waits forever. |
 
-Closed since the last update: [#62](https://github.com/roowus/TSPML/issues/62) (runtime
+Closed since the last update: [#64](https://github.com/roowus/TSPML/issues/64)
+(`checkpoint.respawn` is now emitted — on the reset-press **edge** read from the
+car controller's old-state WeakMap at `setCarState` HEAD, per-car with
+`{ carId, isReplay }`, silent rather than guessing when the state shape drifts;
+full restarts and pre-first-checkpoint presses correctly don't fire because the
+game's own scene code routes those down the recreate-the-car path),
+[#62](https://github.com/roowus/TSPML/issues/62) (runtime
 user mods' pasted `mixins.json` now reaches the bundle transform via a request-carried
 patch plan — Cache API → service-worker POST replay → one-pass compose, base
 all-or-nothing, user per-mod isolated, with an in-bundle per-mod report),

@@ -25,6 +25,10 @@
  * 5. **`start()` and `setCarState()` as peer methods** of one class, with
  *    `getNextCheckpointIndex()`/`hasFinished()` reading the OLD state — which is
  *    what makes the diff-at-HEAD trick in the combined inject work.
+ * 6. **The full state shape the respawn edge-detect reads (#64)** —
+ *    `controls.reset` + `hasCheckpointToRespawnAt`, initialized exactly like the
+ *    real constructor's placeholder state (`reset: false`, respawn flag false),
+ *    with the old state reachable through the `te` WeakMap at the method HEAD.
  *
  * What it does NOT reproduce: physics, Three.js, the recorder, minified helper
  * calls (`(0,l.gn)(this,ie,"f")` becomes a plain `ie.get(this)`). None of that is
@@ -80,6 +84,8 @@ export const CAR_CONTROLLER_BUNDLE = `
             hasStarted: false,
             finishFrames: null,
             nextCheckpointIndex: 0,
+            hasCheckpointToRespawnAt: false,
+            controls: { up: false, right: false, down: false, left: false, reset: false },
           });
         }
         getCarState() { return te.get(this); }

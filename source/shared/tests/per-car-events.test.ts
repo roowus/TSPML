@@ -25,7 +25,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { transform } from "@tspml/transform";
 
-import { CAR_CONTROLLER_BINDINGS, TIER1_BRIDGE_PATCHES } from "../src/bridge-patches.js";
+import {
+  CAR_CONTROLLER_BINDINGS,
+  READ_BINDING,
+  TIER1_BRIDGE_PATCHES,
+} from "../src/bridge-patches.js";
 import { CAR_CONTROLLER_BUNDLE, CAR_CONTROLLER_LITERALS } from "./car-controller-fixture.js";
 
 /** One event a mod's listener saw. */
@@ -92,6 +96,32 @@ function race(car: FixtureCar): void {
   car.start();
   car.setCarState({ frames: 10, hasStarted: true, finishFrames: null, nextCheckpointIndex: 1 }, false);
   car.setCarState({ frames: 20, hasStarted: true, finishFrames: 20, nextCheckpointIndex: 1 }, false);
+}
+
+/**
+ * A FULL car state as the game ships it — the respawn edge-detect (#64) reads
+ * `controls.reset` and `hasCheckpointToRespawnAt`, which the abbreviated states
+ * in {@link race} deliberately omit (their absence must mean "no emit", and the
+ * suite asserts exactly that below).
+ */
+function fullState(over: Record<string, unknown>): Record<string, unknown> {
+  return {
+    frames: 0,
+    hasStarted: true,
+    finishFrames: null,
+    nextCheckpointIndex: 1,
+    hasCheckpointToRespawnAt: true,
+    controls: { up: false, right: false, down: false, left: false, reset: false },
+    ...over,
+  };
+}
+
+/** `fullState` with the reset control held. */
+function resetState(over: Record<string, unknown>): Record<string, unknown> {
+  return fullState({
+    controls: { up: false, right: false, down: false, left: false, reset: true },
+    ...over,
+  });
 }
 
 describe("per-car race events (#10)", () => {
@@ -225,24 +255,133 @@ describe("per-car race events (#10)", () => {
   });
 });
 
+describe("checkpoint.respawn (#64)", () => {
+  let seen: Seen[];
+  let mod: FixtureExports;
+
+  beforeEach(() => {
+    ({ seen, mod } = runFixture());
+  });
+
+  /** Only the respawn events, with the noise of the other emits filtered out. */
+  const respawns = (): Seen[] => seen.filter((s) => s.name === "checkpoint.respawn");
+
+  /**
+   * The happy path: pass a checkpoint, then hold reset for several frames. The
+   * emit is the RISING edge — exactly one event, not one per held frame, and
+   * `index` is the checkpoint respawned AT (the one just passed), not the next.
+   */
+  it("emits once on the rising edge of controls.reset, at the passed checkpoint", () => {
+    const car = new mod.ot(6, null);
+    car.start();
+    car.setCarState(fullState({ frames: 10 }), false); // passes checkpoint 0
+    car.setCarState(resetState({ frames: 20 }), false); // reset pressed
+    car.setCarState(resetState({ frames: 21 }), false); // still held
+    car.setCarState(resetState({ frames: 22 }), false); // still held
+    expect(respawns()).toHaveLength(1);
+    expect(respawns()[0]?.payload).toEqual({ index: 0, carId: 6, isReplay: false });
+  });
+
+  /** Release + press again is a second respawn — a new edge, a new event. */
+  it("emits again on a second press after release", () => {
+    const car = new mod.ot(6, null);
+    car.start();
+    car.setCarState(fullState({ frames: 10 }), false);
+    car.setCarState(resetState({ frames: 20 }), false);
+    car.setCarState(fullState({ frames: 30 }), false); // released
+    car.setCarState(resetState({ frames: 40 }), false); // pressed again
+    expect(respawns()).toHaveLength(2);
+  });
+
+  /**
+   * A reset before any checkpoint is a FULL restart in the game (the scene
+   * recreates the car), so index-0 edges must not produce a respawn event.
+   */
+  it("does not emit before the first checkpoint", () => {
+    const car = new mod.ot(6, null);
+    car.start();
+    car.setCarState(resetState({ nextCheckpointIndex: 0, hasCheckpointToRespawnAt: false }), false);
+    expect(respawns()).toHaveLength(0);
+  });
+
+  /**
+   * `t` (the hard-set flag) means "this state did not flow from the sim" —
+   * replay scrubs and discontinuous jumps. The game suppresses its own reset
+   * callbacks' edge semantics there and so do we.
+   */
+  it("does not emit on a hard state-set (t = true)", () => {
+    const car = new mod.ot(6, null);
+    car.start();
+    car.setCarState(fullState({ frames: 10 }), false);
+    car.setCarState(resetState({ frames: 20 }), true);
+    expect(respawns()).toHaveLength(0);
+  });
+
+  /** The game's own respawn-availability flag gates the emit. */
+  it("does not emit when the state says no checkpoint is available", () => {
+    const car = new mod.ot(6, null);
+    car.start();
+    car.setCarState(fullState({ frames: 10 }), false);
+    car.setCarState(resetState({ frames: 20, hasCheckpointToRespawnAt: false }), false);
+    expect(respawns()).toHaveLength(0);
+  });
+
+  /**
+   * Honesty over spam: if the OLD state's reset flag cannot be read as boolean
+   * false (changed shape — here simulated by states with no `controls` at all),
+   * the edge cannot be established, so nothing fires. Emitting on every
+   * held-reset frame would be the failure mode this guard exists to prevent.
+   */
+  it("stays silent when the previous state's controls are unreadable", () => {
+    const car = new mod.ot(6, null);
+    car.start();
+    // Old state lacks `controls` entirely (the abbreviated shape `race()` uses).
+    car.setCarState({ frames: 10, hasStarted: true, finishFrames: null, nextCheckpointIndex: 1 }, false);
+    car.setCarState(resetState({ frames: 20 }), false);
+    expect(respawns()).toHaveLength(0);
+  });
+
+  /** Per-car like its siblings: a ghost's replayed reset is attributed to the ghost. */
+  it("tags a ghost's respawn as isReplay: true", () => {
+    const ghost = new mod.ot(9, { frames: [] });
+    ghost.start();
+    ghost.setCarState(fullState({ frames: 10 }), false);
+    ghost.setCarState(resetState({ frames: 20 }), false);
+    expect(respawns()[0]?.payload).toEqual({ index: 0, carId: 9, isReplay: true });
+  });
+
+  /** The abbreviated race() flow must be unaffected — no spurious respawns. */
+  it("does not fire during a plain race", () => {
+    race(new mod.ot(3, null));
+    expect(respawns()).toHaveLength(0);
+  });
+});
+
 describe("binding constants", () => {
   /**
    * The injects reference the bindings through {@link CAR_CONTROLLER_BINDINGS} so a
    * game rename is one edit. If a future change inlines a name instead, the constant
-   * stops being the single source of truth and the rename-degradation test above
-   * silently stops covering it.
+   * stops being the single source of truth and the rename-degradation tests above
+   * silently stop covering it.
+   *
+   * Checked by REMOVAL: regenerate every possible {@link READ_BINDING}
+   * instantiation (each binding × each receiver the injects use), strip them from
+   * the joined inject text, and require the bare names to be gone. (The previous
+   * version asserted equal use COUNTS per binding, which stopped holding when #64
+   * added a binding that is read once per inject rather than once per CAR_REF.)
    */
-  it("are the only place the minified names appear", () => {
-    const injects = PER_CAR_PATCHES.map((p) => ("inject" in p ? p.inject : "")).join("\n");
+  it("are the only place the minified names appear, always via READ_BINDING", () => {
+    let injects = PER_CAR_PATCHES.map((p) => ("inject" in p ? p.inject : "")).join("\n");
     for (const name of Object.values(CAR_CONTROLLER_BINDINGS)) {
       // Present in the generated payload...
       expect(injects).toContain(`typeof ${name} !==`);
+      // ...and removable by stripping helper instantiations alone.
+      for (const receiver of ["__car", "this"]) {
+        injects = injects.replaceAll(READ_BINDING(name, receiver), "");
+      }
+      expect(injects, `binding "${name}" referenced outside READ_BINDING`).not.toMatch(
+        new RegExp(`\\b${name}\\b`),
+      );
     }
-    // ...and each appears only via the shared helper, i.e. the same number of times
-    // for every binding. An inlined extra use would skew this.
-    const counts = Object.values(CAR_CONTROLLER_BINDINGS).map(
-      (n) => injects.split(new RegExp(`\\b${n}\\b`)).length - 1,
-    );
-    expect(new Set(counts).size, `uneven binding use: ${JSON.stringify(counts)}`).toBe(1);
   });
 });

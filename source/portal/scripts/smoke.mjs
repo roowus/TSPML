@@ -14,9 +14,11 @@
 // (#10) — it is a per-car event, and this is a solo race. Ghost cars cannot occur
 // here (a fresh browser has no saved record to replay), so the player/ghost logic
 // itself is covered by an executable fixture in @tspml/shared, not by this script.
-// checkpoint.passed / race.finished need the player to
-// actually pass a checkpoint / finish, so they are reported but not asserted
-// (expect 0 in this harness).
+// checkpoint.passed / checkpoint.respawn / race.finished need the player to
+// actually pass a checkpoint / respawn at one / finish, so they are reported but
+// not asserted (expect 0 in this harness — a respawn additionally requires a
+// passed checkpoint first, so it is doubly out of reach; the #64 edge semantics
+// are covered by the executable fixture in @tspml/shared).
 //
 // TWO FRAMES, and the distinction matters: the game runs in the /api/proxy
 // iframe (`gameFrame`), the portal chrome in the main frame (`page.mainFrame()`).
@@ -36,6 +38,7 @@ const COUNTED_EVENTS = [
   "race.started",
   "track.afterLoad",
   "checkpoint.passed",
+  "checkpoint.respawn",
   "race.finished",
 ];
 
@@ -394,6 +397,7 @@ console.log(
           "race.started": c("race.started"),
           "track.afterLoad": c("track.afterLoad"),
           "checkpoint.passed": c("checkpoint.passed"),
+          "checkpoint.respawn": c("checkpoint.respawn"),
           "race.finished": c("race.finished"),
         },
         // #10: solo race => exactly one race.started, from the PLAYER's car.
@@ -401,6 +405,7 @@ console.log(
         perCarPayloads: {
           "race.started": startedPayloads,
           "checkpoint.passed": payloads["checkpoint.passed"] ?? [],
+          "checkpoint.respawn": payloads["checkpoint.respawn"] ?? [],
           "race.finished": payloads["race.finished"] ?? [],
         },
         sidebarOk,

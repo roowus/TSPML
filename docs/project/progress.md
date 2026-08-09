@@ -1561,3 +1561,46 @@ end-to-end: skip warning without the paste → re-add with mixins.json → resta
 banner → reload → inject fires in the GAME frame + `1/1 applied` row →
 bogus-symbol mod isolated (`0/1 symbol-unresolved`) while the good mod and the
 base LIVE badge survive → disable/remove.
+
+## 2026-08-08 — #64: `checkpoint.respawn` is emitted ✅
+
+The event was typed from day one and fired by nothing — a subscriber waited
+forever. It now fires from the same `setCarState` inject that carries
+`checkpoint.passed` and `race.finished`, using a property of that hook point
+that was already documented but unused: a `before` inject at HEAD runs while
+the module-scope `te` WeakMap still holds the car's **old** state, so the new
+state (parameter) vs. old state (WeakMap) comparison detects the reset-press
+**rising edge** — once per press, not once per held frame.
+
+Why the edge is exactly "respawned at a checkpoint", from the deobfuscated
+0.6.2 scene code: both reset triggers (touch UI + `VehicleCheckpointReset`
+keydown) check `hs()` — has-checkpoint-to-respawn-at, not finished, 250 ms
+debounce — and only set `controls.reset = true` when it passes; the else
+branch calls the full-restart path, which **recreates the car** and never
+routes reset through `setCarState`. `VehicleStartReset` always full-restarts.
+So a reset flag reaching car state IS the checkpoint respawn, and the two
+"don't fire" clauses in #64 (full restart, before first checkpoint) fall out
+of the game's own control flow rather than needing to be simulated.
+
+Guards, in the order they run: `!t` (a hard state-set is a replay scrub, not a
+press), `hasCheckpointToRespawnAt === true`, `getNextCheckpointIndex() > 0`,
+then the old-state read — which degrades to **silence** if the WeakMap or the
+state shape drifts under a future bundle (never spam, never a guess; same
+fail-soft rule as `isReplay: null` in #10). Payload is `CheckpointInfo` with
+`index = getNextCheckpointIndex() - 1` — the checkpoint respawned **at** —
+plus the per-car `{ carId, isReplay }`.
+
+The old-state read added a third entry to `CAR_CONTROLLER_BINDINGS`
+(`carState: "te"`), and all three minified names now flow through one
+`READ_BINDING` helper, so the binding-constants test could switch from
+"equal use counts" (broken by a binding used once per inject instead of once
+per CAR_REF) to "strip the helper instantiations, assert no bare minified
+name survives".
+
+Tests: 8 new fixture-driven cases in `per-car-events.test.ts` (rising edge
+with exact payload, second press after release, no-fire before first
+checkpoint / on `t === true` / without a checkpoint to respawn at / during a
+plain race, ghost respawn attribution, and silence when the old state is
+unreadable) — 42/42 in `@tspml/shared`. The portal smoke counts and reports
+`checkpoint.respawn` alongside `checkpoint.passed` (report-only: a respawn
+needs a passed checkpoint first, which the harness can't script).
