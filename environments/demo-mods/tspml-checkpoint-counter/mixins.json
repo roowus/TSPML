@@ -4,7 +4,7 @@
     {
       "op": "after",
       "symbol": "Car",
-      "inject": "(function(){try{if(typeof window!=='undefined'){window.__tspml-checkpoint-counterMixin=true;}}catch(e){}})();"
+      "inject": "(function(){try{if(typeof window!=='undefined'){(window.__tspmlMixinMarkers=window.__tspmlMixinMarkers||{})[\"tspml-checkpoint-counter\"]=true;}}catch(e){}})();"
     }
   ]
 }
