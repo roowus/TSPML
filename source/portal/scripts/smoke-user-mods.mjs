@@ -31,13 +31,21 @@
 //   6. disable — toggling the first mod off unloads it (disposer runs), drops
 //                it from the loaded list (bundled mods stay), and raises the
 //                restart banner again (its patch set left the plan);
-//   7. remove  — removing both mods clears the stored records.
+//   7. remove  — removing both mods clears the stored records;
+//   8. URL     — (#80 first slice) the Add form's "Import from a URL" method
+//                imports the portal's own /sample-mod/mod.json (same-origin,
+//                no CORS to negotiate; the manifest's entrypoint is fetched
+//                relative to it), the mod loads through the same pipeline,
+//                and removing it clears its record.
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-user-mods-smoke.png";
 const MOD_ID = "smoke-user-mod";
 const BOGUS_ID = "smoke-bogus-mod";
+// The portal serves this itself (public/sample-mod/) so the URL-import leg has
+// a known-good same-origin target — id from that mod.json.
+const URL_MOD_ID = "tspml-sample-url-mod";
 
 const step = (msg) => process.stderr.write(`smoke:usermods · ${msg}\n`);
 
@@ -318,6 +326,41 @@ out.rowGone = await page.evaluate((ids) => {
   );
 }, [MOD_ID, BOGUS_ID]);
 
+// 8. URL import (#80 first slice): switch the Add form's method dropdown to
+// "Import from a URL" and import the portal's own sample mod. Same-origin, so
+// the browser's direct fetch (never /api/proxy) needs no CORS cooperation —
+// this pins the dispatch (manifest URL → entrypoint fetched relative to it)
+// and the form wiring without leaving localhost. The paste textareas stay in
+// the DOM (.add-hidden collapses them visually), so switching back to paste
+// afterwards is hygiene, not a rescue.
+step("import the sample mod from a URL");
+// Leg 5's reload collapsed the Add form's <details>; the Add form summary is
+// the FIRST summary in the aside (the Log section's comes later).
+await page.click('aside[aria-label="Mods"] summary');
+await page.selectOption('aside[aria-label="Mods"] select.add-select', "url");
+await page.fill('aside[aria-label="Mods"] input.add-input', `${BASE_URL}/sample-mod/mod.json`);
+await page.click('aside[aria-label="Mods"] button:has-text("Import mod")');
+out.urlModLoaded = await waitForSidebar(
+  () => /mods:\s*✓ .*tspml-sample-url-mod/.test(document.body.innerText),
+  30000,
+);
+out.urlModListed = (await sidebarText()).includes(URL_MOD_ID);
+
+step("remove the URL-imported mod");
+await page.click(
+  `aside[aria-label="Mods"] li:has(code:text-is("${URL_MOD_ID}")) button:has-text("remove")`,
+);
+await page.waitForTimeout(1000);
+out.urlModCleared = await page.evaluate((id) => {
+  try {
+    const raw = window.localStorage.getItem("tspml.userMods.v1");
+    return !raw || !raw.includes(id);
+  } catch {
+    return false;
+  }
+}, URL_MOD_ID);
+await page.selectOption('aside[aria-label="Mods"] select.add-select', "paste");
+
 const PASS =
   out.frameMounted === true &&
   out.bundledLoaded === true &&
@@ -342,7 +385,10 @@ const PASS =
   out.bundledSurvive === true &&
   out.disableRestartBanner === true &&
   out.storageCleared === true &&
-  out.rowGone === true;
+  out.rowGone === true &&
+  out.urlModLoaded === true &&
+  out.urlModListed === true &&
+  out.urlModCleared === true;
 
 console.log(
   JSON.stringify(

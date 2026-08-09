@@ -131,8 +131,11 @@ surface a **restart banner** rather than pretending to apply live.
 | `lib/demo-mods.ts` / `lib/mod-loader.ts` | The bundled demo mods and their load through `@tspml/loader` (per-mod failure isolation — a bad mod never aborts boot). `mod-loader.ts` also routes **user mods** through the same `load()` call. |
 | `lib/user-mods.ts` | Runtime user-mod substrate: localStorage persistence (versioned, corruption-tolerant) + Blob-URL `import()` of pasted entrypoint code + the `user:<id>` entry-specifier scheme + `parseMixinsJson` for the third paste. |
 | `lib/user-patches.ts` | The #62 plan mechanism: caps, plan build/fingerprint (page side), defensive re-parse (server side), and the in-bundle report prelude. |
+| `lib/mod-import.ts` | "Import from a URL" (#80 first slice): the **browser** fetches a `mod.json` (entrypoint + web-host mixins resolved relative to it) or a single built `.js` (minimal manifest synthesized) — never `/api/proxy`, which stays Kodub-only. Refuses kodub/`/api/` URLs, including ones a manifest resolves to; enforces the #62 caps at import time. |
+| `public/sample-mod/` | A tiny real mod (`mod.json` + factory entrypoint) the portal serves itself — a known-good same-origin target for "Import from a URL" (and the smoke's URL leg). |
 | `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener + the #62 plan-to-POST replay for the bundle fetch. |
 | `tests/rewrite.test.ts` | vitest unit tests for the rewrite. |
+| `tests/mod-import.test.ts` | vitest unit tests for URL import: dispatch (manifest / single file / sniffed), relative resolution, host refusals, caps — all against a fake fetch. |
 | `tests/user-mods.test.ts` / `tests/user-patches.test.ts` / `tests/demo-transform.test.ts` | vitest unit tests for the user-mod storage layer + loader path (injected import — node can't feed a Blob URL to `import()`), the #62 plan mechanism, and the compose contracts (driven with a synthetic bundle + map). |
 | `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs`, `scripts/smoke-user-mods.mjs`, `scripts/smoke-ui.mjs` | Playwright headless proofs against the live game (see below). |
 | `scripts/shot-check.mjs` | Dev utility (`pnpm --filter @tspml/portal shot:check`): screenshots the boot overlay, opened Add form, and sidebar to /tmp for a quick visual review. No assertions; not in CI. |
@@ -187,15 +190,20 @@ the mixin**: the inject fires in the game frame and the sidebar's "Your mixins" 
 1/1 applied ([#62](https://github.com/roowus/TSPML/issues/62)) → a second mod with a bogus
 `{symbol}` reports 0/1 `symbol-unresolved` while the first mod's row and the base
 transform's LIVE badge survive (per-mod isolation) → disable runs its disposer and drops
-it (bundled mods untouched) → remove clears the stored records. Unlike the other smokes
-it **requires** `TSPML_TRANSFORM=1` — the mixin legs assert on the transformed bundle.
+it (bundled mods untouched) → remove clears the stored records → the Add form's
+**"Import from a URL"** method imports the portal's own `/sample-mod/mod.json`
+([#80](https://github.com/roowus/TSPML/issues/80) first slice — same-origin, so the
+browser's direct fetch needs no CORS cooperation) and the mod loads through the same
+pipeline. Unlike the other smokes it **requires** `TSPML_TRANSFORM=1` — the mixin legs
+assert on the transformed bundle.
 
 `smoke-ui.mjs` covers the page as a surface rather than the sidebar's claims: the
 boot-progress overlay shows during load and clears once every step lands, the
 stage's fullscreen button enters/exits fullscreen on the stage wrapper (so the exit
 control stays visible) with its label flipping, the expand button toggles theater
-mode (the stage covers the tab **without** the Fullscreen API), and at phone width
-the sidebar stacks below the game. It is the only smoke that does not need
+mode (the stage covers the tab **without** the Fullscreen API), the sidebar's Log
+section exists collapsed and opens onto the timestamped session events, and at phone
+width the sidebar stacks below the game. It is the only smoke that does not need
 `TSPML_TRANSFORM`.
 
 All five portal smokes run in CI (`.github/workflows/smoke.yml`, closing
