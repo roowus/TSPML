@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { Audio, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
 import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
 import type { TspmlApi } from '@tspml/api';
@@ -44,6 +44,12 @@ import { teardown } from '@/lib/teardown';
  * The audio registry (`api.audio`, #11) rides the SAME capture as the track manager
  * — it is constructor param 3 of the track-selection UI where the manager is param 5
  * — so it needs no early-capture slot and attaches from a single object.
+ *
+ * Layout/styling lives in globals.css. The headless smokes assert on this
+ * page's rendered text and structure (aside[aria-label="Mods"], the Add form's
+ * <summary> + three textareas, the "Your mixins" heading, the restart banner's
+ * "need a restart" / "reload now", the `mods:`/`safety:` status lines, and the
+ * empty-list placeholder copy) — keep those stable when reshaping the UI.
  */
 
 type SwState = 'idle' | 'registering' | 'active' | 'error';
@@ -154,6 +160,10 @@ export default function PlayPage(): ReactElement {
   const [mixinEnvSkipped, setMixinEnvSkipped] = useState<readonly string[]>([]);
   const [mixinNotice, setMixinNotice] = useState<string | null>(null);
   const [needsRestart, setNeedsRestart] = useState(false);
+  // Fullscreen is on the STAGE wrapper, not the iframe: the overlay button must
+  // stay visible (and clickable) in fullscreen to offer the way back out.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const stageRef = useRef<HTMLElement>(null);
   const parkedFingerprintRef = useRef<string | null>(null);
   const servedFingerprintRef = useRef<string | null>(null);
   const planSetsRef = useRef(0);
@@ -210,6 +220,22 @@ export default function PlayPage(): ReactElement {
       window.clearInterval(id);
     };
   }, [bus]);
+
+  // Track fullscreen so the button can flip label and the way out is always
+  // offered in the UI itself (Esc works too, but say so with a visible control).
+  useEffect(() => {
+    const onChange = (): void => setIsFullscreen(document.fullscreenElement !== null);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = (): void => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void stageRef.current?.requestFullscreen?.();
+    }
+  };
 
   // Hydrate the user-mod list from localStorage once, on the client only —
   // reading in the initial useState would run during SSR/prerender too. Then
@@ -555,40 +581,50 @@ export default function PlayPage(): ReactElement {
   }, []);
 
   return (
-    <main style={mainStyle}>
-      <header style={headerStyle}>
-        <h1 style={titleStyle}>TSPML — PolyTrack, modded</h1>
-        <p style={subtitleStyle}>
-          The real game loaded through a service worker + <code>/api/proxy</code>.
-          With <code>TSPML_TRANSFORM=1</code>, <code>main.bundle.js</code> is
-          AST-rewritten — the green “TSPML ✔ LIVE” badge proves a transformed
-          bundle runs.
-        </p>
+    <main className="app">
+      <header className="topbar">
+        <div>
+          <h1>TSPML — PolyTrack, modded</h1>
+          <p className="tagline">
+            The real game through a service worker + <code>/api/proxy</code>, mod-transformed on
+            the way.
+          </p>
+        </div>
         <ServiceWorkerBadge state={swState} error={swError} />
       </header>
 
-      <div style={gridStyle}>
-        <section style={gameSectionStyle} aria-label="Game">
-          {/* Mount also gates on planReady (#62): the SW reads the mixin plan
-              from the Cache API while serving the bundle, so it must be parked
-              before the frame's first fetch. The park is a couple of Cache API
-              calls — never a visible delay on top of SW activation. */}
+      <div className="content">
+        {/* Mount also gates on planReady (#62): the SW reads the mixin plan
+            from the Cache API while serving the bundle, so it must be parked
+            before the frame's first fetch. The park is a couple of Cache API
+            calls — never a visible delay on top of SW activation. */}
+        <section ref={stageRef} className="stage" aria-label="Game">
           {swState === 'active' && planReady ? (
-            <iframe
-              ref={frameRef}
-              onLoad={handleFrameLoad}
-              title="PolyTrack (proxied)"
-              src={GAME_FRAME_SRC}
-              style={frameStyle}
-              allow="autoplay; fullscreen; gamepad; pointer-lock"
-              allowFullScreen
-            />
+            <>
+              <iframe
+                ref={frameRef}
+                onLoad={handleFrameLoad}
+                title="PolyTrack (proxied)"
+                src={GAME_FRAME_SRC}
+                className="game-frame"
+                allow="autoplay; fullscreen; gamepad; pointer-lock"
+                allowFullScreen
+              />
+              <button
+                type="button"
+                className="fs-btn"
+                onClick={toggleFullscreen}
+                title={isFullscreen ? 'Exit fullscreen (Esc works too)' : 'Play fullscreen'}
+              >
+                {isFullscreen ? '✕ Exit fullscreen' : '⛶ Fullscreen'}
+              </button>
+            </>
           ) : (
-            <div style={startingStyle}>
+            <div className="stage-loading">
               {swState === 'error'
                 ? 'Service worker unavailable — the game needs it to load.'
                 : 'Activating service worker…'}
-              <span style={startingHintStyle}>
+              <span className="stage-hint">
                 The game mounts once the service worker controls this page, so its
                 track/leaderboard requests are proxied (issue #9).
               </span>
@@ -596,254 +632,271 @@ export default function PlayPage(): ReactElement {
           )}
         </section>
 
-        <aside style={asideStyle} aria-label="Mods">
-          <h2 style={asideTitleStyle}>Mods</h2>
-          <ul style={listStyle}>
-            {loadedMods.length === 0 ? (
-              <li style={listItemStyle}>
-                <div style={modMetaStyle}>
-                  {swState === 'active' ? 'loading…' : 'waiting for game…'}
-                </div>
-              </li>
-            ) : (
-              loadedMods.map((mod) => (
-                <li key={mod.id} style={listItemStyle}>
-                  <div style={modNameStyle}>
-                    <code>{mod.id}</code>
-                  </div>
-                  {mod.reason ? <div style={modMetaStyle}>{mod.reason.slice(0, 72)}</div> : null}
-                  <span
-                    style={{
-                      ...modStatusStyle,
-                      color: mod.status === 'loaded' ? '#3fb950' : '#f85149',
-                    }}
-                  >
-                    {mod.status}
-                  </span>
-                </li>
-              ))
-            )}
-          </ul>
-          {mixinsSkipped.length > 0 ? (
-            <p style={warnNoteStyle}>
-              ⚠ <code>{mixinsSkipped.join(', ')}</code>: the manifest declares
-              mixins but no <code>mixins.json</code> was pasted — they were{' '}
-              <strong>not applied</strong>. Re-add the mod with its{' '}
-              <code>mixins.json</code> in the third box. The mod’s entrypoint
-              (events, keybinds, tracks, audio) still runs.
-            </p>
-          ) : null}
+        <aside className="sidebar" aria-label="Mods">
+          {/* The restart banner leads the sidebar: it is the one thing here that
+              asks the user to act, and it must not hide below the fold. */}
           {needsRestart ? (
-            <p style={warnNoteStyle}>
+            <div className="restart-banner">
               ⚠ Mixin changes need a restart —{' '}
-              <button type="button" style={smallButtonStyle} onClick={() => window.location.reload()}>
+              <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
                 reload now
               </button>{' '}
-              to apply them to the game. (The running game keeps the bundle it
-              was served; entrypoint-only changes apply live.)
-            </p>
-          ) : null}
-          {mixinNotice ? <p style={warnNoteStyle}>⚠ {mixinNotice}</p> : null}
-          {mixinOverCap.length > 0 ? (
-            <p style={warnNoteStyle}>
-              ⚠ <code>{mixinOverCap.join(', ')}</code>: mixins exceed the
-              per-request limits and were left out of the patch plan.
-            </p>
-          ) : null}
-          {mixinEnvSkipped.length > 0 ? (
-            <p style={warnNoteStyle}>
-              ⚠ <code>{mixinEnvSkipped.join(', ')}</code>: the manifest declares
-              its mixins for a different environment (this portal is{' '}
-              <code>web</code>) — they were <strong>not applied</strong>.
-            </p>
-          ) : null}
-          {mixinReport && mixinReport.mods.length > 0 ? (
-            <>
-              <h2 style={{ ...asideTitleStyle, marginTop: 20 }}>Your mixins</h2>
-              {mixinReport.planStatus !== 'applied' ? (
-                <p style={warnNoteStyle}>
-                  ⚠ plan {mixinReport.planStatus} — no user mixin was applied.
-                </p>
-              ) : null}
-              <ul style={listStyle}>
-                {mixinReport.mods.map((m) => (
-                  <li key={m.modId} style={listItemStyle}>
-                    <div style={userModRowStyle}>
-                      <code style={{ fontSize: 13 }}>{m.modId}</code>
-                      <span
-                        style={{
-                          ...modStatusStyle,
-                          marginTop: 0,
-                          color: m.applied === m.declared ? '#3fb950' : m.applied > 0 ? '#d29922' : '#f85149',
-                        }}
-                      >
-                        {m.applied}/{m.declared} applied
-                      </span>
-                    </div>
-                    {m.failed.map((f, i) => (
-                      <div key={i} style={modMetaStyle}>
-                        ✗ {f.reason}: {f.detail.slice(0, 96)}
-                      </div>
-                    ))}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-
-          <h2 style={{ ...asideTitleStyle, marginTop: 20 }}>Your mods</h2>
-          {userMods.length === 0 ? (
-            <p style={modMetaStyle}>None yet — add one below.</p>
-          ) : (
-            <ul style={listStyle}>
-              {userMods.map((mod, i) => {
-                const id = userModId(mod) ?? `(no id #${i + 1})`;
-                return (
-                  <li key={id} style={listItemStyle}>
-                    <div style={userModRowStyle}>
-                      <code style={{ fontSize: 13 }}>{id}</code>
-                      <span style={userModButtonsStyle}>
-                        <button
-                          type="button"
-                          style={smallButtonStyle}
-                          onClick={() =>
-                            updateUserMods(
-                              userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
-                            )
-                          }
-                        >
-                          {mod.enabled ? 'disable' : 'enable'}
-                        </button>
-                        <button
-                          type="button"
-                          style={smallButtonStyle}
-                          onClick={() => updateUserMods(userModsRef.current.filter((m) => m !== mod))}
-                        >
-                          remove
-                        </button>
-                      </span>
-                    </div>
-                    <div style={modMetaStyle}>{mod.enabled ? 'enabled' : 'disabled'}</div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {persistWarning ? <p style={warnNoteStyle}>⚠ {persistWarning}</p> : null}
-
-          <details style={addDetailsStyle}>
-            <summary style={addSummaryStyle}>+ Add a mod</summary>
-            <p style={modMetaStyle}>
-              Paste your <code>mod.json</code> and the <strong>built</strong>{' '}
-              entrypoint JS (an ES module whose default export is the mod factory —{' '}
-              <code>pnpm build</code> output, not TypeScript source). It loads
-              through the same validated loader path as the bundled mods and stays
-              in this browser’s storage.
-            </p>
-            <p style={warnNoteStyle}>
-              Mod code runs unsandboxed in this page, in your browser — exactly
-              like the bundled mods. Only add code you trust or wrote. The safety
-              classifier labels each mod but never blocks.
-            </p>
-            <label style={addLabelStyle}>
-              mod.json
-              <textarea
-                style={addTextareaStyle}
-                rows={5}
-                spellCheck={false}
-                placeholder='{"schemaVersion": 1, "id": "my-mod", ...}'
-                value={draftManifest}
-                onChange={(e) => setDraftManifest(e.target.value)}
-              />
-            </label>
-            <label style={addLabelStyle}>
-              entrypoint.js (built)
-              <textarea
-                style={addTextareaStyle}
-                rows={7}
-                spellCheck={false}
-                placeholder="export default (api) => { /* ... */ };"
-                value={draftCode}
-                onChange={(e) => setDraftCode(e.target.value)}
-              />
-            </label>
-            <label style={addLabelStyle}>
-              mixins.json (optional — Tier-2 patches, applied on the next game load)
-              <textarea
-                style={addTextareaStyle}
-                rows={5}
-                spellCheck={false}
-                placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
-                value={draftMixins}
-                onChange={(e) => setDraftMixins(e.target.value)}
-              />
-            </label>
-            {addError ? <p style={warnNoteStyle}>✗ {addError}</p> : null}
-            <button type="button" style={addButtonStyle} onClick={handleAddMod}>
-              Add mod
-            </button>
-          </details>
-          <div style={bridgeRowStyle}>
-            <span
-              style={{ ...bridgeDotStyle, background: controlCount > 0 ? '#3fb950' : '#9aa4b2' }}
-              aria-hidden="true"
-            />
-            bridge:{' '}
-            {controlCount > 0
-              ? `car.control × ${controlCount.toLocaleString()}`
-              : 'idle (start a race)'}
-          </div>
-          <div style={bridgeRowStyle}>
-            <span
-              style={{ ...bridgeDotStyle, background: keybindCount > 0 ? '#3fb950' : '#9aa4b2' }}
-              aria-hidden="true"
-            />
-            registry:{' '}
-            {keybindCount > 0
-              ? `keybind F × ${keybindCount}`
-              : 'press F (TSPML demo keybind)'}
-          </div>
-          <div style={bridgeRowStyle}>
-            <span
-              style={{
-                ...bridgeDotStyle,
-                background: modsStatus.startsWith('✓') ? '#3fb950' : modsStatus.startsWith('✗') ? '#f85149' : '#9aa4b2',
-              }}
-              aria-hidden="true"
-            />
-            mods: {modsStatus}
-          </div>
-          {safetyStatus ? (
-            <div style={bridgeRowStyle}>
-              <span
-                style={{ ...bridgeDotStyle, background: safetyStatus.startsWith('⚠') ? '#d29922' : '#3fb950' }}
-                aria-hidden="true"
-              />
-              safety: {safetyStatus}
+              to apply them to the game. (The running game keeps the bundle it was
+              served; entrypoint-only changes apply live.)
             </div>
           ) : null}
-          <div style={bridgeRowStyle}>
-            <span
-              style={{ ...bridgeDotStyle, background: tracksStatus.startsWith('✓') ? '#3fb950' : '#9aa4b2' }}
-              aria-hidden="true"
-            />
-            tracks: {tracksStatus}
-          </div>
-          <div style={bridgeRowStyle}>
-            <span
-              style={{ ...bridgeDotStyle, background: audioStatus.startsWith('✓') ? '#3fb950' : '#9aa4b2' }}
-              aria-hidden="true"
-            />
-            audio: {audioStatus}
-          </div>
-          <p style={noteStyle}>
-            The transform pipeline is built (M3); the <code>car.control</code>{' '}
-            event is wired end-to-end (M4-B) — its count ticks up while you race.
-            The list above is driven by <code>@tspml/loader</code> results. Once{' '}
-            <code>tracks</code> reads attached, a mod can put its own track in the
-            game’s Custom tracks list via <code>api.tracks</code>, and{' '}
-            <code>api.audio</code> can override any of the game’s sounds by URL.
-          </p>
+
+          <section className="side-section">
+            <h2>Your mods</h2>
+            {userMods.length === 0 ? (
+              <p className="meta">None yet — add one below.</p>
+            ) : (
+              <ul className="rows">
+                {userMods.map((mod, i) => {
+                  const id = userModId(mod) ?? `(no id #${i + 1})`;
+                  return (
+                    <li key={id}>
+                      <div className="row-head">
+                        <code>{id}</code>
+                        <span className="row-buttons">
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() =>
+                              updateUserMods(
+                                userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
+                              )
+                            }
+                          >
+                            {mod.enabled ? 'disable' : 'enable'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() => updateUserMods(userModsRef.current.filter((m) => m !== mod))}
+                          >
+                            remove
+                          </button>
+                        </span>
+                      </div>
+                      <div className="meta">{mod.enabled ? 'enabled' : 'disabled'}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {persistWarning ? <p className="warn">⚠ {persistWarning}</p> : null}
+            {mixinsSkipped.length > 0 ? (
+              <p className="warn">
+                ⚠ <code>{mixinsSkipped.join(', ')}</code>: the manifest declares
+                mixins but no <code>mixins.json</code> was pasted — they were{' '}
+                <strong>not applied</strong>. Re-add the mod with its{' '}
+                <code>mixins.json</code> in the third box. The mod’s entrypoint
+                (events, keybinds, tracks, audio) still runs.
+              </p>
+            ) : null}
+            {mixinOverCap.length > 0 ? (
+              <p className="warn">
+                ⚠ <code>{mixinOverCap.join(', ')}</code>: mixins exceed the
+                per-request limits and were left out of the patch plan.
+              </p>
+            ) : null}
+            {mixinEnvSkipped.length > 0 ? (
+              <p className="warn">
+                ⚠ <code>{mixinEnvSkipped.join(', ')}</code>: the manifest declares
+                its mixins for a different environment (this portal is{' '}
+                <code>web</code>) — they were <strong>not applied</strong>.
+              </p>
+            ) : null}
+
+            <details className="add-form">
+              <summary>+ Add a mod</summary>
+              <p className="meta">
+                Paste your <code>mod.json</code> and the <strong>built</strong>{' '}
+                entrypoint JS (an ES module whose default export is the mod factory —{' '}
+                <code>pnpm build</code> output, not TypeScript source). It loads
+                through the same validated loader path as the bundled mods and stays
+                in this browser’s storage.
+              </p>
+              <p className="warn">
+                Mod code runs unsandboxed in this page, in your browser — exactly
+                like the bundled mods. Only add code you trust or wrote. The safety
+                classifier labels each mod but never blocks.
+              </p>
+              <label className="add-label">
+                mod.json
+                <textarea
+                  rows={5}
+                  spellCheck={false}
+                  placeholder='{"schemaVersion": 1, "id": "my-mod", ...}'
+                  value={draftManifest}
+                  onChange={(e) => setDraftManifest(e.target.value)}
+                />
+              </label>
+              <label className="add-label">
+                entrypoint.js (built)
+                <textarea
+                  rows={7}
+                  spellCheck={false}
+                  placeholder="export default (api) => { /* ... */ };"
+                  value={draftCode}
+                  onChange={(e) => setDraftCode(e.target.value)}
+                />
+              </label>
+              <label className="add-label">
+                mixins.json (optional — Tier-2 patches, applied on the next game load)
+                <textarea
+                  rows={5}
+                  spellCheck={false}
+                  placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
+                  value={draftMixins}
+                  onChange={(e) => setDraftMixins(e.target.value)}
+                />
+              </label>
+              {addError ? <p className="warn">✗ {addError}</p> : null}
+              <button type="button" className="btn btn-primary" onClick={handleAddMod}>
+                Add mod
+              </button>
+            </details>
+          </section>
+
+          {mixinNotice || (mixinReport && mixinReport.mods.length > 0) ? (
+            <section className="side-section">
+              <h2>Your mixins</h2>
+              {mixinNotice ? <p className="warn">⚠ {mixinNotice}</p> : null}
+              {mixinReport && mixinReport.mods.length > 0 ? (
+                <>
+                  {mixinReport.planStatus !== 'applied' ? (
+                    <p className="warn">
+                      ⚠ plan {mixinReport.planStatus} — no user mixin was applied.
+                    </p>
+                  ) : null}
+                  <ul className="rows">
+                    {mixinReport.mods.map((m) => (
+                      <li key={m.modId}>
+                        <div className="row-head">
+                          <code>{m.modId}</code>
+                          <span
+                            className="status-pill"
+                            style={{
+                              color:
+                                m.applied === m.declared ? 'var(--green)' : m.applied > 0 ? 'var(--amber)' : 'var(--red)',
+                            }}
+                          >
+                            {m.applied}/{m.declared} applied
+                          </span>
+                        </div>
+                        {m.failed.map((f, i) => (
+                          <div key={i} className="meta">
+                            ✗ {f.reason}: {f.detail.slice(0, 96)}
+                          </div>
+                        ))}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </section>
+          ) : null}
+
+          <section className="side-section">
+            <h2>Loaded mods</h2>
+            <ul className="rows">
+              {loadedMods.length === 0 ? (
+                <li>
+                  <div className="meta">
+                    {swState === 'active' ? 'loading…' : 'waiting for game…'}
+                  </div>
+                </li>
+              ) : (
+                loadedMods.map((mod) => (
+                  <li key={mod.id}>
+                    <div className="row-head">
+                      <code>{mod.id}</code>
+                      <span
+                        className="status-pill"
+                        style={{ color: mod.status === 'loaded' ? 'var(--green)' : 'var(--red)' }}
+                      >
+                        {mod.status}
+                      </span>
+                    </div>
+                    {mod.reason ? <div className="meta">{mod.reason.slice(0, 72)}</div> : null}
+                  </li>
+                ))
+              )}
+            </ul>
+          </section>
+
+          <section className="side-section">
+            <h2>Status</h2>
+            <div className="status-row">
+              <span
+                className="dot"
+                style={{ background: controlCount > 0 ? 'var(--green)' : 'var(--muted)' }}
+                aria-hidden="true"
+              />
+              bridge:{' '}
+              {controlCount > 0
+                ? `car.control × ${controlCount.toLocaleString()}`
+                : 'idle (start a race)'}
+            </div>
+            <div className="status-row">
+              <span
+                className="dot"
+                style={{ background: keybindCount > 0 ? 'var(--green)' : 'var(--muted)' }}
+                aria-hidden="true"
+              />
+              registry:{' '}
+              {keybindCount > 0
+                ? `keybind F × ${keybindCount}`
+                : 'press F (TSPML demo keybind)'}
+            </div>
+            <div className="status-row">
+              <span
+                className="dot"
+                style={{
+                  background: modsStatus.startsWith('✓')
+                    ? 'var(--green)'
+                    : modsStatus.startsWith('✗')
+                      ? 'var(--red)'
+                      : 'var(--muted)',
+                }}
+                aria-hidden="true"
+              />
+              mods: {modsStatus}
+            </div>
+            {safetyStatus ? (
+              <div className="status-row">
+                <span
+                  className="dot"
+                  style={{ background: safetyStatus.startsWith('⚠') ? 'var(--amber)' : 'var(--green)' }}
+                  aria-hidden="true"
+                />
+                safety: {safetyStatus}
+              </div>
+            ) : null}
+            <div className="status-row">
+              <span
+                className="dot"
+                style={{ background: tracksStatus.startsWith('✓') ? 'var(--green)' : 'var(--muted)' }}
+                aria-hidden="true"
+              />
+              tracks: {tracksStatus}
+            </div>
+            <div className="status-row">
+              <span
+                className="dot"
+                style={{ background: audioStatus.startsWith('✓') ? 'var(--green)' : 'var(--muted)' }}
+                aria-hidden="true"
+              />
+              audio: {audioStatus}
+            </div>
+            <p className="meta">
+              Live signals from the bridge: <code>car.control</code> ticks while you
+              race, and once <code>tracks</code>/<code>audio</code> read attached a
+              mod can add tracks to the game’s Custom list and override its sounds.
+            </p>
+          </section>
         </aside>
       </div>
     </main>
@@ -865,160 +918,12 @@ function ServiceWorkerBadge({
         : state === 'error'
           ? 'service worker unavailable'
           : 'service worker idle';
-  const color = state === 'active' ? '#3fb950' : state === 'error' ? '#f85149' : '#d29922';
+  const color = state === 'active' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--amber)';
   return (
-    <p style={{ ...badgeStyle, color }}>
+    <p className="sw-badge" style={{ color }}>
       <span aria-hidden="true">● </span>
       {label}
-      {error ? <span style={errorStyle}> — {error}</span> : null}
+      {error ? <span className="sw-error"> — {error}</span> : null}
     </p>
   );
 }
-
-/* Inline styles keep the file count down for the scaffold. */
-
-const mainStyle: CSSProperties = {
-  fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-  maxWidth: 1100,
-  margin: '0 auto',
-  padding: 24,
-};
-const headerStyle: CSSProperties = { marginBottom: 16 };
-const titleStyle: CSSProperties = { margin: 0, fontSize: 24 };
-const subtitleStyle: CSSProperties = { margin: '8px 0 12px', color: '#9aa4b2', fontSize: 14 };
-const badgeStyle: CSSProperties = { fontSize: 13, fontWeight: 600 };
-const errorStyle: CSSProperties = { color: '#9aa4b2', fontWeight: 400 };
-const gridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 280px',
-  gap: 16,
-};
-const gameSectionStyle: CSSProperties = {
-  background: '#000',
-  borderRadius: 10,
-  overflow: 'hidden',
-  aspectRatio: '16 / 9',
-};
-const frameStyle: CSSProperties = { width: '100%', height: '100%', border: '0' };
-const startingStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 8,
-  height: '100%',
-  color: '#9aa4b2',
-  fontSize: 14,
-};
-const startingHintStyle: CSSProperties = {
-  fontSize: 12,
-  maxWidth: 320,
-  textAlign: 'center',
-  lineHeight: 1.5,
-  opacity: 0.8,
-};
-const asideStyle: CSSProperties = {
-  background: '#14171f',
-  border: '1px solid #21262d',
-  borderRadius: 10,
-  padding: 16,
-};
-const asideTitleStyle: CSSProperties = { margin: '0 0 12px', fontSize: 16 };
-const listStyle: CSSProperties = { listStyle: 'none', padding: 0, margin: 0 };
-const listItemStyle: CSSProperties = { padding: '8px 0', borderTop: '1px solid #21262d' };
-const modNameStyle: CSSProperties = { fontWeight: 600, fontSize: 14 };
-const modMetaStyle: CSSProperties = { color: '#9aa4b2', fontSize: 12, marginTop: 2 };
-const modStatusStyle: CSSProperties = {
-  display: 'inline-block',
-  marginTop: 4,
-  fontSize: 11,
-  textTransform: 'uppercase',
-  letterSpacing: 0.5,
-  color: '#d29922',
-};
-const noteStyle: CSSProperties = {
-  marginTop: 12,
-  fontSize: 12,
-  color: '#9aa4b2',
-  lineHeight: 1.5,
-};
-const bridgeRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  marginTop: 12,
-  fontSize: 13,
-  fontFamily: 'ui-monospace, Menlo, monospace',
-  color: '#c9d1d9',
-};
-const bridgeDotStyle: CSSProperties = {
-  display: 'inline-block',
-  width: 8,
-  height: 8,
-  borderRadius: '50%',
-  background: '#9aa4b2',
-};
-const warnNoteStyle: CSSProperties = {
-  marginTop: 8,
-  fontSize: 12,
-  color: '#d29922',
-  lineHeight: 1.5,
-};
-const userModRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 8,
-};
-const userModButtonsStyle: CSSProperties = { display: 'flex', gap: 6 };
-const smallButtonStyle: CSSProperties = {
-  background: '#21262d',
-  color: '#c9d1d9',
-  border: '1px solid #30363d',
-  borderRadius: 6,
-  padding: '2px 8px',
-  fontSize: 11,
-  cursor: 'pointer',
-};
-const addDetailsStyle: CSSProperties = {
-  marginTop: 12,
-  borderTop: '1px solid #21262d',
-  paddingTop: 12,
-};
-const addSummaryStyle: CSSProperties = {
-  cursor: 'pointer',
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#c9d1d9',
-};
-const addLabelStyle: CSSProperties = {
-  display: 'block',
-  marginTop: 10,
-  fontSize: 12,
-  color: '#9aa4b2',
-};
-const addTextareaStyle: CSSProperties = {
-  display: 'block',
-  width: '100%',
-  marginTop: 4,
-  background: '#0d1117',
-  color: '#c9d1d9',
-  border: '1px solid #30363d',
-  borderRadius: 6,
-  padding: 8,
-  fontFamily: 'ui-monospace, Menlo, monospace',
-  fontSize: 11,
-  resize: 'vertical',
-  boxSizing: 'border-box',
-};
-const addButtonStyle: CSSProperties = {
-  marginTop: 10,
-  background: '#238636',
-  color: '#fff',
-  border: '1px solid #2ea043',
-  borderRadius: 6,
-  padding: '6px 14px',
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
