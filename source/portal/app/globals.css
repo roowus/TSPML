@@ -106,18 +106,29 @@ body {
   border-radius: 0;
 }
 
-.game-frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
+/* Theater ("expand") mode: the stage covers the whole tab without the
+   Fullscreen API. The topbar/sidebar stay in the DOM (the smokes read the
+   sidebar's text) — they are just pushed out of the viewport by the fixed
+   stage painting over everything. */
+.app.theater .stage {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  border-radius: 0;
 }
 
-.fs-btn {
+/* ---- Stage overlay controls (fullscreen + theater) ---- */
+
+.stage-controls {
   position: absolute;
   top: 10px;
   right: 10px;
   z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+
+.stage-btn {
   background: rgba(13, 17, 23, 0.72);
   color: var(--text-body);
   border: 1px solid var(--border-strong);
@@ -131,11 +142,101 @@ body {
   transition: opacity 120ms ease, background 120ms ease;
 }
 
-.fs-btn:hover,
-.fs-btn:focus-visible {
+.stage-btn:hover,
+.stage-btn:focus-visible {
   opacity: 1;
   background: rgba(13, 17, 23, 0.92);
 }
+
+/* ---- Boot progress overlay ---- */
+
+.boot-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 13, 18, 0.88);
+  backdrop-filter: blur(2px);
+  pointer-events: none; /* status surface, never a click shield */
+  transition: opacity 400ms ease;
+}
+
+.boot-overlay.boot-done {
+  opacity: 0;
+}
+
+.boot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(320px, 80%);
+  align-items: stretch;
+}
+
+.boot-title {
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.boot-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.boot-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green);
+  transition: width 300ms ease;
+}
+
+.boot-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.boot-steps li.done {
+  color: var(--text-body);
+}
+
+.boot-steps li.active {
+  color: var(--text);
+}
+
+.boot-mark {
+  display: inline-block;
+  width: 18px;
+  color: var(--green);
+}
+
+.boot-steps li.active .boot-mark {
+  color: var(--amber);
+}
+
+.boot-overlay .stage-hint {
+  align-self: center;
+}
+
+.game-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* .fs-btn / .theater-btn are marker classes on .stage-btn (smoke-ui clicks
+   button.fs-btn); their look comes from .stage-btn above. */
 
 .stage-loading {
   display: flex;
@@ -220,6 +321,72 @@ body {
   display: flex;
   gap: 6px;
   flex: none;
+}
+
+/* ---- Mod cards (Your mods + Loaded mods) ----
+   Each mod renders as a small module card: an initial tile, the id, a status
+   badge, and a meta line. The rows list drops its separators; spacing comes
+   from the card gaps. Structure contract: <code> = id, first <span> = status. */
+
+.rows.mod-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rows.mod-cards li {
+  border-top: 0;
+  padding: 0;
+}
+
+.mod-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.mod-card-off,
+.mod-card-failed {
+  opacity: 0.75;
+}
+
+.mod-card-failed {
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.mod-tile {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #1f6feb33, #23863633);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-style: normal;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mod-card-off .mod-tile {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.mod-card-failed .mod-tile {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--red);
+}
+
+.mod-card-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .status-pill {
@@ -312,6 +479,47 @@ body {
   display: block;
   margin-top: 10px;
   font-size: 12px;
+  color: var(--muted);
+}
+
+.add-select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--panel-deep);
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+
+/* The paste boxes stay in the DOM when the URL method is selected (the smoke
+   fills them by index), just visually collapsed. */
+.add-hidden {
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+}
+
+.field-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.field-tag.req {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--green);
+}
+
+.field-tag.opt {
+  background: var(--border);
   color: var(--muted);
 }
 

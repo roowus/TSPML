@@ -163,6 +163,20 @@ export default function PlayPage(): ReactElement {
   // Fullscreen is on the STAGE wrapper, not the iframe: the overlay button must
   // stay visible (and clickable) in fullscreen to offer the way back out.
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Theater ("expand") mode: the stage fills the browser tab — topbar and
+  // sidebar collapse via a class on .app — WITHOUT the Fullscreen API, so the
+  // browser chrome stays. A separate control from fullscreen on purpose.
+  const [isTheater, setIsTheater] = useState(false);
+  // Boot progress plumbing: the stage shows a step list until every TSPML boot
+  // stage lands (SW controls the page → mixin plan parked → game bundle loaded
+  // → mods loaded), then fades. `frameLoaded` flips in handleFrameLoad;
+  // `bootHidden` unmounts the overlay shortly after the fade completes.
+  const [frameLoaded, setFrameLoaded] = useState(false);
+  const [bootHidden, setBootHidden] = useState(false);
+  // Which add-a-mod method is selected. Only "paste" works today; "url" is a
+  // placeholder for import-by-URL / modpacks (#80) so the dropdown already
+  // teaches the model of "several ways to add a mod".
+  const [addMethod, setAddMethod] = useState<'paste' | 'url'>('paste');
   const stageRef = useRef<HTMLElement>(null);
   const parkedFingerprintRef = useRef<string | null>(null);
   const servedFingerprintRef = useRef<string | null>(null);
@@ -237,6 +251,18 @@ export default function PlayPage(): ReactElement {
     }
   };
 
+  // Esc leaves theater mode — but only while the PORTAL window has focus; keys
+  // pressed inside the game iframe land in the game (that is what keybinds are
+  // for). The on-stage button is therefore the primary way out, Esc a courtesy.
+  useEffect(() => {
+    if (!isTheater) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setIsTheater(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isTheater]);
+
   // Hydrate the user-mod list from localStorage once, on the client only —
   // reading in the initial useState would run during SSR/prerender too. Then
   // park the mixin patch plan (#62): the iframe mount gates on `planReady`, so
@@ -263,6 +289,25 @@ export default function PlayPage(): ReactElement {
       cancelled = true;
     };
   }, []);
+
+  // The four boot stages the progress overlay reports, in the order they
+  // complete. "mods" is done once loadMods resolved either way — the overlay
+  // tracks boot PROGRESS; per-mod verdicts live in the sidebar.
+  const bootSteps = [
+    { label: 'Service worker', done: swState === 'active' },
+    { label: 'Mixin plan', done: planReady },
+    { label: 'Game', done: frameLoaded },
+    { label: 'Mods', done: modsStatus !== '…' },
+  ];
+  const bootDone = bootSteps.every((s) => s.done);
+
+  // Unmount the overlay a beat after the last step lands so the CSS fade can
+  // play; until then it sits over the stage with pointer-events:none.
+  useEffect(() => {
+    if (!bootDone) return;
+    const id = window.setTimeout(() => setBootHidden(true), 700);
+    return () => window.clearTimeout(id);
+  }, [bootDone]);
 
   /** Push a load's results into the sidebar state. */
   const applyLoadSummary = (s: ModLoadSummary): void => {
@@ -359,6 +404,7 @@ export default function PlayPage(): ReactElement {
       | (Window & { __tspml?: unknown; [REPORT_GLOBAL]?: unknown })
       | null;
     if (!w) return;
+    setFrameLoaded(true);
     // #62: the per-mod mixin report rides INSIDE the served bundle as a
     // `window.__tspmlUserMixins` prelude — same-origin frame, read it directly.
     // Non-null plan but no global: the bundle bypassed the SW POST path
@@ -459,6 +505,16 @@ export default function PlayPage(): ReactElement {
 
   /** Parse + add the pasted mod, or explain inline why not. */
   const handleAddMod = (): void => {
+    // Empty-box checks FIRST: "Unexpected end of JSON input" on a blank
+    // manifest told users nothing about what to do (reported confusion).
+    if (draftManifest.trim().length === 0) {
+      setAddError('box 1 (mod.json) is empty — it is required. Paste the mod’s manifest JSON.');
+      return;
+    }
+    if (draftCode.trim().length === 0) {
+      setAddError('box 2 (entrypoint.js) is empty — it is required. Paste the BUILT entrypoint JS (ES module, default export).');
+      return;
+    }
     let manifest: unknown;
     try {
       manifest = JSON.parse(draftManifest);
@@ -468,10 +524,6 @@ export default function PlayPage(): ReactElement {
     }
     if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) {
       setAddError('manifest must be a JSON object (the contents of mod.json)');
-      return;
-    }
-    if (draftCode.trim().length === 0) {
-      setAddError('entrypoint code is empty — paste the BUILT entrypoint JS (ES module, default export)');
       return;
     }
     // Optional third paste (#62): the mod's mixins.json. Validated shallowly
@@ -580,8 +632,10 @@ export default function PlayPage(): ReactElement {
     };
   }, []);
 
+  const bootDoneCount = bootSteps.filter((s) => s.done).length;
+
   return (
-    <main className="app">
+    <main className={isTheater ? 'app theater' : 'app'}>
       <header className="topbar">
         <div>
           <h1>TSPML — PolyTrack, modded</h1>
@@ -610,26 +664,69 @@ export default function PlayPage(): ReactElement {
                 allow="autoplay; fullscreen; gamepad; pointer-lock"
                 allowFullScreen
               />
-              <button
-                type="button"
-                className="fs-btn"
-                onClick={toggleFullscreen}
-                title={isFullscreen ? 'Exit fullscreen (Esc works too)' : 'Play fullscreen'}
-              >
-                {isFullscreen ? '✕ Exit fullscreen' : '⛶ Fullscreen'}
-              </button>
+              <div className="stage-controls">
+                <button
+                  type="button"
+                  className="stage-btn theater-btn"
+                  onClick={() => setIsTheater((t) => !t)}
+                  title={
+                    isTheater
+                      ? 'Back to the normal layout (Esc works while the page has focus)'
+                      : 'Expand over the whole tab (no fullscreen)'
+                  }
+                >
+                  {isTheater ? '🗗 Shrink' : '⤢ Expand'}
+                </button>
+                <button
+                  type="button"
+                  className="stage-btn fs-btn"
+                  onClick={toggleFullscreen}
+                  title={isFullscreen ? 'Exit fullscreen (Esc works too)' : 'Play fullscreen'}
+                >
+                  {isFullscreen ? '✕ Exit fullscreen' : '⛶ Fullscreen'}
+                </button>
+              </div>
             </>
-          ) : (
-            <div className="stage-loading">
-              {swState === 'error'
-                ? 'Service worker unavailable — the game needs it to load.'
-                : 'Activating service worker…'}
-              <span className="stage-hint">
-                The game mounts once the service worker controls this page, so its
-                track/leaderboard requests are proxied (issue #9).
-              </span>
+          ) : null}
+          {/* Boot progress (over the stage until every step lands, then fades).
+              pointer-events:none so it never eats a click meant for the game or
+              the stage buttons — it is a status surface, not a modal. */}
+          {!bootHidden ? (
+            <div className={bootDone ? 'boot-overlay boot-done' : 'boot-overlay'} aria-live="polite">
+              {swState === 'error' ? (
+                <div className="stage-loading">
+                  Service worker unavailable — the game needs it to load.
+                  <span className="stage-hint">{swError}</span>
+                </div>
+              ) : (
+                <div className="boot-card">
+                  <div className="boot-title">
+                    {bootDone ? 'TSPML ready' : 'Loading TSPML…'}
+                  </div>
+                  <div className="boot-bar" role="progressbar" aria-valuemin={0} aria-valuemax={4} aria-valuenow={bootDoneCount}>
+                    <div className="boot-bar-fill" style={{ width: `${(bootDoneCount / bootSteps.length) * 100}%` }} />
+                  </div>
+                  <ol className="boot-steps">
+                    {bootSteps.map((s, i) => {
+                      const active = !s.done && bootSteps.slice(0, i).every((p) => p.done);
+                      return (
+                        <li key={s.label} className={s.done ? 'done' : active ? 'active' : ''}>
+                          <span className="boot-mark" aria-hidden="true">
+                            {s.done ? '✓' : active ? '◌' : '·'}
+                          </span>
+                          {s.label}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <span className="stage-hint">
+                    The game mounts once the service worker controls this page, so
+                    its track/leaderboard requests are proxied (issue #9).
+                  </span>
+                </div>
+              )}
             </div>
-          )}
+          ) : null}
         </section>
 
         <aside className="sidebar" aria-label="Mods">
@@ -651,35 +748,47 @@ export default function PlayPage(): ReactElement {
             {userMods.length === 0 ? (
               <p className="meta">None yet — add one below.</p>
             ) : (
-              <ul className="rows">
+              <ul className="rows mod-cards">
                 {userMods.map((mod, i) => {
                   const id = userModId(mod) ?? `(no id #${i + 1})`;
+                  const version = typeof mod.manifest.version === 'string' ? mod.manifest.version : null;
                   return (
-                    <li key={id}>
-                      <div className="row-head">
-                        <code>{id}</code>
-                        <span className="row-buttons">
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            onClick={() =>
-                              updateUserMods(
-                                userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
-                              )
-                            }
-                          >
-                            {mod.enabled ? 'disable' : 'enable'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            onClick={() => updateUserMods(userModsRef.current.filter((m) => m !== mod))}
-                          >
-                            remove
-                          </button>
-                        </span>
+                    <li key={id} className={mod.enabled ? 'mod-card' : 'mod-card mod-card-off'}>
+                      {/* The tile and body wrapper are <i>/<div> on purpose: the
+                          smoke reads each row's FIRST <span> as the status text. */}
+                      <i className="mod-tile" aria-hidden="true">
+                        {id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'}
+                      </i>
+                      <div className="mod-card-body">
+                        <div className="row-head">
+                          <code>{id}</code>
+                          <span className="row-buttons">
+                            <button
+                              type="button"
+                              className="btn btn-small"
+                              onClick={() =>
+                                updateUserMods(
+                                  userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
+                                )
+                              }
+                            >
+                              {mod.enabled ? 'disable' : 'enable'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-small"
+                              onClick={() => updateUserMods(userModsRef.current.filter((m) => m !== mod))}
+                            >
+                              remove
+                            </button>
+                          </span>
+                        </div>
+                        <div className="meta">
+                          {mod.enabled ? 'enabled' : 'disabled'}
+                          {version ? ` · v${version}` : ''}
+                          {mod.mixins ? ` · ${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : ''}
+                        </div>
                       </div>
-                      <div className="meta">{mod.enabled ? 'enabled' : 'disabled'}</div>
                     </li>
                   );
                 })}
@@ -711,52 +820,79 @@ export default function PlayPage(): ReactElement {
 
             <details className="add-form">
               <summary>+ Add a mod</summary>
-              <p className="meta">
-                Paste your <code>mod.json</code> and the <strong>built</strong>{' '}
-                entrypoint JS (an ES module whose default export is the mod factory —{' '}
-                <code>pnpm build</code> output, not TypeScript source). It loads
-                through the same validated loader path as the bundled mods and stays
-                in this browser’s storage.
-              </p>
-              <p className="warn">
-                Mod code runs unsandboxed in this page, in your browser — exactly
-                like the bundled mods. Only add code you trust or wrote. The safety
-                classifier labels each mod but never blocks.
-              </p>
+              {/* Smoke contract (smoke-user-mods.mjs): after clicking the summary
+                  it fills THREE textareas by index (0=manifest, 1=code, 2=mixins)
+                  and clicks the "Add mod" button — the paste method must stay the
+                  default so all three exist in the DOM in that order. */}
               <label className="add-label">
-                mod.json
-                <textarea
-                  rows={5}
-                  spellCheck={false}
-                  placeholder='{"schemaVersion": 1, "id": "my-mod", ...}'
-                  value={draftManifest}
-                  onChange={(e) => setDraftManifest(e.target.value)}
-                />
+                How do you want to add it?
+                <select
+                  className="add-select"
+                  value={addMethod}
+                  onChange={(e) => setAddMethod(e.target.value === 'url' ? 'url' : 'paste')}
+                >
+                  <option value="paste">Paste the mod’s files (works now)</option>
+                  <option value="url">Import from a URL / modpack (coming soon)</option>
+                </select>
               </label>
-              <label className="add-label">
-                entrypoint.js (built)
-                <textarea
-                  rows={7}
-                  spellCheck={false}
-                  placeholder="export default (api) => { /* ... */ };"
-                  value={draftCode}
-                  onChange={(e) => setDraftCode(e.target.value)}
-                />
-              </label>
-              <label className="add-label">
-                mixins.json (optional — Tier-2 patches, applied on the next game load)
-                <textarea
-                  rows={5}
-                  spellCheck={false}
-                  placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
-                  value={draftMixins}
-                  onChange={(e) => setDraftMixins(e.target.value)}
-                />
-              </label>
-              {addError ? <p className="warn">✗ {addError}</p> : null}
-              <button type="button" className="btn btn-primary" onClick={handleAddMod}>
-                Add mod
-              </button>
+              {addMethod === 'url' ? (
+                <p className="meta">
+                  Not available yet — importing a mod by URL (and modpacks) is
+                  planned as issue #80. For now, switch back to{' '}
+                  <strong>Paste the mod’s files</strong>: only two boxes are
+                  required.
+                </p>
+              ) : (
+                <p className="meta">
+                  A mod is two files (plus one optional). Paste each into its box —
+                  only <strong>1</strong> and <strong>2</strong> are required. The
+                  mod stays in this browser’s storage.
+                </p>
+              )}
+              <div className={addMethod === 'paste' ? undefined : 'add-hidden'}>
+                <label className="add-label">
+                  <span className="field-tag req">required</span> 1 · mod.json — the mod’s manifest
+                  <textarea
+                    rows={5}
+                    spellCheck={false}
+                    placeholder='{"schemaVersion": 1, "id": "my-mod", "version": "1.0.0", "environment": "web", "entrypoint": "index.js"}'
+                    value={draftManifest}
+                    onChange={(e) => setDraftManifest(e.target.value)}
+                  />
+                </label>
+                <label className="add-label">
+                  <span className="field-tag req">required</span> 2 · entrypoint.js — the{' '}
+                  <strong>built</strong> code (ES module, default export;{' '}
+                  <code>pnpm build</code> output, not TypeScript source)
+                  <textarea
+                    rows={7}
+                    spellCheck={false}
+                    placeholder="export default (api) => { /* ... */ };"
+                    value={draftCode}
+                    onChange={(e) => setDraftCode(e.target.value)}
+                  />
+                </label>
+                <label className="add-label">
+                  <span className="field-tag opt">optional</span> 3 · mixins.json — Tier-2 game
+                  patches; leave empty unless the mod ships one (applied on the next game load)
+                  <textarea
+                    rows={5}
+                    spellCheck={false}
+                    placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
+                    value={draftMixins}
+                    onChange={(e) => setDraftMixins(e.target.value)}
+                  />
+                </label>
+                <p className="warn">
+                  Mod code runs unsandboxed in this page, in your browser — exactly
+                  like the bundled mods. Only add code you trust or wrote. The safety
+                  classifier labels each mod but never blocks.
+                </p>
+                {addError ? <p className="warn">✗ {addError}</p> : null}
+                <button type="button" className="btn btn-primary" onClick={handleAddMod}>
+                  Add mod
+                </button>
+              </div>
             </details>
           </section>
 
@@ -801,7 +937,7 @@ export default function PlayPage(): ReactElement {
 
           <section className="side-section">
             <h2>Loaded mods</h2>
-            <ul className="rows">
+            <ul className="rows mod-cards">
               {loadedMods.length === 0 ? (
                 <li>
                   <div className="meta">
@@ -810,17 +946,25 @@ export default function PlayPage(): ReactElement {
                 </li>
               ) : (
                 loadedMods.map((mod) => (
-                  <li key={mod.id}>
-                    <div className="row-head">
-                      <code>{mod.id}</code>
-                      <span
-                        className="status-pill"
-                        style={{ color: mod.status === 'loaded' ? 'var(--green)' : 'var(--red)' }}
-                      >
-                        {mod.status}
-                      </span>
+                  /* Smoke contract (smoke.mjs): per row, <code> is the mod id and
+                     the FIRST <span> is the status — the tile is an <i> and the
+                     body a <div> so the status-pill keeps that slot. */
+                  <li key={mod.id} className={mod.status === 'loaded' ? 'mod-card' : 'mod-card mod-card-failed'}>
+                    <i className="mod-tile" aria-hidden="true">
+                      {mod.id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'}
+                    </i>
+                    <div className="mod-card-body">
+                      <div className="row-head">
+                        <code>{mod.id}</code>
+                        <span
+                          className="status-pill"
+                          style={{ color: mod.status === 'loaded' ? 'var(--green)' : 'var(--red)' }}
+                        >
+                          {mod.status}
+                        </span>
+                      </div>
+                      {mod.reason ? <div className="meta">{mod.reason.slice(0, 72)}</div> : null}
                     </div>
-                    {mod.reason ? <div className="meta">{mod.reason.slice(0, 72)}</div> : null}
                   </li>
                 ))
               )}

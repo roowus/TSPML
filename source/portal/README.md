@@ -135,6 +135,7 @@ surface a **restart banner** rather than pretending to apply live.
 | `tests/rewrite.test.ts` | vitest unit tests for the rewrite. |
 | `tests/user-mods.test.ts` / `tests/user-patches.test.ts` / `tests/demo-transform.test.ts` | vitest unit tests for the user-mod storage layer + loader path (injected import — node can't feed a Blob URL to `import()`), the #62 plan mechanism, and the compose contracts (driven with a synthetic bundle + map). |
 | `scripts/smoke.mjs`, `scripts/smoke-tracks.mjs`, `scripts/smoke-audio.mjs`, `scripts/smoke-user-mods.mjs`, `scripts/smoke-ui.mjs` | Playwright headless proofs against the live game (see below). |
+| `scripts/shot-check.mjs` | Dev utility (`pnpm --filter @tspml/portal shot:check`): screenshots the boot overlay, opened Add form, and sidebar to /tmp for a quick visual review. No assertions; not in CI. |
 
 ## Commands
 
@@ -158,7 +159,7 @@ pnpm --filter @tspml/portal smoke                   # terminal 2: boot + mods + 
 pnpm --filter @tspml/portal smoke:tracks            # terminal 2: the api.tracks registry
 pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio registry
 pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user mods + pasted mixins
-pnpm --filter @tspml/portal smoke:ui                # terminal 2: fullscreen + responsive layout
+pnpm --filter @tspml/portal smoke:ui                # terminal 2: boot overlay + fullscreen/theater + responsive layout
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -190,9 +191,12 @@ it (bundled mods untouched) → remove clears the stored records. Unlike the oth
 it **requires** `TSPML_TRANSFORM=1` — the mixin legs assert on the transformed bundle.
 
 `smoke-ui.mjs` covers the page as a surface rather than the sidebar's claims: the
+boot-progress overlay shows during load and clears once every step lands, the
 stage's fullscreen button enters/exits fullscreen on the stage wrapper (so the exit
-control stays visible), the label flips, and at phone width the sidebar stacks below
-the game. It is the only smoke that does not need `TSPML_TRANSFORM`.
+control stays visible) with its label flipping, the expand button toggles theater
+mode (the stage covers the tab **without** the Fullscreen API), and at phone width
+the sidebar stacks below the game. It is the only smoke that does not need
+`TSPML_TRANSFORM`.
 
 All five portal smokes run in CI (`.github/workflows/smoke.yml`, closing
 [#25](https://github.com/roowus/TSPML/issues/25)) — advisory on PRs plus a daily
