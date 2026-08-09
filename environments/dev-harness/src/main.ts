@@ -177,7 +177,11 @@ function runMod(): void {
 frame.addEventListener("load", () => {
   const w = frame.contentWindow as FrameWindow | null;
   if (!w) return;
-  if (!keybinds) keybinds = new Keybinds(w);
+  // #67: this listener runs on every iframe load; a reload means a new window,
+  // so an existing registry must retarget (keeping the mod's bindings) rather
+  // than keep listening to the dead one.
+  if (keybinds) keybinds.retarget(w);
+  else keybinds = new Keybinds(w);
   // The raw api the GAME emits to (window.__tspml.events.emit -> our bus), plus the
   // capture callbacks the track-registry patches call (#12).
   w.__tspml = {

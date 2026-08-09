@@ -55,7 +55,11 @@ A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap 
 |---|---|---|
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
 
-Closed since the last update: [#6](https://github.com/roowus/TSPML/issues/6)
+Closed since the last update: [#67](https://github.com/roowus/TSPML/issues/67)
+(mod keybinds now survive game-frame reloads — `Keybinds.retarget(window)` moves the
+listeners to the new frame window while keeping every registered binding; previously
+only the FIRST frame's window ever got listeners, so any in-place iframe reload or
+React remount silently killed every mod keybind), [#6](https://github.com/roowus/TSPML/issues/6)
 (`breaks` is now Fabric-accurate: the declaring mod is **soft-disabled** — excluded
 from the load order with a `breaks-disabled` warning and a per-mod `'disabled'`
 status, dependents cascading — instead of one incompatibility declaration aborting

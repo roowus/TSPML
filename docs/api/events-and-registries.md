@@ -178,7 +178,7 @@ api.settings.getSetting(id);                   // returns TYPED value (fixes PML
 > viable** as "add new content" — `cars` (styles) and `settings` have no add path
 > (`Object.freeze` catalogs + init-time preloading into model Maps; late mutation
 > throws "model not found"). What IS viable:
-> - **`keybinds`** — bridge-owned parallel listener. ✅ **implemented** (M4-G/H; the one clean, fully-verifiable registry).
+> - **`keybinds`** — bridge-owned parallel listener. ✅ **implemented** (M4-G/H; the one clean, fully-verifiable registry). Survives game-frame reloads: the registry retargets its listeners to the new frame window, keeping every registered binding ([#67](https://github.com/roowus/TSPML/issues/67)).
 > - **`tracks`** — reuse the import-by-code path. ✅ **implemented** ([#12](https://github.com/roowus/TSPML/issues/12); see below).
 > - **`audio`** — override existing clips (and add new ones) by shadowing the audio
 >   manager's buffer lookup. ✅ **implemented** ([#11](https://github.com/roowus/TSPML/issues/11); see below).
