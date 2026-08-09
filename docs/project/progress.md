@@ -1649,3 +1649,30 @@ can't abort, no conflict/recommend warnings from a disabled mod, mutual
 breaks disables both, missing dep on an active mod still throws) + a `load()`
 case pinning "status entry, entrypoint never invoked". 75 loader tests green;
 `pnpm -r test` / build / lint green.
+
+## 2026-08-08 — #67: keybinds survive game-frame reloads ✅
+
+`Keybinds` attached its `keydown`/`keyup` listeners in the constructor and kept
+that window reference forever, while both frame-load handlers (portal
+`app/page.tsx`, dev-harness `src/main.ts`) guarded construction with "only if no
+registry exists yet" — so only the **first** game frame's window ever got
+listeners. Any in-place iframe reload or React remount produces a new document
+and window, after which every registered keybind — the demo `KeyF` and every
+mod's `api.keybinds.register(...)` — silently stopped firing. No error, no
+signal: the registry still "worked", it just listened to a dead realm. (Top-level
+reloads reset all refs, which is why the smokes never caught it.)
+
+Fix: `Keybinds.retarget(next: Window)` (issue option 1) — detach from the old
+window (best-effort: the old realm may already be torn down and its proxy may
+throw), attach the same handler fields to the new one, keep the bindings map.
+Mods register once at mod-load, not per frame-load, so recreating the registry
+would drop their bindings, and leaving it alone leaves listeners on a dead
+window; retargeting is the only option that keeps both invariants. Same-window
+retarget while attached is a no-op (guards against double-fired handlers);
+`retarget` after `dispose` re-attaches; `dispose` after `retarget` detaches the
+NEW window. Both frame-load handlers now retarget when an instance exists.
+
+Tests: 5 new cases in `keybinds.test.ts` (fires on new window / not old with
+bindings kept, same-window no-op, dead-realm detach throw survived, re-attach
+after dispose, dispose-after-retarget). 46 api-bridge tests; `pnpm -r test` /
+build / lint green.
