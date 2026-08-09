@@ -42,9 +42,10 @@ describe("BRIDGE_PATCHES composition", () => {
     expect(BRIDGE_PATCHES).toEqual([...TIER1_BRIDGE_PATCHES, ...REGISTRY_CAPTURE_PATCHES]);
   });
 
-  it("ships the badge + the six Tier-1 emits", () => {
-    // One patch carries BOTH checkpoint.passed and race.finished (it diffs carState
-    // in a single setCarState inject), so 6 events come from 5 emitting patches.
+  it("ships the badge + the seven Tier-1 emits", () => {
+    // One patch carries checkpoint.passed, checkpoint.respawn AND race.finished
+    // (it diffs carState in a single setCarState inject), so 7 events come from
+    // 5 emitting patches.
     expect(TIER1_BRIDGE_PATCHES).toHaveLength(6);
     const all = TIER1_BRIDGE_PATCHES.flatMap((p) => injectSources(p).map((s) => s.source)).join(
       "\n",
@@ -55,6 +56,7 @@ describe("BRIDGE_PATCHES composition", () => {
       "race.started",
       "track.afterLoad",
       "checkpoint.passed",
+      "checkpoint.respawn",
       "race.finished",
     ]) {
       expect(all, `missing emit for ${event}`).toContain(event);
