@@ -14,6 +14,11 @@
  */
 const nextConfig = {
   reactStrictMode: true,
+  // pnpm hoists dependencies to the monorepo root's node_modules/.pnpm, two
+  // levels above this package. Without this, Vercel's file trace resolves
+  // those paths relative to source/portal and the deploy fails with
+  // "File does not exist: node_modules/.pnpm/@swc+helpers/...".
+  outputFileTracingRoot: new URL('../../', import.meta.url).pathname,
 };
 
 export default nextConfig;
