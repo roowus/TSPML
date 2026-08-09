@@ -346,7 +346,14 @@ export default function PlayPage(): ReactElement {
     }
     servedFingerprintRef.current = parkedFingerprintRef.current;
     setNeedsRestart(false);
-    if (!keybindsRef.current) keybindsRef.current = new Keybinds(w);
+    // #67: handleFrameLoad runs on EVERY iframe load, and each load can mean a
+    // new document + window (in-place game reload, React remount of the
+    // <iframe>). Everything else here is rebuilt per-load; keybinds must
+    // RETARGET instead — a fresh registry would drop every binding mods
+    // registered at mod-load time, while the old one keeps listening to a
+    // window that no longer receives key events.
+    if (keybindsRef.current) keybindsRef.current.retarget(w);
+    else keybindsRef.current = new Keybinds(w);
     if (!demoKeybindRegistered.current) {
       keybindsRef.current.register({
         id: 'tspml.demo',

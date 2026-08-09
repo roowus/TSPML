@@ -16,7 +16,7 @@ export interface KeybindsOptions {
  * unit-testable with a mock target in the node test environment.
  */
 export class Keybinds implements KeybindsRegistry {
-  private readonly target: Window;
+  private target: Window;
   private readonly bindings = new Map<string, KeybindBinding>();
   private readonly onError: (error: unknown, id: string, phase: 'down' | 'up') => void;
   private readonly handleKeyDown: (e: KeyboardEvent) => void;
@@ -45,6 +45,34 @@ export class Keybinds implements KeybindsRegistry {
   /** Number of registered bindings (testability). */
   get size(): number {
     return this.bindings.size;
+  }
+
+  /**
+   * Move the listeners to a new window, keeping every registered binding (#67).
+   *
+   * The game iframe gets a NEW document (and window) whenever it reloads
+   * in place or React remounts the element — but mods register keybinds once
+   * at mod-load, not per frame-load. Recreating the registry would silently
+   * drop their bindings; leaving it alone leaves the listeners on a dead
+   * window. Retargeting is the only option that keeps both invariants.
+   *
+   * Detaching from the old window is best-effort: if its document is already
+   * gone, the proxy may throw, and there is nothing to detach from anyway.
+   */
+  retarget(next: Window): void {
+    if (next === this.target && this.attached) return;
+    if (this.attached) {
+      try {
+        this.target.removeEventListener('keydown', this.handleKeyDown);
+        this.target.removeEventListener('keyup', this.handleKeyUp);
+      } catch {
+        /* old realm already torn down — nothing to detach from */
+      }
+    }
+    this.target = next;
+    next.addEventListener('keydown', this.handleKeyDown);
+    next.addEventListener('keyup', this.handleKeyUp);
+    this.attached = true;
   }
 
   /** Detach the window listeners + clear bindings (cleanup / unload). */
