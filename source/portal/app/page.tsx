@@ -10,6 +10,7 @@ import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
 import { parseMixinsJson, readUserMods, saveUserMods, upsertUserMod, userModId } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
+import { importModFromUrl } from '@/lib/mod-import';
 import {
   buildUserPatchPlan,
   PLAN_CACHE,
@@ -173,10 +174,23 @@ export default function PlayPage(): ReactElement {
   // `bootHidden` unmounts the overlay shortly after the fade completes.
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [bootHidden, setBootHidden] = useState(false);
-  // Which add-a-mod method is selected. Only "paste" works today; "url" is a
-  // placeholder for import-by-URL / modpacks (#80) so the dropdown already
-  // teaches the model of "several ways to add a mod".
-  const [addMethod, setAddMethod] = useState<'paste' | 'url'>('paste');
+  // Which add-a-mod method is selected. "paste" and "url" work today; "id"
+  // (mod/modpack ids from a registry backend) is the announced next slice of
+  // #80, so the dropdown already teaches the model of "several ways".
+  const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'id'>('paste');
+  const [draftUrl, setDraftUrl] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  // The boot/status log: what happened, when, in order. Shown live on the
+  // loading overlay (last lines) and in full in the sidebar's Log section —
+  // the honest answer to "what is it doing?" while the overlay progress bar
+  // sits on a step. Session-only; never persisted.
+  const [bootLog, setBootLog] = useState<readonly { t: string; msg: string }[]>([]);
+  // Closes over nothing but the stable setter — safe to call from effects and
+  // out-of-render handlers alike. Bounded to the last 200 lines.
+  const log = (msg: string): void => {
+    const t = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    setBootLog((prev) => [...prev.slice(-199), { t, msg }]);
+  };
   const stageRef = useRef<HTMLElement>(null);
   const parkedFingerprintRef = useRef<string | null>(null);
   const servedFingerprintRef = useRef<string | null>(null);
@@ -271,6 +285,11 @@ export default function PlayPage(): ReactElement {
     const stored = readUserMods();
     userModsRef.current = stored;
     setUserMods(stored);
+    log(
+      stored.length > 0
+        ? `restored ${stored.length} user mod${stored.length === 1 ? '' : 's'} from browser storage`
+        : 'no stored user mods',
+    );
     let cancelled = false;
     planChainRef.current = planChainRef.current.then(async () => {
       const r = await parkUserPatchPlan(stored);
@@ -284,10 +303,16 @@ export default function PlayPage(): ReactElement {
         setMixinNotice('Storage for mixin plans is unavailable — user-mod mixins will not be applied this session.');
       }
       setPlanReady(true);
+      log(
+        r.sets > 0
+          ? `mixin plan parked (${r.sets} mod${r.sets === 1 ? '' : 's'} with patches)`
+          : 'mixin plan parked (empty — no user mixins)',
+      );
     });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- log only touches its stable setter
   }, []);
 
   // The four boot stages the progress overlay reports, in the order they
@@ -312,6 +337,9 @@ export default function PlayPage(): ReactElement {
   /** Push a load's results into the sidebar state. */
   const applyLoadSummary = (s: ModLoadSummary): void => {
     unloadModsRef.current = s.unload;
+    log(
+      `mods loaded: ${s.loaded.length} ok${s.failed.length > 0 ? `, ${s.failed.length} failed (${s.failed.map((f) => f.id).join(', ')})` : ''}`,
+    );
     const rows: LoadedModRow[] = [
       ...s.loaded.map((id) => ({ id, status: 'loaded' as const })),
       ...s.failed.map((f) => ({ id: f.id, status: 'failed' as const, reason: f.reason })),
@@ -405,6 +433,7 @@ export default function PlayPage(): ReactElement {
       | null;
     if (!w) return;
     setFrameLoaded(true);
+    log('game frame loaded');
     // #62: the per-mod mixin report rides INSIDE the served bundle as a
     // `window.__tspmlUserMixins` prelude — same-origin frame, read it directly.
     // Non-null plan but no global: the bundle bypassed the SW POST path
@@ -414,12 +443,16 @@ export default function PlayPage(): ReactElement {
     if (isMixinReport(rawReport)) {
       setMixinReport(rawReport);
       setMixinNotice(null);
+      const applied = rawReport.mods.reduce((n, m) => n + m.applied, 0);
+      const declared = rawReport.mods.reduce((n, m) => n + m.declared, 0);
+      if (declared > 0) log(`user mixins: ${applied}/${declared} applied`);
     } else {
       setMixinReport(null);
       if (planSetsRef.current > 0) {
         setMixinNotice(
           'Mixins were not applied to this game load — the bundle was served without the patch plan (transform mode off, or the service worker did not intercept).',
         );
+        log('user mixins NOT applied — bundle served without the patch plan');
       }
     }
     servedFingerprintRef.current = parkedFingerprintRef.current;
@@ -565,7 +598,46 @@ export default function PlayPage(): ReactElement {
     setDraftManifest('');
     setDraftCode('');
     setDraftMixins('');
+    log(`added mod '${userModId(rec) ?? '(no id)'}' (pasted)`);
     updateUserMods(next);
+  };
+
+  /**
+   * Import a mod from a URL (#80 first slice). The fetch is the BROWSER's —
+   * lib/mod-import.ts never touches /api/proxy; see its header for why that
+   * boundary is load-bearing. The result is a plain UserModRecord, so from
+   * here on the paste path and the import path are the same code.
+   */
+  const handleImportUrl = (): void => {
+    const url = draftUrl.trim();
+    if (url.length === 0) {
+      setAddError('paste a URL first — a mod.json link or a single built .js file');
+      return;
+    }
+    setImportBusy(true);
+    setAddError(null);
+    log(`importing mod from URL…`);
+    void importModFromUrl(url).then((result) => {
+      setImportBusy(false);
+      if (!result.ok) {
+        setAddError(result.error);
+        log(`import failed: ${result.error.slice(0, 120)}`);
+        return;
+      }
+      const rec: UserModRecord = {
+        manifest: result.mod.manifest,
+        code: result.mod.code,
+        ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+        enabled: true,
+        addedAt: new Date().toISOString(),
+      };
+      const next = upsertUserMod(userModsRef.current, rec);
+      setDraftUrl('');
+      log(
+        `added mod '${userModId(rec) ?? '(no id)'}' (imported from URL${result.mod.note ? `; ${result.mod.note}` : ''})`,
+      );
+      updateUserMods(next);
+    });
   };
 
   // Teardown (#17). The loader has always returned an idempotent `unload()` and every
@@ -603,6 +675,7 @@ export default function PlayPage(): ReactElement {
     }
     let cancelled = false;
     setSwState('registering');
+    log('registering service worker…');
     // The service worker must be CONTROLLING this page before the game loads:
     // the game's runtime fetches (track data, leaderboard) go to kodub.com and
     // are only rewritten to /api/proxy if the SW intercepts them. On a first
@@ -611,7 +684,9 @@ export default function PlayPage(): ReactElement {
     // "Failed to load track" (issue #9). We therefore mount the game iframe
     // only after `controllerchange` (or immediately if already controlled).
     const control = (): void => {
-      if (!cancelled) setSwState('active');
+      if (cancelled) return;
+      setSwState('active');
+      log('service worker controls the page — mounting the game frame');
     };
     if (navigator.serviceWorker.controller) {
       control();
@@ -625,7 +700,9 @@ export default function PlayPage(): ReactElement {
       .catch((err: unknown) => {
         if (cancelled) return;
         setSwState('error');
-        setSwError(err instanceof Error ? err.message : String(err));
+        const msg = err instanceof Error ? err.message : String(err);
+        setSwError(msg);
+        log(`service worker registration FAILED: ${msg}`);
       });
     return () => {
       cancelled = true;
@@ -719,6 +796,18 @@ export default function PlayPage(): ReactElement {
                       );
                     })}
                   </ol>
+                  {/* Live tail of the boot log — the answer to "what is it
+                      doing?" while the bar sits on a step. Full log lives in
+                      the sidebar's Log section. */}
+                  {bootLog.length > 0 ? (
+                    <div className="boot-log" aria-hidden="true">
+                      {bootLog.slice(-4).map((l, i) => (
+                        <div key={`${l.t}-${i}`} className="boot-log-line">
+                          <span className="log-time">{l.t}</span> {l.msg}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <span className="stage-hint">
                     The game mounts once the service worker controls this page, so
                     its track/leaderboard requests are proxied (issue #9).
@@ -829,26 +918,71 @@ export default function PlayPage(): ReactElement {
                 <select
                   className="add-select"
                   value={addMethod}
-                  onChange={(e) => setAddMethod(e.target.value === 'url' ? 'url' : 'paste')}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAddMethod(v === 'url' ? 'url' : v === 'id' ? 'id' : 'paste');
+                    setAddError(null);
+                  }}
                 >
-                  <option value="paste">Paste the mod’s files (works now)</option>
-                  <option value="url">Import from a URL / modpack (coming soon)</option>
+                  <option value="paste">Paste the mod’s files</option>
+                  <option value="url">Import from a URL</option>
+                  <option value="id">Import by mod / modpack ID (coming soon)</option>
                 </select>
               </label>
-              {addMethod === 'url' ? (
-                <p className="meta">
-                  Not available yet — importing a mod by URL (and modpacks) is
-                  planned as issue #80. For now, switch back to{' '}
-                  <strong>Paste the mod’s files</strong>: only two boxes are
-                  required.
-                </p>
-              ) : (
+              {addMethod === 'paste' ? (
                 <p className="meta">
                   A mod is two files (plus one optional). Paste each into its box —
                   only <strong>1</strong> and <strong>2</strong> are required. The
                   mod stays in this browser’s storage.
                 </p>
-              )}
+              ) : null}
+              {addMethod === 'url' ? (
+                <>
+                  <p className="meta">
+                    Paste a direct link to the mod’s <code>mod.json</code> (its
+                    entrypoint and mixins are fetched next to it) or to a single
+                    built <code>.js</code> file (a minimal manifest is generated).
+                    Your browser fetches it directly, so the host must allow
+                    cross-origin reads — raw GitHub/gist links and CDNs work.
+                  </p>
+                  <label className="add-label">
+                    <span className="field-tag req">required</span> mod URL
+                    <input
+                      type="url"
+                      className="add-input"
+                      spellCheck={false}
+                      placeholder="https://raw.githubusercontent.com/you/your-mod/main/mod.json"
+                      value={draftUrl}
+                      onChange={(e) => setDraftUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !importBusy) handleImportUrl();
+                      }}
+                    />
+                  </label>
+                  <p className="warn">
+                    Mod code runs unsandboxed in this page, in your browser — only
+                    import from authors you trust. The safety classifier labels each
+                    mod but never blocks.
+                  </p>
+                  {addError ? <p className="warn">✗ {addError}</p> : null}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={importBusy}
+                    onClick={handleImportUrl}
+                  >
+                    {importBusy ? 'Importing…' : 'Import mod'}
+                  </button>
+                </>
+              ) : null}
+              {addMethod === 'id' ? (
+                <p className="meta">
+                  Not available yet — a registry of mod and modpack IDs (a saved
+                  list of mod URLs you can share as one ID) is the next slice of
+                  issue #80. Until then, use <strong>Import from a URL</strong> or{' '}
+                  <strong>Paste the mod’s files</strong>.
+                </p>
+              ) : null}
               <div className={addMethod === 'paste' ? undefined : 'add-hidden'}>
                 <label className="add-label">
                   <span className="field-tag req">required</span> 1 · mod.json — the mod’s manifest
@@ -1040,6 +1174,27 @@ export default function PlayPage(): ReactElement {
               race, and once <code>tracks</code>/<code>audio</code> read attached a
               mod can add tracks to the game’s Custom list and override its sounds.
             </p>
+          </section>
+
+          <section className="side-section">
+            <h2>Log</h2>
+            {/* Everything TSPML did this session, in order — the full version
+                of the tail the boot overlay shows. Session-only, last 200
+                lines. Collapsed by default; the smokes never open it, and its
+                lines are timestamp-prefixed so they can't collide with the
+                `mods:`/`safety:` line-anchored assertions. */}
+            <details className="log-details">
+              <summary>
+                {bootLog.length} event{bootLog.length === 1 ? '' : 's'} this session
+              </summary>
+              <div className="log-box">
+                {bootLog.map((l, i) => (
+                  <div key={`${l.t}-${i}`} className="log-line">
+                    <span className="log-time">{l.t}</span> {l.msg}
+                  </div>
+                ))}
+              </div>
+            </details>
           </section>
         </aside>
       </div>

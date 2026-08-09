@@ -11,7 +11,9 @@
 //   4. clicking again exits fullscreen;
 //   5. clicking expand puts the app in theater mode: the stage covers the whole
 //      viewport WITHOUT the Fullscreen API; clicking again restores the layout;
-//   6. at a phone-width viewport the sidebar stacks BELOW the game stage.
+//   6. the sidebar's Log section exists collapsed, and opening it shows the
+//      timestamped session events the boot path wrote;
+//   7. at a phone-width viewport the sidebar stacks BELOW the game stage.
 //
 //   pnpm --filter @tspml/portal dev       # in one terminal (:3000)
 //   pnpm --filter @tspml/portal smoke:ui  # in another
@@ -113,6 +115,20 @@ out.theaterExited = await page.evaluate(
   () => document.querySelector('main.app')?.classList.contains('theater') === false,
 );
 
+// 6. Session log: the sidebar's Log section is collapsed by default; opening
+// it reveals the timestamped lines the boot path logged (SW registration,
+// frame load, mods loaded — anything, we only assert lines exist).
+step('open the sidebar Log section');
+out.logCollapsed = await page.evaluate(() => {
+  const d = document.querySelector('details.log-details');
+  return d instanceof HTMLDetailsElement && !d.open;
+});
+await page.click('details.log-details summary').catch(() => {});
+await page.waitForTimeout(200);
+out.logHasLines = await page.evaluate(
+  () => document.querySelectorAll('details.log-details .log-line').length >= 3,
+);
+
 step('narrow viewport: sidebar stacks under the stage');
 await page.setViewportSize({ width: 480, height: 900 });
 await page.waitForTimeout(500);
@@ -137,6 +153,8 @@ const PASS =
   out.theaterCoversTab === true &&
   out.theaterLabelFlipped === true &&
   out.theaterExited === true &&
+  out.logCollapsed === true &&
+  out.logHasLines === true &&
   out.narrowStacked === true;
 
 console.log(JSON.stringify({ PASS, verdict: out, shot: SHOT }, null, 2));

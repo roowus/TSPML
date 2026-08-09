@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "tspml-sample-url-mod",
+  "name": "TSPML sample URL mod",
+  "version": "1.0.0",
+  "description": "Tiny sample mod served by the portal itself — try 'Import from a URL' with /sample-mod/mod.json to see the import path work end-to-end.",
+  "authors": ["TSPML"],
+  "environment": "web",
+  "entrypoint": "index.js",
+  "targets": []
+}
