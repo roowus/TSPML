@@ -13,7 +13,7 @@
  * re-litigate the bridge's API surface. `api.audio` / `api.tracks` already have
  * real types in `@tspml/api`, and the api-bridge unit tests hold them.
  *
- * The `__tspmlDev` / `__tspmlCounts` / `__demoHud*` entries are smoke-owned
+ * The `__tspmlDev` / `__tspmlCounts` / `__smoke*` entries are smoke-owned
  * scratch state, not product surface.
  */
 
@@ -42,8 +42,8 @@ declare global {
     __smokeUserModDisposed?: boolean;
     /** Set in the GAME frame by the pasted user mod's mixin inject (#62). */
     __smokeUserMixin?: boolean;
-    /** Set by @tspml/demo-hud's declared mixin — proves a mod mixin applied. */
-    __demoHudMixin?: unknown;
+    /** Set in the GAME frame by smoke.mjs's SEEDED user mod's mixin inject. */
+    __smokeSeededMixin?: boolean;
   }
 }
 

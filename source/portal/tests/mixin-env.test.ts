@@ -1,7 +1,7 @@
 // Unit tests for lib/mixin-env.ts — mixin-descriptor environment gating (#21).
 // The portal is a WEB host: a mod.json mixin descriptor declared for
 // desktop/worker must not contribute patches here, and the predicate must be
-// shared verbatim by demo-mods, the user patch plan, and mixinsSkipped.
+// shared verbatim by the user patch plan builder and the loader's mixinsSkipped.
 import { describe, expect, it } from 'vitest';
 import {
   mixinEnvironmentAppliesToHost,

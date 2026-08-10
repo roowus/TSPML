@@ -1,7 +1,9 @@
 // Headless proof for RUNTIME USER MODS in the portal: paste a mod through the
-// actual "+ Add a mod" form and verify it loads through the same loader path as
-// the bundled mods — in a real browser, where the Blob-URL `import()` the unit
-// tests must fake (node cannot feed a Blob URL to `import()`) runs for real.
+// actual "+ Add a mod" form and verify it loads through the loader — in a real
+// browser, where the Blob-URL `import()` the unit tests must fake (node cannot
+// feed a Blob URL to `import()`) runs for real. User mods are the ONLY way mods
+// enter the portal (the bundled demo mods were removed), so this smoke covers
+// the whole mod pipeline from a cold, empty store.
 // Since #62 this is ALSO the end-to-end proof for user-mod MIXINS: pasted
 // mixins.json → Cache API plan → SW POST replay → one-pass compose on the
 // server → report prelude inside the bundle → per-mod rows in the sidebar →
@@ -29,7 +31,7 @@
 //                with symbol-unresolved, per-mod isolated: the first mod stays
 //                1/1 and the base transform's LIVE badge survives;
 //   6. disable — toggling the first mod off unloads it (disposer runs), drops
-//                it from the loaded list (bundled mods stay), and raises the
+//                it from the loaded list (the other mod stays), and raises the
 //                restart banner again (its patch set left the plan);
 //   7. remove  — removing both mods clears the stored records;
 //   8. URL     — (#80 first slice) the Add form's "Import from a URL" method
@@ -67,8 +69,7 @@ const CODE = `export default (api) => {
   api.logger.log("[${MOD_ID}] loaded");
   return () => { window.__smokeUserModDisposed = true; };
 };`;
-// Modeled on demo-hud's mixins.json — an `after` inject on the mapped Car
-// symbol, the proven M5-C shape.
+// An `after` inject on the mapped Car symbol — the proven M5-C shape.
 const MIXINS = JSON.stringify({
   patches: [
     {
@@ -163,11 +164,13 @@ if (!frameEl) {
 
 const out = { frameMounted: !!frameEl };
 
-// The initial (bundled-only) load must finish before the form is exercised —
-// otherwise "the user mod loaded" could be conflated with first load.
-step("wait for the bundled mods to load");
-out.bundledLoaded = await waitForSidebar(
-  () => /mods:\s*✓ .*tspml-example-hud/.test(document.body.innerText),
+// The initial load must SETTLE before the form is exercised — otherwise "the
+// user mod loaded" could be conflated with first load. There are no bundled
+// mods, so a cold profile settles at "mods: none" (the loader ran over an
+// empty store and honestly reported nothing).
+step("wait for the initial (empty) load to settle at 'mods: none'");
+out.initialLoadSettled = await waitForSidebar(
+  () => /mods:\s*none/.test(document.body.innerText),
   90000,
 );
 
@@ -286,8 +289,9 @@ out.liveBadgeSurvives = gameFrame
 await page.screenshot({ path: SHOT });
 
 // 6. Disable: the mod unloads (disposer runs), leaves the loaded list, the
-// bundled demo mods survive — and the restart banner returns, because its
-// patch set left the plan while the frame keeps the already-patched bundle.
+// OTHER user mod (the bogus-mixin one — its entrypoint is fine, only its mixin
+// fails) survives the reload of the set — and the restart banner returns,
+// because its patch set left the plan while the frame keeps the patched bundle.
 step("disable the mod");
 await page.click(`aside[aria-label="Mods"] li:has(code:text-is("${MOD_ID}")) button:has-text("disable")`);
 out.disabledUnloaded = await page
@@ -298,7 +302,7 @@ out.disabledDropped = await waitForSidebar(
   () => /mods:\s*✓ /.test(document.body.innerText) && !/mods:.*smoke-user-mod/.test(document.body.innerText),
   20000,
 );
-out.bundledSurvive = /mods:\s*✓ .*tspml-example-hud/.test(await sidebarText());
+out.otherModSurvives = new RegExp(`mods:\\s*✓ .*${BOGUS_ID}`).test(await sidebarText());
 out.disableRestartBanner = await waitForSidebar(
   () => /need a restart/.test(document.body.innerText),
   15000,
@@ -363,7 +367,7 @@ await page.selectOption('aside[aria-label="Mods"] select.add-select', "paste");
 
 const PASS =
   out.frameMounted === true &&
-  out.bundledLoaded === true &&
+  out.initialLoadSettled === true &&
   out.addedLoaded === true &&
   out.entrypointRuns === true &&
   out.sidebarListsMod === true &&
@@ -382,7 +386,7 @@ const PASS =
   out.liveBadgeSurvives === true &&
   out.disabledUnloaded === true &&
   out.disabledDropped === true &&
-  out.bundledSurvive === true &&
+  out.otherModSurvives === true &&
   out.disableRestartBanner === true &&
   out.storageCleared === true &&
   out.rowGone === true &&

@@ -122,13 +122,13 @@ surface a **restart banner** rather than pretending to apply live.
 
 | Path | Role |
 | --- | --- |
-| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the demo mods + the user's added mods, and renders the live sidebar (including the "Add a mod" form). |
+| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the user's added mods, and renders the live sidebar (including the "Add a mod" form) plus the draggable stage/sidebar resizer. |
 | `app/layout.tsx` | Root layout (App Router). |
 | `app/globals.css` | All page styling (the page used to inline it; hover/fullscreen/media-query rules can't be inline). The smokes assert on rendered text + structure, so presentation-only changes here are safe. |
 | `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/POST/OPTIONS) + the three `<head>` injections + the bundle transform. POST is the SW's plan-carrying bundle fetch (#62) — the upstream fetch is always GET, the body never leaves the route. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
 | `lib/rewrite.ts` | Canonical pure `rewriteGameUrl()` + `isGameHost()` — the only place the rewrite rules live (unit-tested). |
 | `lib/demo-transform.ts` | Mappings `{symbol}` resolution + the hash-gated application of `@tspml/shared`'s patches, composed with user patch sets (#62: base all-or-nothing, user per-mod isolated, replace pre-screen). Never throws: on any mismatch the bundle is served untouched. |
-| `lib/demo-mods.ts` / `lib/mod-loader.ts` | The bundled demo mods and their load through `@tspml/loader` (per-mod failure isolation — a bad mod never aborts boot). `mod-loader.ts` also routes **user mods** through the same `load()` call. |
+| `lib/mod-loader.ts` | Routes the user's mods through `@tspml/loader`'s `load()` call (per-mod failure isolation — a bad mod never aborts boot; duplicate-id and dependency pre-gates keep one bad entry from taking the rest down). There are no bundled mods — the demo mods live only in `environments/demo-mods` for the dev harness. |
 | `lib/user-mods.ts` | Runtime user-mod substrate: localStorage persistence (versioned, corruption-tolerant) + Blob-URL `import()` of pasted entrypoint code + the `user:<id>` entry-specifier scheme + `parseMixinsJson` for the third paste. |
 | `lib/user-patches.ts` | The #62 plan mechanism: caps, plan build/fingerprint (page side), defensive re-parse (server side), and the in-bundle report prelude. |
 | `lib/bundle-cache.ts` | In-process memo of the **base** transformed bundle (the plain-GET path) — deterministic per upstream, so a warm instance skips the babel pass. Promise-memoized (the page's prewarm and the SW's real fetch share one compute), short TTL, errors never cached. The #62 POST path is never memoized (per-user report, `no-store`). |
@@ -168,7 +168,8 @@ pnpm --filter @tspml/portal smoke:ui                # terminal 2: boot overlay +
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
-gameplay, the demo mods load, the mixin applies, and the race-setup Tier-1 events fire.
+gameplay, a seeded user mod loads (entrypoint + mixin + unload), and the race-setup Tier-1
+events fire.
 `smoke-tracks.mjs` drives **only what a mod can** (`api.tracks` and nothing else): mint a
 real import code from the game's own codec → `register` → the track is present in the
 **game's** custom-track list → an invalid code is a typed `invalid-code` failure rather than

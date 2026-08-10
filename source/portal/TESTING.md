@@ -57,6 +57,6 @@ Open http://localhost:3000. Does the *unmodified* game render and play through t
 
 ## What this does NOT test yet (honest)
 
-- **Real mods with live hooks** — no mod-loading is wired into the running game yet (that's the rest of M4, the API bridge). Today's marker is a hardcoded demo hook, not a loaded mod.
+- **Real mods with live hooks** — this manual walkthrough only checks the transform + proxy path. Mod loading (user-added mods via the sidebar) is covered by the headless smokes instead (`scripts/smoke.mjs`, `scripts/smoke-user-mods.mjs`).
 - **Online / leaderboards / multiplayer** through the proxy — one `502` on an online call remains (issue #7, M8). Non-blocking for local gameplay.
 - **Chunks** — only `main.bundle.js` is transformed; 0.6.2 splits more code into numbered chunks (issue #3).
