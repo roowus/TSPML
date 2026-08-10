@@ -1,26 +1,20 @@
 /**
  * @tspml/portal — loads the portal's mods via @tspml/loader.
  *
- * Two sources, one loader path:
- * - the BUNDLED demo mods (statically imported so the bundler includes them),
- * - the USER mods added at runtime through the portal UI and persisted in
- *   localStorage (see ./user-mods.ts) — the thing that makes the portal usable
- *   to a modder who hasn't forked this repo.
+ * All mods are USER mods, added at runtime through the portal UI (pasted,
+ * URL-imported, and later registry-imported — #80) and persisted in
+ * localStorage (see ./user-mods.ts). There are no bundled mods: the demo mods
+ * that once shipped inside the portal now live only in environments/demo-mods
+ * for the dev harness, so the mod list is entirely the user's.
  *
- * Both kinds go through the same `load()` call, so a user mod gets everything a
- * bundled one does: manifest validation, dependency resolution, per-mod failure
- * isolation, safety classification, and unload.
+ * Every mod goes through the same `load()` call: manifest validation,
+ * dependency resolution, per-mod failure isolation, safety classification, and
+ * unload.
  */
 import type { TspmlApi } from '@tspml/api';
 import type { Mod, ModDescriptor, ResolveContext } from '@tspml/loader';
 import { classifySafety, load, modFromManifest, parseVersionManifest, resolveDependencies } from '@tspml/loader';
 import type { SafetyReport } from '@tspml/loader';
-// Statically imported so the bundler includes the demo mod; `importEntry` below
-// returns it for the demo-hud specifier.
-import demoHudFactory from '@tspml/demo-hud';
-import demoHudManifest from '@tspml/demo-hud/mod.json';
-import checkpointCounterFactory from '@tspml/checkpoint-counter';
-import checkpointCounterManifest from '@tspml/checkpoint-counter/mod.json';
 import type { UserModRecord } from './user-mods';
 import { importFromSource, USER_ENTRY_PREFIX, userEntrySpecifier, userModId } from './user-mods';
 import { mixinEnvironmentAppliesToHost, PORTAL_HOST_ENVIRONMENT } from './mixin-env';
@@ -52,7 +46,7 @@ export interface ModLoadSummary {
 }
 
 export interface LoadModsOptions {
-  /** User mods to load alongside the bundled ones (disabled ones are skipped). */
+  /** The user's mods (disabled ones are skipped). */
   readonly userMods?: readonly UserModRecord[];
   /**
    * How a user mod's stored source becomes a module. Defaults to the Blob-URL
@@ -81,33 +75,20 @@ export const PORTAL_RESOLVE_CONTEXT: ResolveContext = {
 };
 
 /**
- * Load the bundled demo mods + any user mods against the given (bridge) api.
- * Per-mod failure isolation: a bad mod is reported, never boot-aborts. Also
- * classifies each mod's safety (M6-B, warn-only) for the portal to surface.
+ * Load the user's mods against the given (bridge) api. Per-mod failure
+ * isolation: a bad mod is reported, never boot-aborts. Also classifies each
+ * mod's safety (M6-B, warn-only) for the portal to surface.
  */
 export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Promise<ModLoadSummary> {
   const userMods = (options.userMods ?? []).filter((m) => m.enabled);
   const importUserMod = options.importUserMod ?? ((record: UserModRecord) => importFromSource(record.code));
   const context = options.context ?? PORTAL_RESOLVE_CONTEXT;
 
-  // A user mod is addressed as `user:<id>`; anything else is a bundled specifier.
+  // Every user mod is addressed as `user:<id>`.
   const userById = new Map<string, UserModRecord>();
   const preFailed: Array<{ id: string; reason: string }> = [];
 
-  // Ids the bundled mods claim. A user mod colliding with one (or with another
-  // user mod) is failed HERE, before load(): the loader treats a duplicate id as
-  // abortive for the whole set (rightly — it can't order two mods with one
-  // name), but one bad user entry must not take the demo mods down with it.
-  const bundledIds = new Set<string>(
-    [demoHudManifest, checkpointCounterManifest]
-      .map((m) => (m as { id?: unknown }).id)
-      .filter((id): id is string => typeof id === 'string'),
-  );
-
-  const descriptors: ModDescriptor[] = [
-    { manifest: demoHudManifest as unknown, entry: 'demo-hud' },
-    { manifest: checkpointCounterManifest as unknown, entry: 'checkpoint-counter' },
-  ];
+  const descriptors: ModDescriptor[] = [];
 
   // User mods that parse cleanly, awaiting the dependency pre-gate below.
   const candidates: Array<{ id: string; record: UserModRecord; mod: Mod }> = [];
@@ -120,7 +101,11 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
       descriptors.push({ manifest: record.manifest });
       continue;
     }
-    if (bundledIds.has(id) || userById.has(id)) {
+    // Two records claiming one id must be failed HERE, before load(): the
+    // loader treats a duplicate id as abortive for the whole set (rightly — it
+    // can't order two mods with one name), but one bad entry must not take the
+    // user's other mods down with it.
+    if (userById.has(id)) {
       preFailed.push({ id, reason: `duplicate mod id '${id}' (already loaded)` });
       continue;
     }
@@ -137,24 +122,15 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   // Dependency pre-gate. Like duplicate ids, RESOLUTION errors (missing
   // `depends`, version conflict, cycle) are abortive in the loader — it cannot
   // order a set it cannot resolve — so a pasted manifest declaring
-  // `depends: {"anything": "*"}` would otherwise take the bundled mods down
-  // with it. Accept user mods against the resolved set to a fixpoint (so a mod
-  // depending on another user mod loads regardless of paste order), and
+  // `depends: {"anything": "*"}` would otherwise take the rest of the user's
+  // mods down with it. Accept mods against the resolved set to a fixpoint (so
+  // a mod depending on another user mod loads regardless of paste order), and
   // pre-fail whatever never resolves — each with the resolver's own message.
   // (`breaks` (#6), environment and targets mismatches (#21) no longer throw:
   // those mods pass this gate and load() soft-disables them, which the status
   // loop below reports as failed-with-reason. The gate resolves with the SAME
   // context as load() so the two passes cannot disagree about what throws.)
-  let accepted: Mod[];
-  try {
-    accepted = [demoHudManifest, checkpointCounterManifest].map((m) =>
-      modFromManifest(parseVersionManifest(m as unknown)),
-    );
-  } catch {
-    // A bundled manifest failing to parse is a repo bug load() will surface;
-    // gate the user mods against each other only.
-    accepted = [];
-  }
+  const accepted: Mod[] = [];
   const pending = [...candidates];
   let progress = true;
   while (progress) {
@@ -184,8 +160,6 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   }
 
   const importEntry = async (specifier: string): Promise<unknown> => {
-    if (specifier === 'demo-hud') return { default: demoHudFactory };
-    if (specifier === 'checkpoint-counter') return { default: checkpointCounterFactory };
     if (specifier.startsWith(USER_ENTRY_PREFIX)) {
       const record = userById.get(specifier.slice(USER_ENTRY_PREFIX.length));
       if (!record) throw new Error(`no stored code for '${specifier}'`);
@@ -206,8 +180,7 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
     else failed.push({ id, reason: s.reason ?? 'unknown' });
   }
 
-  // M6-B: classify each mod's safety (warn-only — never blocks). User mods ride
-  // the same classifier as bundled ones.
+  // M6-B: classify each mod's safety (warn-only — never blocks).
   const safety: ModSafetyEntry[] = [];
   // User mods whose manifest declares mixins with no pasted mixins.json to back
   // them — see ModLoadSummary.mixinsSkipped. Records WITH pasted mixins ride

@@ -87,8 +87,46 @@ body {
 .content {
   display: flex;
   flex: 1;
-  gap: 12px;
+  gap: 6px;
   min-height: 0; /* lets the stage/sidebar shrink instead of overflowing */
+  /* The stage/sidebar split, driven by the resizer bar (page.tsx sets it
+     inline). A custom property rather than an inline width on the aside so
+     the ≤900px stacked layout's `width: auto` still wins. */
+  --sidebar-width: 340px;
+}
+
+/* ---- Stage/sidebar drag handle ---- */
+
+.content-resizer {
+  flex: none;
+  width: 8px;
+  border-radius: 4px;
+  cursor: col-resize;
+  touch-action: none; /* pointer events drive the drag; don't scroll instead */
+  background: transparent;
+  position: relative;
+}
+
+/* The visible grip: a slim line that widens/brightens under the pointer so
+   the affordance is discoverable without a permanent visual seam. */
+.content-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.15s ease, inset 0.15s ease;
+}
+
+.content-resizer:hover::before,
+.content-resizer:focus-visible::before,
+.content-resizer:active::before {
+  inset: 0 2px;
+  background: var(--accent, #7c5cff);
+}
+
+.content-resizer:focus-visible {
+  outline: none;
 }
 
 /* ---- Game stage ---- */
@@ -316,7 +354,7 @@ body {
 /* ---- Sidebar ---- */
 
 .sidebar {
-  width: 340px;
+  width: var(--sidebar-width, 340px);
   flex: none;
   overflow-y: auto;
   background: var(--panel);
@@ -648,5 +686,10 @@ body {
   .sidebar {
     width: auto;
     overflow-y: visible;
+  }
+
+  /* Stacked layout: a horizontal split does not exist to resize. */
+  .content-resizer {
+    display: none;
   }
 }

@@ -51,7 +51,7 @@ export interface UserPatchPlan {
 /**
  * Caps enforced at ADD time (the author hears it immediately) and re-checked
  * server-side (the body is still attacker-shaped input). Sized for real inject
- * code with an order of magnitude of headroom over the bundled demo mixins,
+ * code with an order of magnitude of headroom over typical mod mixins,
  * while bounding the Babel work a request can demand of the lambda.
  */
 export const USER_PATCH_LIMITS = {
