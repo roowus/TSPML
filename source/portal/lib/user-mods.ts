@@ -1,12 +1,12 @@
 /**
  * @tspml/portal — user-added mods (runtime mod loading).
  *
- * The portal's bundled demo mods are statically imported at build time, which
- * proves the loader works but is useless to a modder: they cannot run their own
- * mod without forking this repo. This module is the missing half — a mod a user
- * pastes into the portal (manifest + built entrypoint JS) is persisted to
- * `localStorage` and loaded through the SAME `@tspml/loader` path as the bundled
- * mods: parsed, validated, dependency-resolved, safety-classified, isolated.
+ * A mod a user pastes into the portal (manifest + built entrypoint JS) is
+ * persisted to `localStorage` and loaded through the standard `@tspml/loader`
+ * path: parsed, validated, dependency-resolved, safety-classified, isolated.
+ * This is what makes the portal usable to a modder who hasn't forked this
+ * repo — and since the bundled demo mods were removed, it is the ONLY way
+ * mods enter the portal.
  *
  * Scope (deliberate):
  * - **Tier-1 entrypoint + pasted Tier-2 mixins.** A user mod's entrypoint gets

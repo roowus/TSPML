@@ -9,7 +9,7 @@
  * only such descriptors must be reported as not-applied, never silently
  * dropped (page.tsx surfaces `envSkipped` from the plan builder).
  *
- * Pure and dependency-free so demo-mods, the plan builder, and mod-loader all
+ * Pure and dependency-free so the plan builder and mod-loader both
  * share the ONE predicate and the one host constant — entrypoint resolution
  * (PORTAL_RESOLVE_CONTEXT) and mixin gating cannot disagree about what the
  * portal is.

@@ -48,7 +48,6 @@ import mapJson from "@tspml/mappings/maps/polytrack-0.6.2.json";
 // The proxy route must ALSO inject @tspml/shared's EARLY_CAPTURE_SCRIPT_TAG, or the
 // codec capture below fires before the bridge exists and is silently dropped.
 import { BRIDGE_PATCHES } from "@tspml/shared";
-import { MOD_MIXIN_PATCHES } from "./demo-mods";
 import type { UserMixinModReport, UserMixinReport, UserPatchSet } from "./user-patches";
 
 const MAP: GameMap = validateMap(mapJson);
@@ -78,13 +77,14 @@ function resolveDeclaredPatch(
   return p as unknown as Patch;
 }
 
-/** All applied patches: the shared bridge patches PLUS mod-declared mixins (M5-A).
- *  Loosely typed — mod-declared patches may use `{symbol}` (M5-C) resolved in
- *  applyDemoTransform, or inline anchors. */
+/** All base patches: the loader-owned bridge patches (badge + Tier-1 emits +
+ *  captures). Mod-declared mixins ride the request-carried user patch plan
+ *  (#62) — since the bundled demo mods left the portal, nothing else
+ *  contributes to the base transform. Loosely typed — patches may use
+ *  `{symbol}` (M5-C) resolved in applyDemoTransform, or inline anchors. */
 const ALL_PATCHES: readonly Record<string, unknown>[] = [
   ...BRIDGE_PATCHES,
-  ...MOD_MIXIN_PATCHES,
-] as readonly Record<string, unknown>[];
+] as unknown as readonly Record<string, unknown>[];
 
 export interface DemoTransformResult {
   /** Bundle source to serve (transformed code, or the original on failure). */

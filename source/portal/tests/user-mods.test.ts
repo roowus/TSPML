@@ -154,7 +154,7 @@ describe('parseMixinsJson (#62)', () => {
 });
 
 describe('loadMods with user mods', () => {
-  it('loads an enabled user mod through the loader alongside the bundled mods', async () => {
+  it('loads an enabled user mod through the loader', async () => {
     const entered: string[] = [];
     const summary = await loadMods(fakeApi(), {
       userMods: [record({ id: 'my-mod' })],
@@ -165,11 +165,16 @@ describe('loadMods with user mods', () => {
       }),
     });
     expect(summary.loaded).toContain('my-mod');
-    // The bundled demo mods still load — a user mod joins them, never replaces them.
-    expect(summary.loaded).toContain('tspml-example-hud');
     expect(entered).toEqual(['my-mod']);
     // And it is safety-classified like any other mod.
     expect(summary.safety.map((s) => s.id)).toContain('my-mod');
+  });
+
+  it('loads nothing when the user has no mods — there are no bundled mods', async () => {
+    const summary = await loadMods(fakeApi(), { userMods: [] });
+    expect(summary.loaded).toEqual([]);
+    expect(summary.failed).toEqual([]);
+    expect(summary.safety).toEqual([]);
   });
 
   it('skips disabled user mods entirely', async () => {
@@ -185,13 +190,13 @@ describe('loadMods with user mods', () => {
 
   it('fails (only) the user mod on a manifest error, isolated from the rest', async () => {
     const summary = await loadMods(fakeApi(), {
-      userMods: [{ ...record(), manifest: { schemaVersion: 1, id: 'bad-mod' } }],
+      userMods: [{ ...record(), manifest: { schemaVersion: 1, id: 'bad-mod' } }, record({ id: 'good-mod' })],
       importUserMod: async () => ({ default: () => {} }),
     });
     const failure = summary.failed.find((f) => f.id === 'bad-mod');
     expect(failure).toBeDefined();
     expect(failure!.reason).toMatch(/name/); // the first missing required field
-    expect(summary.loaded).toContain('tspml-example-hud');
+    expect(summary.loaded).toContain('good-mod');
   });
 
   it('fails (only) the user mod when its code throws on import', async () => {
@@ -202,20 +207,6 @@ describe('loadMods with user mods', () => {
       },
     });
     expect(summary.failed.find((f) => f.id === 'boom-mod')?.reason).toMatch(/nope/);
-    expect(summary.loaded).toContain('tspml-example-hud');
-  });
-
-  it('pre-fails a user mod whose id collides with a bundled mod, WITHOUT aborting the load', async () => {
-    // The loader treats duplicate ids as abortive for the whole set; the portal
-    // must catch the collision first so one bad user entry can't take the
-    // bundled mods down.
-    const summary = await loadMods(fakeApi(), {
-      userMods: [record({ id: 'tspml-example-hud' })],
-      importUserMod: async () => ({ default: () => {} }),
-    });
-    expect(summary.failed.find((f) => f.id === 'tspml-example-hud')?.reason).toMatch(/duplicate/);
-    expect(summary.loaded).toContain('tspml-example-hud');
-    expect(summary.loaded).toContain('tspml-checkpoint-counter');
   });
 
   it('pre-fails the SECOND user mod claiming the same id', async () => {
@@ -230,27 +221,27 @@ describe('loadMods with user mods', () => {
   it('pre-fails a user mod with an unmet dependency, WITHOUT aborting the load', async () => {
     // Resolution errors (missing depends, breaks, cycles) are abortive in the
     // loader, exactly like duplicate ids — a pasted manifest saying
-    // `depends: {"anything": "*"}` must not take the bundled mods down.
+    // `depends: {"anything": "*"}` must not take the user's other mods down.
     const needy = record({ id: 'needy-mod' });
     (needy.manifest as Record<string, unknown>).depends = { 'not-installed': '^1.0.0' };
     const summary = await loadMods(fakeApi(), {
-      userMods: [needy],
+      userMods: [needy, record({ id: 'innocent-mod' })],
       importUserMod: async () => ({ default: () => {} }),
     });
     expect(summary.failed.find((f) => f.id === 'needy-mod')?.reason).toMatch(/not installed/);
-    expect(summary.loaded).toContain('tspml-example-hud');
-    expect(summary.loaded).toContain('tspml-checkpoint-counter');
+    expect(summary.loaded).toContain('innocent-mod');
   });
 
-  it('pre-fails a user mod that breaks a bundled mod, WITHOUT aborting the load', async () => {
+  it('pre-fails a user mod that breaks another loaded mod, WITHOUT aborting the load', async () => {
+    const victim = record({ id: 'victim-mod' });
     const breaker = record({ id: 'breaker-mod' });
-    (breaker.manifest as Record<string, unknown>).breaks = { 'tspml-example-hud': '*' };
+    (breaker.manifest as Record<string, unknown>).breaks = { 'victim-mod': '*' };
     const summary = await loadMods(fakeApi(), {
-      userMods: [breaker],
+      userMods: [victim, breaker],
       importUserMod: async () => ({ default: () => {} }),
     });
     expect(summary.failed.find((f) => f.id === 'breaker-mod')?.reason).toMatch(/breaks/);
-    expect(summary.loaded).toContain('tspml-example-hud');
+    expect(summary.loaded).toContain('victim-mod');
   });
 
   it('loads a user mod depending on another user mod, in either paste order', async () => {
@@ -276,8 +267,6 @@ describe('loadMods with user mods', () => {
     });
     expect(summary.loaded).toContain('mixin-mod');
     expect(summary.mixinsSkipped).toEqual(['mixin-mod']);
-    // Bundled mods' mixins ARE applied (server-side) — they must not appear here.
-    expect(summary.mixinsSkipped).not.toContain('tspml-example-hud');
   });
 
   it('does NOT nag for unpasted mixins declared for another environment — pasting them would change nothing here (#21)', async () => {
@@ -311,24 +300,25 @@ describe('loadMods with user mods', () => {
     const desktopOnly = record({ id: 'desktop-mod' });
     (desktopOnly.manifest as Record<string, unknown>).environment = 'desktop';
     const importUserMod = vi.fn(async () => ({ default: () => {} }));
-    const summary = await loadMods(fakeApi(), { userMods: [desktopOnly], importUserMod });
+    const summary = await loadMods(fakeApi(), {
+      userMods: [desktopOnly, record({ id: 'web-mod' })],
+      importUserMod,
+    });
     const failure = summary.failed.find((f) => f.id === 'desktop-mod');
     expect(failure?.reason).toMatch(/environment 'desktop'/);
-    expect(importUserMod).not.toHaveBeenCalled();
-    // Soft, not abortive: the bundled mods are untouched.
-    expect(summary.loaded).toContain('tspml-example-hud');
-    expect(summary.loaded).toContain('tspml-checkpoint-counter');
+    // Soft, not abortive: the user's other mods are untouched.
+    expect(summary.loaded).toContain('web-mod');
   });
 
   it('reports a stale-targets user mod as failed-with-reason against the pinned game version (#21)', async () => {
     const stale = record({ id: 'stale-mod' });
     (stale.manifest as Record<string, unknown>).targets = ['>=0.7.0'];
     const summary = await loadMods(fakeApi(), {
-      userMods: [stale],
+      userMods: [stale, record({ id: 'fitting-mod' })],
       importUserMod: async () => ({ default: () => {} }),
     });
     expect(summary.failed.find((f) => f.id === 'stale-mod')?.reason).toMatch(/targets '>=0\.7\.0'/);
-    expect(summary.loaded).toContain('tspml-example-hud');
+    expect(summary.loaded).toContain('fitting-mod');
   });
 
   it('the context is overridable — a pinned desktop context flips which mods fit (#21)', async () => {
@@ -339,10 +329,7 @@ describe('loadMods with user mods', () => {
       importUserMod: async () => ({ default: () => {} }),
       context: { hostEnvironment: 'desktop', polytrackVersion: '0.6.2' },
     });
-    // The user mod fits now; the bundled demo mods (environment unset = '*')
-    // still load — '*' means anywhere, including a desktop host.
     expect(summary.loaded).toContain('desktop-mod');
-    expect(summary.loaded).toContain('tspml-example-hud');
   });
 
   it('unloads a user mod via the standard disposer path (#17)', async () => {

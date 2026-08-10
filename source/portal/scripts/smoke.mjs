@@ -10,6 +10,14 @@
 // car.created, race.started, track.afterLoad — the portal's own sidebar
 // reflects the load (#41), AND a real `pagehide` tears the mod back down (#17).
 //
+// There are no bundled mods anymore: this smoke SEEDS one user mod into
+// localStorage (the same store the Add form writes) before first load. The
+// seeded mod replicates what the old bundled demo-hud proved — an entrypoint
+// that subscribes car.control, registers a KeyG keybind, and returns a
+// disposer — plus a mixins.json patch, so the full user-mod path (storage →
+// loader → parked plan → SW POST replay → compose → inject firing in the game
+// frame) is under test on every run, not just in smoke-user-mods.
+//
 // race.started is checked as EXACTLY 1 and attributed to the player's car
 // (#10) — it is a per-car event, and this is a solo race. Ghost cars cannot occur
 // here (a fresh browser has no saved record to replay), so the player/ghost logic
@@ -31,6 +39,47 @@ import { chromium } from "playwright";
 
 const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-smoke.png";
+
+// The seeded user mod (see header). Counters hang off the `api` object, which
+// the portal exposes on the GAME frame as window.__tspml — same read path the
+// old bundled demo-hud used. The disposer flips `unloaded` for the #17 leg.
+const SEEDED_MOD_ID = "smoke-seeded-hud";
+const SEEDED_RECORD = {
+  manifest: {
+    schemaVersion: 1,
+    id: SEEDED_MOD_ID,
+    name: "Smoke seeded HUD",
+    version: "1.0.0",
+    entrypoint: "entrypoint.js",
+    targets: [">=0.6.0 <0.7.0"],
+    mixins: [{ config: "mixins.json" }],
+  },
+  code: `export default (api) => {
+  const c = { control: 0, key: 0, loaded: true };
+  api.__smokeHud = c;
+  const offControl = api.events.on("car.control", () => { c.control++; });
+  const unregister = api.keybinds.register({
+    id: "${SEEDED_MOD_ID}.toggle",
+    key: "KeyG",
+    description: "Seeded HUD: toggle",
+    onDown: () => { c.key++; },
+  });
+  api.logger.log("[${SEEDED_MOD_ID}] loaded");
+  return () => { offControl(); unregister(); c.unloaded = true; };
+};`,
+  // A Tier-2 mixin on the mapped Car symbol (the proven M5-C shape): rides the
+  // parked plan → SW POST replay → server compose, and stamps a game-frame
+  // global this smoke asserts.
+  mixins: [
+    {
+      op: "after",
+      symbol: "Car",
+      inject: "(function(){ try { window.__smokeSeededMixin = true; } catch (e) {} })();",
+    },
+  ],
+  enabled: true,
+  addedAt: "2026-08-09T00:00:00.000Z",
+};
 
 const COUNTED_EVENTS = [
   "car.control",
@@ -67,6 +116,15 @@ function findFrame(urlIncludes) {
     page.frames().find((f) => f !== page.mainFrame() && f.url().includes(urlIncludes)) ?? null
   );
 }
+
+// Seed the user mod into the SAME localStorage key the Add form writes, before
+// any portal script runs — the portal's first load then picks it up exactly as
+// it would a mod the user added on a previous visit (persistence path).
+await page.addInitScript((record) => {
+  try {
+    window.localStorage.setItem("tspml.userMods.v1", JSON.stringify([record]));
+  } catch {}
+}, SEEDED_RECORD);
 
 process.stderr.write(`smoke: goto ${URL}\n`);
 await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -145,10 +203,9 @@ const dom = await gameFrame.evaluate(() => {
       (buttons && buttons.querySelectorAll("button,[role=button],a").length > 0) ||
       /km\/h|00:00\.\d/.test(text),
     reachedGameplay: /km\/h/.test(text),
-    // M5-A: a mod-DECLARED mixin (demo-hud's mixins.json) injected this marker.
-    modMixinApplied: !!(
-      window.__demoHudMixin || document.getElementById("tspml-demo-hud-mixin")
-    ),
+    // #62: the seeded mod's mixin rode the parked plan → SW POST replay →
+    // server compose, and its inject ran inside the served bundle.
+    modMixinApplied: window.__smokeSeededMixin === true,
     bodyText: text.slice(0, 200),
   };
 });
@@ -158,11 +215,11 @@ const dom = await gameFrame.evaluate(() => {
 // collision nearly shipped) compiles fine and leaves every assertion above
 // green — the sidebar just silently stops saying anything.
 //
-// The ids are hardcoded on purpose. "the list is non-empty" is satisfied by the
+// The id is hardcoded on purpose. "the list is non-empty" is satisfied by the
 // placeholder row too ("loading…" / "waiting for game…"), so a regression to the
 // placeholder would pass. Naming what the portal actually loads is what makes
 // this an assertion rather than a shape check.
-const EXPECTED_MOD_IDS = ["tspml-example-hud", "tspml-checkpoint-counter"];
+const EXPECTED_MOD_IDS = [SEEDED_MOD_ID];
 
 const sidebar = await page.mainFrame().evaluate((expected) => {
   const aside = /** @type {HTMLElement | null} */ (
@@ -170,8 +227,14 @@ const sidebar = await page.mainFrame().evaluate((expected) => {
   );
   if (!aside) return { present: false, text: "", modIds: [], statuses: [] };
   const text = aside.innerText || "";
-  // Each mod row renders its id in a <code> and its load status in the last span.
-  const rows = Array.from(aside.querySelectorAll("li"));
+  // Scope to the "Loaded mods" section: with user mods seeded, the "Your mods"
+  // rows (whose first <span> is the buttons wrapper) and the "Your mixins"
+  // report rows also render a <code> — only the loaded list's first <span> is
+  // the load status.
+  const section = Array.from(aside.querySelectorAll("section")).find(
+    (s) => s.querySelector("h2")?.textContent?.trim() === "Loaded mods",
+  );
+  const rows = Array.from((section ?? aside).querySelectorAll("li"));
   const modIds = rows
     .map((li) => li.querySelector("code"))
     .filter(Boolean)
@@ -285,14 +348,15 @@ try {
   keybindFired = -1;
 }
 
-// Verify the LOADED MOD (@tspml/demo-hud): its car.control listener rides the
-// same bus (so it should have fired during the race), and its KeyG keybind
-// should fire on dispatch. Proves a real mod package subscribed via the api.
+// Verify the SEEDED USER MOD: its car.control listener rides the same bus (so
+// it should have fired during the race), and its KeyG keybind should fire on
+// dispatch. Proves a stored user mod loaded through the real Blob-URL import
+// and subscribed via the api.
 let mod = { loaded: false, control: 0, key: 0 };
 try {
   await gameFrame.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyG" })));
   mod = await gameFrame.evaluate(() => {
-    const d = (window.__tspml && window.__tspml.__demoHud) || {};
+    const d = (window.__tspml && window.__tspml.__smokeHud) || {};
     return { loaded: !!d.loaded, control: d.control || 0, key: d.key || 0 };
   });
 } catch (e) {
@@ -308,12 +372,12 @@ try {
 // (`unload` never fires on mobile Safari and disables the bfcache), and it is dispatched
 // on the MAIN frame, where the listener lives — the portal chrome, not the game iframe.
 //
-// The observable is demo-hud's `unloaded` flag, set by the disposer it returns. That
-// flag was added for exactly this check and has been read by nothing.
+// The observable is the seeded mod's `unloaded` flag, set by the disposer it
+// returns — exactly the old demo-hud contract, now proven on the user-mod path.
 const unloadCheck = { before: null, after: null, error: null };
 try {
   unloadCheck.before = await gameFrame.evaluate(
-    () => window.__tspml?.__demoHud?.unloaded === true,
+    () => window.__tspml?.__smokeHud?.unloaded === true,
   );
   await page.mainFrame().evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false }));
@@ -322,7 +386,7 @@ try {
   // once — a single synchronous read races it and reports a false negative.
   unloadCheck.after = await gameFrame.evaluate(async () => {
     for (let i = 0; i < 40; i++) {
-      if (window.__tspml?.__demoHud?.unloaded === true) return true;
+      if (window.__tspml?.__smokeHud?.unloaded === true) return true;
       await new Promise((r) => setTimeout(r, 50));
     }
     return false;
