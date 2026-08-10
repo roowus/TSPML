@@ -402,6 +402,24 @@ body {
   color: var(--muted);
 }
 
+/* Section heading with an action beside it (Your mods' ⟳ reload). The h2
+   keeps its bottom margin; the row aligns the button to the heading text. */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.section-head > h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
 .rows {
   list-style: none;
   margin: 0;

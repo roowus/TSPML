@@ -11,6 +11,7 @@ import type { ModLoadSummary } from '@/lib/mod-loader';
 import { parseMixinsJson, readUserMods, saveUserMods, upsertUserMod, userModId } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
 import { importModFromUrl } from '@/lib/mod-import';
+import { refreshFromSources } from '@/lib/mod-reload';
 import {
   buildUserPatchPlan,
   PLAN_CACHE,
@@ -198,6 +199,10 @@ export default function PlayPage(): ReactElement {
   const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'id'>('paste');
   const [draftUrl, setDraftUrl] = useState('');
   const [importBusy, setImportBusy] = useState(false);
+  // "⟳ reload" (the reload-mods feature): busy while URL re-fetches are in
+  // flight; the notice reports per-mod re-fetch failures (stored copy kept).
+  const [reloadBusy, setReloadBusy] = useState(false);
+  const [reloadNotice, setReloadNotice] = useState<string | null>(null);
   // The boot/status log: what happened, when, in order. Shown live on the
   // loading overlay (last lines) and in full in the sidebar's Log section —
   // the honest answer to "what is it doing?" while the overlay progress bar
@@ -735,6 +740,8 @@ export default function PlayPage(): ReactElement {
         ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
         enabled: true,
         addedAt: new Date().toISOString(),
+        // Remember where it came from — this is what "⟳ reload" re-fetches.
+        sourceUrl: url,
       };
       const next = upsertUserMod(userModsRef.current, rec);
       setDraftUrl('');
@@ -742,6 +749,33 @@ export default function PlayPage(): ReactElement {
         `added mod '${userModId(rec) ?? '(no id)'}' (imported from URL${result.mod.note ? `; ${result.mod.note}` : ''})`,
       );
       updateUserMods(next);
+    });
+  };
+
+  /**
+   * "⟳ reload" (the reload-mods feature). Two things at once:
+   * URL-imported mods are RE-FETCHED from their `sourceUrl` (the
+   * modder-iterates-on-a-hosted-mod loop — same import path, same rules),
+   * then the WHOLE set — pasted mods included — goes back through
+   * `updateUserMods`, which unloads and reloads every mod through the loader.
+   * A failed re-fetch keeps that mod's stored copy and says so; it never
+   * blocks the rest of the reload.
+   */
+  const handleReloadMods = (): void => {
+    if (reloadBusy) return;
+    setReloadBusy(true);
+    setReloadNotice(null);
+    log('reloading mods…');
+    void refreshFromSources(userModsRef.current).then((r) => {
+      setReloadBusy(false);
+      if (r.refetched.length > 0) log(`re-fetched from source: ${r.refetched.join(', ')}`);
+      for (const f of r.failures) log(`re-fetch FAILED for '${f.id}': ${f.error.slice(0, 120)}`);
+      if (r.failures.length > 0) {
+        setReloadNotice(
+          `kept the stored copy of ${r.failures.map((f) => f.id).join(', ')} — the re-fetch failed (${r.failures[0]!.error.slice(0, 96)})`,
+        );
+      }
+      updateUserMods(r.next);
     });
   };
 
@@ -981,7 +1015,26 @@ export default function PlayPage(): ReactElement {
           ) : null}
 
           <section className="side-section">
-            <h2>Your mods</h2>
+            <div className="section-head">
+              <h2>Your mods</h2>
+              {/* Reload = re-fetch URL-imported mods from their source, then
+                  re-run the whole set through the loader. Entrypoint changes
+                  apply live; mixin changes raise the restart banner as usual.
+                  Rendered only with mods present — a reload of nothing is
+                  noise, and the smokes' empty-store boot stays button-free. */}
+              {userMods.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={reloadBusy}
+                  title="Re-fetch URL-imported mods from their source and reload every mod"
+                  onClick={handleReloadMods}
+                >
+                  {reloadBusy ? 'reloading…' : '⟳ reload'}
+                </button>
+              ) : null}
+            </div>
+            {reloadNotice ? <p className="warn">⚠ {reloadNotice}</p> : null}
             {userMods.length === 0 ? (
               <p className="meta">None yet — add one below.</p>
             ) : (
@@ -1024,6 +1077,8 @@ export default function PlayPage(): ReactElement {
                           {mod.enabled ? 'enabled' : 'disabled'}
                           {version ? ` · v${version}` : ''}
                           {mod.mixins ? ` · ${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : ''}
+                          {/* Which mods "⟳ reload" re-fetches; pasted mods reload from the stored copy. */}
+                          {mod.sourceUrl ? ' · from URL' : ''}
                         </div>
                       </div>
                     </li>

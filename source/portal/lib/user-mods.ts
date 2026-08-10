@@ -49,6 +49,12 @@ export interface UserModRecord {
   readonly enabled: boolean;
   /** ISO date the mod was added (display only). */
   readonly addedAt: string;
+  /**
+   * The URL the mod was imported from (#80). Absent for pasted mods. This is
+   * what makes a mod reloadable: "⟳ Reload mods" re-runs the import from this
+   * URL and replaces the stored copy (lib/mod-reload.ts).
+   */
+  readonly sourceUrl?: string;
 }
 
 /** The `id` a record claims, or null if it doesn't even have one. */
@@ -71,7 +77,11 @@ function isUserModRecord(v: unknown): v is UserModRecord {
     // `mixins` is optional (pre-#62 rows lack it) but when present must be an
     // array of objects — a wrong-typed field drops the row like any other
     // malformed entry rather than smuggling junk into the transform path.
-    (v.mixins === undefined || (Array.isArray(v.mixins) && v.mixins.every(isRecord)))
+    (v.mixins === undefined || (Array.isArray(v.mixins) && v.mixins.every(isRecord))) &&
+    // `sourceUrl` is optional (pasted mods and pre-reload rows lack it); when
+    // present it must be a string — reload hands it straight to the import
+    // path, which re-checks the host rules on every use.
+    (v.sourceUrl === undefined || typeof v.sourceUrl === 'string')
   );
 }
 

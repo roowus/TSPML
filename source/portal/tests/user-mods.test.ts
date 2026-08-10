@@ -136,6 +136,18 @@ describe('user-mods storage', () => {
     });
     expect(readUserMods(storage)).toEqual([good]);
   });
+
+  it('round-trips the optional sourceUrl and drops a wrong-typed one (reload-mods)', () => {
+    const imported = record({ id: 'from-url', sourceUrl: 'https://host.example/mod.json' });
+    const pasted = record({ id: 'pasted' }); // no sourceUrl key at all
+    const storage = memoryStorage();
+    expect(saveUserMods([imported, pasted], storage)).toBe(true);
+    expect(readUserMods(storage)).toEqual([imported, pasted]);
+    const corrupt = memoryStorage({
+      'tspml.userMods.v1': JSON.stringify([pasted, { ...record({ id: 'bad' }), sourceUrl: 42 }]),
+    });
+    expect(readUserMods(corrupt)).toEqual([pasted]);
+  });
 });
 
 describe('parseMixinsJson (#62)', () => {
