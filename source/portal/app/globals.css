@@ -71,6 +71,24 @@ body {
   font-size: 12.5px;
 }
 
+.topbar-side {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.docs-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent, #7c5cff);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.docs-link:hover {
+  text-decoration: underline;
+}
+
 .sw-badge {
   margin: 0;
   font-size: 13px;
