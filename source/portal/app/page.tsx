@@ -826,7 +826,17 @@ export default function PlayPage(): ReactElement {
             the way.
           </p>
         </div>
-        <ServiceWorkerBadge state={swState} error={swError} />
+        <div className="topbar-side">
+          <a
+            className="docs-link"
+            href="https://tspml-docs.vercel.app"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Docs ↗
+          </a>
+          <ServiceWorkerBadge state={swState} error={swError} />
+        </div>
       </header>
 
       <div
