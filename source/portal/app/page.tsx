@@ -13,7 +13,8 @@ import type { UserModRecord } from '@/lib/user-mods';
 import { importModFromUrl } from '@/lib/mod-import';
 import { refreshFromSources } from '@/lib/mod-reload';
 import { buildShareUrl, parseShareUrls, SHARE_LIMITS, SHARE_PARAM } from '@/lib/mod-share';
-import type { ShareParseResult } from '@/lib/mod-share';
+import type { ShareBuildResult, ShareParseResult } from '@/lib/mod-share';
+import { Icon } from './icons';
 import {
   buildUserPatchPlan,
   PLAN_CACHE,
@@ -205,11 +206,16 @@ export default function PlayPage(): ReactElement {
   // flight; the notice reports per-mod re-fetch failures (stored copy kept).
   const [reloadBusy, setReloadBusy] = useState(false);
   const [reloadNotice, setReloadNotice] = useState<string | null>(null);
-  // Share-a-mod-set (links only, never code — see lib/mod-share.ts). `shareNotice`
-  // reports the copy (and names pasted mods the link cannot carry); `sharePrompt`
-  // holds the parsed links from an INCOMING share URL until the user confirms or
-  // dismisses — nothing is imported without that click (mod code runs
-  // unsandboxed; a silent auto-import would be a drive-by).
+  // Share-a-mod-set (links only, never code — see lib/mod-share.ts). `sharePanel`
+  // holds the built link so the UI can SHOW it with its own copy button —
+  // clipboard writes can fail silently (permissions, non-secure contexts), so
+  // the link itself is the ground truth and copying is an explicit action.
+  // `shareNotice` covers the link-less cases (nothing shareable, import
+  // failures); `sharePrompt` holds the parsed links from an INCOMING share URL
+  // until the user confirms or dismisses — nothing is imported without that
+  // click (mod code runs unsandboxed; a silent auto-import would be a drive-by).
+  const [sharePanel, setSharePanel] = useState<ShareBuildResult | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [sharePrompt, setSharePrompt] = useState<ShareParseResult | null>(null);
   const [shareImportBusy, setShareImportBusy] = useState(false);
@@ -460,28 +466,38 @@ export default function PlayPage(): ReactElement {
   }, []);
 
   /**
-   * Build + copy the share link for the CURRENT mod set. Links only: the URL
+   * Build the share link for the CURRENT mod set and open the share panel,
+   * which shows the link itself next to a copy button. Links only: the URL
    * carries each enabled mod's sourceUrl, never code — pasted mods can't ride
    * (their only copy is this browser's storage) and are named so the sharer
-   * knows to send those another way.
+   * knows to send those another way. Copying is a separate, explicit click:
+   * clipboard writes can fail silently (permissions, embedding), and a visible
+   * link can always be selected by hand.
    */
   const handleShare = (): void => {
+    setShareNotice(null);
+    setShareCopied(false);
     const r = buildShareUrl(userModsRef.current, window.location.href);
     if (r.url === null) {
+      setSharePanel(null);
       setShareNotice(
         'Nothing to share yet — only enabled URL-imported mods can ride a link. Pasted mods live only in this browser; host them somewhere and re-import by URL to share them.',
       );
       return;
     }
-    const suffix =
-      r.noSource.length > 0
-        ? ` Pasted mods can’t ride a link and were left out: ${r.noSource.join(', ')} — send those another way.`
-        : '';
     log(`share link built (${r.included.length} mod${r.included.length === 1 ? '' : 's'}: ${r.included.join(', ')})`);
+    setSharePanel(r);
+  };
+
+  /** The share panel's copy button. Failure keeps the panel up — the visible
+      link is the fallback, so the user can select it by hand. */
+  const handleShareCopy = (): void => {
+    const url = sharePanel?.url;
+    if (!url) return;
     void navigator.clipboard
-      .writeText(r.url)
-      .then(() => setShareNotice(`Share link copied to the clipboard (${r.included.length} mod${r.included.length === 1 ? '' : 's'}).${suffix}`))
-      .catch(() => setShareNotice(`Copy this share link: ${r.url}${suffix}`));
+      .writeText(url)
+      .then(() => setShareCopied(true))
+      .catch(() => setShareNotice('Copy failed — select the link above and copy it by hand.'));
   };
 
   /**
@@ -591,6 +607,9 @@ export default function PlayPage(): ReactElement {
   const updateUserMods = (next: UserModRecord[]): void => {
     userModsRef.current = next;
     setUserMods(next);
+    // A built share link reflects the set at build time — close the panel
+    // rather than show a link that no longer matches what's enabled.
+    setSharePanel(null);
     setPersistWarning(
       saveUserMods(next)
         ? null
@@ -983,7 +1002,7 @@ export default function PlayPage(): ReactElement {
             target="_blank"
             rel="noreferrer"
           >
-            Docs ↗
+            Docs <Icon name="external" />
           </a>
           <ServiceWorkerBadge state={swState} error={swError} />
         </div>
@@ -1020,7 +1039,15 @@ export default function PlayPage(): ReactElement {
                       : 'Expand over the whole tab (no fullscreen)'
                   }
                 >
-                  {isTheater ? '🗗 Shrink' : '⤢ Expand'}
+                  {isTheater ? (
+                    <>
+                      <Icon name="shrink" /> Shrink
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="expand" /> Expand
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -1028,7 +1055,15 @@ export default function PlayPage(): ReactElement {
                   onClick={toggleFullscreen}
                   title={isFullscreen ? 'Exit fullscreen (Esc works too)' : 'Play fullscreen'}
                 >
-                  {isFullscreen ? '✕ Exit fullscreen' : '⛶ Fullscreen'}
+                  {isFullscreen ? (
+                    <>
+                      <Icon name="minimize" /> Exit fullscreen
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="maximize" /> Fullscreen
+                    </>
+                  )}
                 </button>
               </div>
             </>
@@ -1057,7 +1092,13 @@ export default function PlayPage(): ReactElement {
                       return (
                         <li key={s.label} className={s.done ? 'done' : active ? 'active' : ''}>
                           <span className="boot-mark" aria-hidden="true">
-                            {s.done ? '✓' : active ? '◌' : '·'}
+                            {s.done ? (
+                              <Icon name="check" />
+                            ) : active ? (
+                              <Icon name="spinner" className="icon-spin" />
+                            ) : (
+                              <Icon name="dot" />
+                            )}
                           </span>
                           {s.label}
                         </li>
@@ -1145,14 +1186,14 @@ export default function PlayPage(): ReactElement {
               ) : null}
               {sharePrompt.invalid.length > 0 ? (
                 <p className="warn">
-                  ⚠ {sharePrompt.invalid.length} link{sharePrompt.invalid.length === 1 ? ' was' : 's were'} refused
+                  <Icon name="warn" /> {sharePrompt.invalid.length} link{sharePrompt.invalid.length === 1 ? ' was' : 's were'} refused
                   by the import rules and will be skipped:{' '}
                   {sharePrompt.invalid.map((x) => `${x.url.slice(0, 64)} (${x.error.slice(0, 64)})`).join('; ')}
                 </p>
               ) : null}
               {sharePrompt.dropped > 0 ? (
                 <p className="warn">
-                  ⚠ {sharePrompt.dropped} link{sharePrompt.dropped === 1 ? '' : 's'} past the {SHARE_LIMITS.maxMods}-mod
+                  <Icon name="warn" /> {sharePrompt.dropped} link{sharePrompt.dropped === 1 ? '' : 's'} past the {SHARE_LIMITS.maxMods}-mod
                   cap were dropped.
                 </p>
               ) : null}
@@ -1188,7 +1229,7 @@ export default function PlayPage(): ReactElement {
               asks the user to act, and it must not hide below the fold. */}
           {needsRestart ? (
             <div className="restart-banner">
-              ⚠ Mixin changes need a restart —{' '}
+              <Icon name="warn" /> Mixin changes need a restart —{' '}
               <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
                 reload now
               </button>{' '}
@@ -1210,10 +1251,10 @@ export default function PlayPage(): ReactElement {
                   <button
                     type="button"
                     className="btn btn-small"
-                    title="Copy a link that carries your enabled URL-imported mods (links only, never code) — whoever opens it is asked before anything imports"
+                    title="Build a link that carries your enabled URL-imported mods (links only, never code) — whoever opens it is asked before anything imports"
                     onClick={handleShare}
                   >
-                    ⤴ share
+                    <Icon name="share" /> share
                   </button>
                   <button
                     type="button"
@@ -1222,13 +1263,59 @@ export default function PlayPage(): ReactElement {
                     title="Re-fetch URL-imported mods from their source and reload every mod"
                     onClick={handleReloadMods}
                   >
-                    {reloadBusy ? 'reloading…' : '⟳ reload'}
+                    <Icon name="refresh" className={reloadBusy ? 'icon-spin' : undefined} />{' '}
+                    {reloadBusy ? 'reloading…' : 'reload'}
                   </button>
                 </span>
               ) : null}
             </div>
+            {/* The built share link: shown in full with its own copy button —
+                the link is the ground truth, the copy is a convenience. */}
+            {sharePanel?.url ? (
+              <div className="share-panel">
+                <div className="share-panel-row">
+                  <code className="share-panel-url">{sharePanel.url}</code>
+                  <button
+                    type="button"
+                    className="btn btn-small share-copy-btn"
+                    title="Copy the share link to the clipboard"
+                    onClick={handleShareCopy}
+                  >
+                    {shareCopied ? (
+                      <>
+                        <Icon name="check" /> copied
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="copy" /> copy
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    title="Close"
+                    onClick={() => setSharePanel(null)}
+                  >
+                    <Icon name="close" />
+                  </button>
+                </div>
+                <p className="meta">
+                  Carries {sharePanel.included.length} enabled URL-imported mod
+                  {sharePanel.included.length === 1 ? '' : 's'} (links only, never code). Whoever
+                  opens it sees the list and confirms before anything imports.
+                  {sharePanel.noSource.length > 0
+                    ? ` Pasted mods can’t ride a link and were left out: ${sharePanel.noSource.join(', ')} — send those another way.`
+                    : ''}
+                </p>
+              </div>
+            ) : null}
             {shareNotice ? <p className="meta share-notice">{shareNotice}</p> : null}
-            {reloadNotice ? <p className="warn">⚠ {reloadNotice}</p> : null}
+            {reloadNotice ? (
+              <p className="warn">
+                <Icon name="warn" /> {reloadNotice}
+              </p>
+            ) : null}
             {userMods.length === 0 ? (
               <p className="meta">None yet — add one below.</p>
             ) : (
@@ -1238,64 +1325,74 @@ export default function PlayPage(): ReactElement {
                   const version = typeof mod.manifest.version === 'string' ? mod.manifest.version : null;
                   return (
                     <li key={id} className={mod.enabled ? 'mod-card' : 'mod-card mod-card-off'}>
-                      {/* The tile and body wrapper are <i>/<div> on purpose: the
-                          smoke reads each row's FIRST <span> as the status text. */}
+                      {/* The tile and body wrapper are <i>/<div> on purpose so a
+                          row's FIRST <span> is the status pill — same shape as
+                          the Loaded-mods rows the smoke reads. */}
                       <i className="mod-tile" aria-hidden="true">
                         {id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'}
                       </i>
+                      {/* Card structure, top to bottom: (1) id + on/off pill,
+                          (2) facts line (version · mixins), (3) origin on its
+                          own single line (truncated, full URL in the title —
+                          a wrapping URL is what made these cards unreadable),
+                          (4) the action buttons in a row of their own so they
+                          never fight a long id for space. */}
                       <div className="mod-card-body">
                         <div className="row-head">
-                          <code>{id}</code>
-                          <span className="row-buttons">
-                            <button
-                              type="button"
-                              className="btn btn-small"
-                              title="Show this mod's stored manifest, code, and mixins"
-                              onClick={() => setSourceOpenId((cur) => (cur === id ? null : id))}
-                            >
-                              {sourceOpenId === id ? 'hide source' : 'source'}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-small"
-                              onClick={() =>
-                                updateUserMods(
-                                  userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
-                                )
-                              }
-                            >
-                              {mod.enabled ? 'disable' : 'enable'}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-small"
-                              onClick={() => {
-                                setSourceOpenId((cur) => (cur === id ? null : cur));
-                                updateUserMods(userModsRef.current.filter((m) => m !== mod));
-                              }}
-                            >
-                              remove
-                            </button>
+                          <code title={id}>{id}</code>
+                          <span className={mod.enabled ? 'status-pill pill-on' : 'status-pill pill-off'}>
+                            {mod.enabled ? 'enabled' : 'disabled'}
                           </span>
                         </div>
-                        <div className="meta">
-                          {mod.enabled ? 'enabled' : 'disabled'}
-                          {version ? ` · v${version}` : ''}
-                          {mod.mixins ? ` · ${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : ''}
-                        </div>
+                        {version || mod.mixins ? (
+                          <div className="meta">
+                            {version ? `v${version}` : ''}
+                            {version && mod.mixins ? ' · ' : ''}
+                            {mod.mixins ? `${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : ''}
+                          </div>
+                        ) : null}
                         {/* Where the mod came from — the origin "⟳ reload" re-fetches
                             (URL imports) or the honest "this browser only" for pastes. */}
                         <div className="meta origin" title={mod.sourceUrl ?? 'Added by pasting — the only copy is this browser’s storage'}>
+                          <Icon name="link" />
                           {mod.sourceUrl ? (
-                            <>
-                              from{' '}
-                              <a href={mod.sourceUrl} target="_blank" rel="noreferrer">
-                                {mod.sourceUrl}
-                              </a>
-                            </>
+                            <a href={mod.sourceUrl} target="_blank" rel="noreferrer">
+                              {mod.sourceUrl}
+                            </a>
                           ) : (
-                            'pasted — lives only in this browser'
+                            <span className="origin-text">pasted — lives only in this browser</span>
                           )}
+                        </div>
+                        <div className="row-buttons mod-actions">
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            title="Show this mod's stored manifest, code, and mixins"
+                            onClick={() => setSourceOpenId((cur) => (cur === id ? null : id))}
+                          >
+                            <Icon name="code" /> {sourceOpenId === id ? 'hide source' : 'source'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() =>
+                              updateUserMods(
+                                userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
+                              )
+                            }
+                          >
+                            {mod.enabled ? 'disable' : 'enable'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-small"
+                            onClick={() => {
+                              setSourceOpenId((cur) => (cur === id ? null : cur));
+                              updateUserMods(userModsRef.current.filter((m) => m !== mod));
+                            }}
+                          >
+                            remove
+                          </button>
                         </div>
                         {sourceOpenId === id ? (
                           <div className="source-view">
@@ -1317,10 +1414,14 @@ export default function PlayPage(): ReactElement {
                 })}
               </ul>
             )}
-            {persistWarning ? <p className="warn">⚠ {persistWarning}</p> : null}
+            {persistWarning ? (
+              <p className="warn">
+                <Icon name="warn" /> {persistWarning}
+              </p>
+            ) : null}
             {mixinsSkipped.length > 0 ? (
               <p className="warn">
-                ⚠ <code>{mixinsSkipped.join(', ')}</code>: the manifest declares
+                <Icon name="warn" /> <code>{mixinsSkipped.join(', ')}</code>: the manifest declares
                 mixins but no <code>mixins.json</code> was pasted — they were{' '}
                 <strong>not applied</strong>. Re-add the mod with its{' '}
                 <code>mixins.json</code> in the third box. The mod’s entrypoint
@@ -1329,20 +1430,22 @@ export default function PlayPage(): ReactElement {
             ) : null}
             {mixinOverCap.length > 0 ? (
               <p className="warn">
-                ⚠ <code>{mixinOverCap.join(', ')}</code>: mixins exceed the
+                <Icon name="warn" /> <code>{mixinOverCap.join(', ')}</code>: mixins exceed the
                 per-request limits and were left out of the patch plan.
               </p>
             ) : null}
             {mixinEnvSkipped.length > 0 ? (
               <p className="warn">
-                ⚠ <code>{mixinEnvSkipped.join(', ')}</code>: the manifest declares
+                <Icon name="warn" /> <code>{mixinEnvSkipped.join(', ')}</code>: the manifest declares
                 its mixins for a different environment (this portal is{' '}
                 <code>web</code>) — they were <strong>not applied</strong>.
               </p>
             ) : null}
 
             <details className="add-form">
-              <summary>+ Add a mod</summary>
+              <summary>
+                <Icon name="plus" /> Add a mod
+              </summary>
               {/* Smoke contract (smoke-user-mods.mjs): after clicking the summary
                   it fills THREE textareas by index (0=manifest, 1=code, 2=mixins)
                   and clicks the "Add mod" button — the paste method must stay the
@@ -1398,7 +1501,11 @@ export default function PlayPage(): ReactElement {
                     import from authors you trust. The safety classifier labels each
                     mod but never blocks.
                   </p>
-                  {addError ? <p className="warn">✗ {addError}</p> : null}
+                  {addError ? (
+                    <p className="warn">
+                      <Icon name="error" /> {addError}
+                    </p>
+                  ) : null}
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1456,7 +1563,11 @@ export default function PlayPage(): ReactElement {
                   code you trust or wrote. The safety classifier labels each mod but
                   never blocks.
                 </p>
-                {addError ? <p className="warn">✗ {addError}</p> : null}
+                {addError ? (
+                    <p className="warn">
+                      <Icon name="error" /> {addError}
+                    </p>
+                  ) : null}
                 <button type="button" className="btn btn-primary" onClick={handleAddMod}>
                   Add mod
                 </button>
@@ -1467,12 +1578,16 @@ export default function PlayPage(): ReactElement {
           {mixinNotice || (mixinReport && mixinReport.mods.length > 0) ? (
             <section className="side-section">
               <h2>Your mixins</h2>
-              {mixinNotice ? <p className="warn">⚠ {mixinNotice}</p> : null}
+              {mixinNotice ? (
+                <p className="warn">
+                  <Icon name="warn" /> {mixinNotice}
+                </p>
+              ) : null}
               {mixinReport && mixinReport.mods.length > 0 ? (
                 <>
                   {mixinReport.planStatus !== 'applied' ? (
                     <p className="warn">
-                      ⚠ plan {mixinReport.planStatus} — no user mixin was applied.
+                      <Icon name="warn" /> plan {mixinReport.planStatus} — no user mixin was applied.
                     </p>
                   ) : null}
                   <ul className="rows">
@@ -1492,7 +1607,7 @@ export default function PlayPage(): ReactElement {
                         </div>
                         {m.failed.map((f, i) => (
                           <div key={i} className="meta">
-                            ✗ {f.reason}: {f.detail.slice(0, 96)}
+                            <Icon name="error" /> {f.reason}: {f.detail.slice(0, 96)}
                           </div>
                         ))}
                       </li>
@@ -1658,8 +1773,7 @@ function ServiceWorkerBadge({
   const color = state === 'active' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--amber)';
   return (
     <p className="sw-badge" style={{ color }}>
-      <span aria-hidden="true">● </span>
-      {label}
+      <Icon name="dot" /> {label}
       {error ? <span className="sw-error"> — {error}</span> : null}
     </p>
   );
