@@ -12,6 +12,8 @@ import { parseMixinsJson, readUserMods, saveUserMods, upsertUserMod, userModId }
 import type { UserModRecord } from '@/lib/user-mods';
 import { importModFromUrl } from '@/lib/mod-import';
 import { refreshFromSources } from '@/lib/mod-reload';
+import { buildShareUrl, parseShareUrls, SHARE_LIMITS, SHARE_PARAM } from '@/lib/mod-share';
+import type { ShareParseResult } from '@/lib/mod-share';
 import {
   buildUserPatchPlan,
   PLAN_CACHE,
@@ -203,6 +205,18 @@ export default function PlayPage(): ReactElement {
   // flight; the notice reports per-mod re-fetch failures (stored copy kept).
   const [reloadBusy, setReloadBusy] = useState(false);
   const [reloadNotice, setReloadNotice] = useState<string | null>(null);
+  // Share-a-mod-set (links only, never code — see lib/mod-share.ts). `shareNotice`
+  // reports the copy (and names pasted mods the link cannot carry); `sharePrompt`
+  // holds the parsed links from an INCOMING share URL until the user confirms or
+  // dismisses — nothing is imported without that click (mod code runs
+  // unsandboxed; a silent auto-import would be a drive-by).
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [sharePrompt, setSharePrompt] = useState<ShareParseResult | null>(null);
+  const [shareImportBusy, setShareImportBusy] = useState(false);
+  // Which mod row's source viewer is open (by mod id). A button-toggled panel,
+  // NOT a <details>: the smokes click the aside's FIRST <summary> expecting the
+  // Add form's, and a per-row summary would steal that slot.
+  const [sourceOpenId, setSourceOpenId] = useState<string | null>(null);
   // The boot/status log: what happened, when, in order. Shown live on the
   // loading overlay (last lines) and in full in the sidebar's Log section —
   // the honest answer to "what is it doing?" while the overlay progress bar
@@ -424,6 +438,97 @@ export default function PlayPage(): ReactElement {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- log only touches its stable setter
   }, []);
+
+  // Incoming share link (?mods=<url>&mods=<url>…): parse it ONCE on mount and
+  // immediately strip the params from the address bar — otherwise the restart
+  // banner's "reload now" (and any manual reload) would re-prompt for a set
+  // that may already be imported. The parsed links sit in `sharePrompt` until
+  // the user confirms; nothing is fetched or run before that click.
+  useEffect(() => {
+    const parsed = parseShareUrls(window.location.search);
+    if (parsed.urls.length === 0 && parsed.invalid.length === 0) return;
+    const clean = new URL(window.location.href);
+    clean.searchParams.delete(SHARE_PARAM);
+    window.history.replaceState(null, '', clean.href);
+    setSharePrompt(parsed);
+    log(
+      `share link opened: ${parsed.urls.length} mod link${parsed.urls.length === 1 ? '' : 's'}${
+        parsed.invalid.length > 0 ? `, ${parsed.invalid.length} refused` : ''
+      }${parsed.dropped > 0 ? `, ${parsed.dropped} over the cap` : ''} — waiting for your confirmation`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot URL read; log only touches its stable setter
+  }, []);
+
+  /**
+   * Build + copy the share link for the CURRENT mod set. Links only: the URL
+   * carries each enabled mod's sourceUrl, never code — pasted mods can't ride
+   * (their only copy is this browser's storage) and are named so the sharer
+   * knows to send those another way.
+   */
+  const handleShare = (): void => {
+    const r = buildShareUrl(userModsRef.current, window.location.href);
+    if (r.url === null) {
+      setShareNotice(
+        'Nothing to share yet — only enabled URL-imported mods can ride a link. Pasted mods live only in this browser; host them somewhere and re-import by URL to share them.',
+      );
+      return;
+    }
+    const suffix =
+      r.noSource.length > 0
+        ? ` Pasted mods can’t ride a link and were left out: ${r.noSource.join(', ')} — send those another way.`
+        : '';
+    log(`share link built (${r.included.length} mod${r.included.length === 1 ? '' : 's'}: ${r.included.join(', ')})`);
+    void navigator.clipboard
+      .writeText(r.url)
+      .then(() => setShareNotice(`Share link copied to the clipboard (${r.included.length} mod${r.included.length === 1 ? '' : 's'}).${suffix}`))
+      .catch(() => setShareNotice(`Copy this share link: ${r.url}${suffix}`));
+  };
+
+  /**
+   * The confirm step for an incoming share link. Each link goes through
+   * `importModFromUrl` — the browser's own fetch, same host rules and caps as
+   * the Add form's URL import — sequentially, so the log reads in order and a
+   * slow host can't interleave upserts. One `updateUserMods` at the end: a
+   * single unload/reload of the whole set instead of N.
+   */
+  const handleShareImport = (): void => {
+    const prompt = sharePrompt;
+    if (!prompt || shareImportBusy) return;
+    setShareImportBusy(true);
+    log(`importing ${prompt.urls.length} mod${prompt.urls.length === 1 ? '' : 's'} from the share link…`);
+    void (async () => {
+      let next = userModsRef.current;
+      const failed: string[] = [];
+      for (const url of prompt.urls) {
+        const result = await importModFromUrl(url);
+        if (!result.ok) {
+          failed.push(url);
+          log(`share import failed for ${url.slice(0, 80)}: ${result.error.slice(0, 120)}`);
+          continue;
+        }
+        const rec: UserModRecord = {
+          manifest: result.mod.manifest,
+          code: result.mod.code,
+          ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+          enabled: true,
+          addedAt: new Date().toISOString(),
+          sourceUrl: url,
+        };
+        next = upsertUserMod(next, rec);
+        log(`added mod '${userModId(rec) ?? '(no id)'}' (from the share link)`);
+      }
+      setShareImportBusy(false);
+      setSharePrompt(null);
+      if (failed.length > 0) {
+        setShareNotice(
+          `${failed.length} of ${prompt.urls.length} share-link mod${prompt.urls.length === 1 ? '' : 's'} failed to import — see the Log section for each error.`,
+        );
+      }
+      // Only reload the set if something actually imported — an all-failed
+      // confirm should not bounce the running mods.
+      if (next !== userModsRef.current) updateUserMods([...next]);
+    })();
+  };
 
   // The four boot stages the progress overlay reports, in the order they
   // complete. "mods" is done once loadMods resolved either way — the overlay
@@ -1012,6 +1117,73 @@ export default function PlayPage(): ReactElement {
         />
 
         <aside className="sidebar" aria-label="Mods">
+          {/* Incoming share link: the confirm-first panel. It lists every link
+              and does NOTHING until "Import" is clicked — mod code runs
+              unsandboxed, so a share URL must never auto-run anything. Links
+              the import rules refused are shown too (with the reason), so a
+              doctored URL fails loudly instead of silently shrinking. */}
+          {sharePrompt ? (
+            <div className="share-prompt">
+              <div className="share-prompt-title">
+                This link shares {sharePrompt.urls.length} mod{sharePrompt.urls.length === 1 ? '' : 's'}
+              </div>
+              {sharePrompt.urls.length > 0 ? (
+                <>
+                  <p className="meta">
+                    Each is a link to mod files the browser will fetch — nothing is
+                    imported or run until you confirm. Mod code runs unsandboxed in
+                    this page; only import from authors you trust.
+                  </p>
+                  <ul className="share-url-list">
+                    {sharePrompt.urls.map((u) => (
+                      <li key={u}>
+                        <code>{u}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {sharePrompt.invalid.length > 0 ? (
+                <p className="warn">
+                  ⚠ {sharePrompt.invalid.length} link{sharePrompt.invalid.length === 1 ? ' was' : 's were'} refused
+                  by the import rules and will be skipped:{' '}
+                  {sharePrompt.invalid.map((x) => `${x.url.slice(0, 64)} (${x.error.slice(0, 64)})`).join('; ')}
+                </p>
+              ) : null}
+              {sharePrompt.dropped > 0 ? (
+                <p className="warn">
+                  ⚠ {sharePrompt.dropped} link{sharePrompt.dropped === 1 ? '' : 's'} past the {SHARE_LIMITS.maxMods}-mod
+                  cap were dropped.
+                </p>
+              ) : null}
+              <div className="share-prompt-actions">
+                {sharePrompt.urls.length > 0 ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary share-import-btn"
+                    disabled={shareImportBusy}
+                    onClick={handleShareImport}
+                  >
+                    {shareImportBusy
+                      ? 'Importing…'
+                      : `Import ${sharePrompt.urls.length} mod${sharePrompt.urls.length === 1 ? '' : 's'}`}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={shareImportBusy}
+                  onClick={() => {
+                    setSharePrompt(null);
+                    log('share link dismissed — nothing was imported');
+                  }}
+                >
+                  dismiss
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {/* The restart banner leads the sidebar: it is the one thing here that
               asks the user to act, and it must not hide below the fold. */}
           {needsRestart ? (
@@ -1034,17 +1206,28 @@ export default function PlayPage(): ReactElement {
                   Rendered only with mods present — a reload of nothing is
                   noise, and the smokes' empty-store boot stays button-free. */}
               {userMods.length > 0 ? (
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  disabled={reloadBusy}
-                  title="Re-fetch URL-imported mods from their source and reload every mod"
-                  onClick={handleReloadMods}
-                >
-                  {reloadBusy ? 'reloading…' : '⟳ reload'}
-                </button>
+                <span className="row-buttons">
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    title="Copy a link that carries your enabled URL-imported mods (links only, never code) — whoever opens it is asked before anything imports"
+                    onClick={handleShare}
+                  >
+                    ⤴ share
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={reloadBusy}
+                    title="Re-fetch URL-imported mods from their source and reload every mod"
+                    onClick={handleReloadMods}
+                  >
+                    {reloadBusy ? 'reloading…' : '⟳ reload'}
+                  </button>
+                </span>
               ) : null}
             </div>
+            {shareNotice ? <p className="meta share-notice">{shareNotice}</p> : null}
             {reloadNotice ? <p className="warn">⚠ {reloadNotice}</p> : null}
             {userMods.length === 0 ? (
               <p className="meta">None yet — add one below.</p>
@@ -1067,6 +1250,14 @@ export default function PlayPage(): ReactElement {
                             <button
                               type="button"
                               className="btn btn-small"
+                              title="Show this mod's stored manifest, code, and mixins"
+                              onClick={() => setSourceOpenId((cur) => (cur === id ? null : id))}
+                            >
+                              {sourceOpenId === id ? 'hide source' : 'source'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-small"
                               onClick={() =>
                                 updateUserMods(
                                   userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
@@ -1078,7 +1269,10 @@ export default function PlayPage(): ReactElement {
                             <button
                               type="button"
                               className="btn btn-small"
-                              onClick={() => updateUserMods(userModsRef.current.filter((m) => m !== mod))}
+                              onClick={() => {
+                                setSourceOpenId((cur) => (cur === id ? null : cur));
+                                updateUserMods(userModsRef.current.filter((m) => m !== mod));
+                              }}
                             >
                               remove
                             </button>
@@ -1088,9 +1282,35 @@ export default function PlayPage(): ReactElement {
                           {mod.enabled ? 'enabled' : 'disabled'}
                           {version ? ` · v${version}` : ''}
                           {mod.mixins ? ` · ${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : ''}
-                          {/* Which mods "⟳ reload" re-fetches; pasted mods reload from the stored copy. */}
-                          {mod.sourceUrl ? ' · from URL' : ''}
                         </div>
+                        {/* Where the mod came from — the origin "⟳ reload" re-fetches
+                            (URL imports) or the honest "this browser only" for pastes. */}
+                        <div className="meta origin" title={mod.sourceUrl ?? 'Added by pasting — the only copy is this browser’s storage'}>
+                          {mod.sourceUrl ? (
+                            <>
+                              from{' '}
+                              <a href={mod.sourceUrl} target="_blank" rel="noreferrer">
+                                {mod.sourceUrl}
+                              </a>
+                            </>
+                          ) : (
+                            'pasted — lives only in this browser'
+                          )}
+                        </div>
+                        {sourceOpenId === id ? (
+                          <div className="source-view">
+                            <div className="source-label">mod.json</div>
+                            <pre className="source-pre">{JSON.stringify(mod.manifest, null, 2)}</pre>
+                            <div className="source-label">entrypoint.js ({mod.code.length.toLocaleString()} chars)</div>
+                            <pre className="source-pre">{mod.code}</pre>
+                            {mod.mixins ? (
+                              <>
+                                <div className="source-label">mixins.json</div>
+                                <pre className="source-pre">{JSON.stringify(mod.mixins, null, 2)}</pre>
+                              </>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     </li>
                   );
