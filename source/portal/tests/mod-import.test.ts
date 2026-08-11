@@ -173,3 +173,55 @@ describe('importModFromUrl — manifest URL', () => {
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('limit') });
   });
 });
+
+describe('importModFromUrl — fresh (the ⟳ reload path)', () => {
+  // A stub that matches routes IGNORING the query string and records what the
+  // import actually sent, so the cache-defeat contract is pinned: without
+  // `fresh` a reload can be silently satisfied by the browser's HTTP cache or
+  // the host CDN's (raw.githubusercontent.com: max-age=300) — the "I pushed a
+  // new build but reload didn't update" bug.
+  function recordingFetch(routes: Record<string, Route>) {
+    const calls: { url: string; cache: RequestCache | undefined }[] = [];
+    const impl = (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push({ url, cache: init?.cache });
+      const bare = url.split('?')[0]!;
+      const r = routes[bare];
+      if (!r) return Promise.resolve(new Response('not found', { status: 404 }));
+      return Promise.resolve(
+        new Response(r.body, { status: 200, headers: { 'content-type': r.contentType ?? 'text/plain' } }),
+      );
+    };
+    return { impl, calls };
+  }
+
+  const routes: Record<string, Route> = {
+    [`${BASE}/mod.json`]: {
+      body: JSON.stringify({ ...MANIFEST, mixins: [{ config: 'mixins.json', environment: 'web' }] }),
+      contentType: 'application/json',
+    },
+    [`${BASE}/index.js`]: { body: 'export default () => {};' },
+    [`${BASE}/mixins.json`]: {
+      body: JSON.stringify({ patches: [{ op: 'after', symbol: 'Car.controlCar', inject: '1;' }] }),
+      contentType: 'application/json',
+    },
+  };
+
+  it('busts both cache layers on EVERY fetched file: no-cache mode + one shared tspml_fresh param', async () => {
+    const { impl, calls } = recordingFetch(routes);
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl, { fresh: true });
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(3); // manifest + entrypoint + mixins
+    const busts = calls.map((c) => new URL(c.url).searchParams.get('tspml_fresh'));
+    expect(busts.every((b) => typeof b === 'string' && b.length > 0)).toBe(true);
+    expect(new Set(busts).size).toBe(1); // one freshness horizon per import
+    expect(calls.every((c) => c.cache === 'no-cache')).toBe(true);
+  });
+
+  it('a plain import stays cache-friendly: no param, default cache mode', async () => {
+    const { impl, calls } = recordingFetch(routes);
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r.ok).toBe(true);
+    expect(calls.every((c) => !c.url.includes('tspml_fresh'))).toBe(true);
+    expect(calls.every((c) => c.cache === 'default')).toBe(true);
+  });
+});

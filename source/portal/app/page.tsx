@@ -768,7 +768,18 @@ export default function PlayPage(): ReactElement {
     log('reloading mods…');
     void refreshFromSources(userModsRef.current).then((r) => {
       setReloadBusy(false);
-      if (r.refetched.length > 0) log(`re-fetched from source: ${r.refetched.join(', ')}`);
+      if (r.refetched.length > 0) {
+        // Name the version each re-fetch landed on — the one fact that answers
+        // "did reload actually pick up my new build?" at a glance.
+        const versions = r.next
+          .filter((m) => {
+            const id = userModId(m);
+            return id !== null && r.refetched.includes(id);
+          })
+          .map((m) => `${userModId(m)}@${typeof m.manifest.version === 'string' ? m.manifest.version : '?'}`);
+        log(`re-fetched from source: ${versions.join(', ')}`);
+      }
+      if (r.noSource.length > 0) log(`reloaded from the stored copy (no source URL): ${r.noSource.join(', ')}`);
       for (const f of r.failures) log(`re-fetch FAILED for '${f.id}': ${f.error.slice(0, 120)}`);
       if (r.failures.length > 0) {
         setReloadNotice(

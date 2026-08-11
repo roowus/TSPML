@@ -48,6 +48,7 @@ describe('refreshFromSources', () => {
     expect(urls).toEqual(['https://host.example/mod.json']);
     expect(r.refetched).toEqual(['from-url']);
     expect(r.failures).toEqual([]);
+    expect(r.noSource).toEqual(['pasted']); // named, so the page can say "stored copy"
     expect(r.next[0]).toBe(pasted); // same object — nothing to rebuild
     expect(r.next[1]!.manifest.version).toBe('2.0.0');
     expect(r.next[1]!.code).toContain('2.0.0');
@@ -108,7 +109,7 @@ describe('refreshFromSources', () => {
     expect(r.next[1]!.manifest.version).toBe('9.9.9');
   });
 
-  it('does nothing (and fetches nothing) for an all-pasted list', async () => {
+  it('fetches nothing for an all-pasted list, but NAMES the mods it could not re-fetch', async () => {
     const mods = [record({ id: 'a' }), record({ id: 'b' })];
     const r = await refreshFromSources(mods, undefined, () => {
       throw new Error('must not be called');
@@ -116,5 +117,16 @@ describe('refreshFromSources', () => {
     expect(r.next).toEqual(mods);
     expect(r.refetched).toEqual([]);
     expect(r.failures).toEqual([]);
+    expect(r.noSource).toEqual(['a', 'b']);
+  });
+
+  it('an `only` reload of a pasted mod reports just that mod as no-source', async () => {
+    const pasted = record({ id: 'pasted' });
+    const imported = record({ id: 'from-url', sourceUrl: 'https://host.example/mod.json' });
+    const r = await refreshFromSources([pasted, imported], pasted, () => {
+      throw new Error('must not be called');
+    });
+    expect(r.noSource).toEqual(['pasted']);
+    expect(r.refetched).toEqual([]);
   });
 });
