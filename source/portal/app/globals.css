@@ -378,12 +378,12 @@ body {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px;
+  padding: 16px;
 }
 
 .side-section {
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
 
@@ -402,17 +402,19 @@ body {
   color: var(--muted);
 }
 
-/* Section heading with an action beside it (Your mods' ⟳ reload). The h2
-   keeps its bottom margin; the row aligns the button to the heading text. */
+/* Section heading with actions beside it (Your mods' ⤴ share / ⟳ reload).
+   Center-aligned: baseline-aligning an uppercase 12px h2 against buttons put
+   the buttons visually low (part of the reported jank). */
 .section-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-bottom: 8px;
 }
 
 .section-head > h2 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -441,16 +443,23 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  /* Long mod ids + three row buttons in a narrow sidebar: wrap instead of
+     clipping — the buttons drop to their own line and stay clickable. */
+  flex-wrap: wrap;
 }
 
 .row-head code {
   font-size: 13px;
+  /* A long id must truncate, not push the buttons out of the card. */
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .row-buttons {
   display: flex;
   gap: 6px;
   flex: none;
+  flex-wrap: wrap;
 }
 
 /* ---- Mod cards (Your mods + Loaded mods) ----
@@ -471,9 +480,11 @@ body {
 
 .mod-card {
   display: flex;
-  align-items: center;
+  /* Top-aligned, not centered: cards grow (origin line, source view) and a
+     centered tile floats weirdly mid-card once they do. */
+  align-items: flex-start;
   gap: 10px;
-  padding: 9px 10px;
+  padding: 10px 12px;
   background: var(--panel-deep);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -528,10 +539,115 @@ body {
 }
 
 .meta {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* The mod-origin line: a full URL must wrap inside the card, never overflow it. */
+.meta.origin {
+  overflow-wrap: anywhere;
+}
+
+.meta.origin a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+}
+
+.meta.origin a:hover {
+  color: var(--text-body);
+}
+
+/* Post-share feedback under the section head (copied / left-out pastes). */
+.share-notice {
+  overflow-wrap: anywhere;
+}
+
+/* ---- Per-mod source viewer (the row's "source" button) ---- */
+
+.source-view {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.source-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.source-pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Incoming share link: the confirm-first panel ---- */
+
+.share-prompt {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(31, 111, 235, 0.08);
+  border: 1px solid rgba(31, 111, 235, 0.5);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.share-prompt-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.share-url-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.share-url-list li {
+  padding: 5px 8px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.share-url-list code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.share-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.share-prompt-actions .share-import-btn {
+  margin-top: 0;
 }
 
 .warn {
@@ -568,8 +684,10 @@ body {
 }
 
 .btn-small {
-  padding: 2px 8px;
+  padding: 3px 9px;
   font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .btn-primary {
