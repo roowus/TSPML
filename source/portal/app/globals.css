@@ -28,6 +28,27 @@
   box-sizing: border-box;
 }
 
+/* ---- Inline SVG icons (app/icons.tsx) ---- */
+
+/* 1em square and baseline-nudged so an icon sits centered next to its label
+   in buttons, headings, and warn lines alike. */
+.icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  vertical-align: -0.15em;
+}
+
+.icon-spin {
+  animation: icon-spin 0.9s linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 html,
 body {
   height: 100%;
@@ -185,6 +206,9 @@ body {
 }
 
 .stage-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: rgba(13, 17, 23, 0.72);
   color: var(--text-body);
   border: 1px solid var(--border-strong);
@@ -238,10 +262,39 @@ body {
 }
 
 .boot-bar {
+  position: relative;
   height: 6px;
   border-radius: 3px;
   background: var(--border);
   overflow: hidden;
+}
+
+/* A light sweep across the whole track, independent of the fill width — the
+   "still alive" signal while a slow step (bundle transform, SW activation)
+   holds the fill in place. Stops once boot completes. */
+.boot-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(230, 232, 238, 0.28) 50%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: boot-sweep 1.4s ease-in-out infinite;
+}
+
+.boot-overlay.boot-done .boot-bar::after {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes boot-sweep {
+  to {
+    transform: translateX(100%);
+  }
 }
 
 .boot-bar-fill {
@@ -249,6 +302,17 @@ body {
   border-radius: 3px;
   background: var(--green);
   transition: width 300ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-bar::after {
+    animation: none;
+    opacity: 0;
+  }
+
+  .icon-spin {
+    animation: none;
+  }
 }
 
 .boot-steps {
@@ -271,7 +335,9 @@ body {
 }
 
 .boot-mark {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
   width: 18px;
   color: var(--green);
 }
@@ -443,16 +509,20 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  /* Long mod ids + three row buttons in a narrow sidebar: wrap instead of
-     clipping — the buttons drop to their own line and stay clickable. */
-  flex-wrap: wrap;
+  /* Matches the 30px mod tile so the id + pill line centers against it —
+     the tile no longer floats above its own text. */
+  min-height: 30px;
 }
 
 .row-head code {
   font-size: 13px;
-  /* A long id must truncate, not push the buttons out of the card. */
-  overflow-wrap: anywhere;
+  font-weight: 600;
+  /* A long id truncates on its single line (full id in the title attr)
+     instead of wrapping the whole card out of shape. */
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-buttons {
@@ -532,10 +602,23 @@ body {
 
 .status-pill {
   display: inline-block;
-  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(110, 118, 129, 0.14);
+  font-size: 10.5px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex: none;
+}
+
+.status-pill.pill-on {
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.14);
+}
+
+.status-pill.pill-off {
+  color: var(--muted);
 }
 
 .meta {
@@ -545,9 +628,26 @@ body {
   line-height: 1.5;
 }
 
-/* The mod-origin line: a full URL must wrap inside the card, never overflow it. */
+/* The mod-origin line: one line, truncated with an ellipsis (the full URL
+   lives in the title attr and the source viewer) — a URL wrapping across
+   three lines is what made the cards unreadable. */
 .meta.origin {
-  overflow-wrap: anywhere;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meta.origin .icon {
+  color: var(--border-strong);
+}
+
+.meta.origin a,
+.meta.origin .origin-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .meta.origin a {
@@ -560,9 +660,50 @@ body {
   color: var(--text-body);
 }
 
-/* Post-share feedback under the section head (copied / left-out pastes). */
+/* The card's action row sits under the text on its own line — buttons never
+   fight a long id for width. */
+.row-buttons.mod-actions {
+  margin-top: 9px;
+}
+
+/* Post-share feedback under the section head (nothing-to-share / copy failed). */
 .share-notice {
   overflow-wrap: anywhere;
+}
+
+/* ---- Built share link panel: the link itself + copy button ---- */
+
+.share-panel {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.share-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The URL stays on one selectable line and scrolls horizontally — truncating
+   it would hide exactly the part that differs between links, and wrapping it
+   makes hand-selection miss characters. */
+.share-panel-url {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.share-copy-btn {
+  flex: none;
 }
 
 /* ---- Per-mod source viewer (the row's "source" button) ---- */
@@ -670,7 +811,14 @@ body {
 
 /* ---- Buttons ---- */
 
+/* inline-flex so an icon and its label share one centered line — baseline
+   layout dropped SVGs visibly low inside buttons (the reported centering
+   jank in the mods menu). */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   background: #21262d;
   color: var(--text-body);
   border: 1px solid var(--border-strong);
