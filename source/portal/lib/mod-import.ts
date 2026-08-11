@@ -47,6 +47,32 @@ export const IMPORT_LIMITS = {
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+export interface ImportOptions {
+  /**
+   * Force truly fresh fetches (the ⟳ reload path). Two layers of cache stand
+   * between "I pushed a new build" and "the portal sees it": the browser's
+   * HTTP cache (a plain fetch is satisfied locally for the host's whole
+   * max-age — raw.githubusercontent.com serves 300s) and the host CDN's.
+   * `fresh` sets `cache: 'no-cache'`, which reliably defeats the browser
+   * layer, and appends a throwaway `tspml_fresh` query param, which defeats
+   * CDNs that key their cache on the full URL (jsDelivr, most raw hosts).
+   * GitHub's own CDN ignores unknown params in its cache key, so there a
+   * just-pushed change can still take up to ~5 minutes to appear — that
+   * floor is the host's, not ours. Trade-off of the param: URLs strict
+   * about their query string (e.g. presigned S3 links) won't tolerate it —
+   * those fail loudly on reload and keep the stored copy, they don't corrupt.
+   */
+  readonly fresh?: boolean;
+}
+
+/** `url` with the cache-busting param applied (when `bust` is non-null). */
+function withBust(url: string, bust: string | null): string {
+  if (bust === null) return url;
+  const u = new URL(url);
+  u.searchParams.set('tspml_fresh', bust);
+  return u.href;
+}
+
 function fail(error: string): { ok: false; error: string } {
   return { ok: false, error };
 }
@@ -82,12 +108,21 @@ async function fetchText(
   cap: number,
   what: string,
   fetchImpl: FetchLike,
+  bust: string | null,
 ): Promise<{ ok: true; text: string; contentType: string } | { ok: false; error: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), IMPORT_LIMITS.timeoutMs);
   let res: Response;
   try {
-    res = await fetchImpl(url, { signal: ctrl.signal, credentials: 'omit', redirect: 'follow' });
+    // 'no-cache' beats the BROWSER's HTTP cache (a plain re-fetch would be
+    // satisfied locally for raw.githubusercontent's max-age=300); the `bust`
+    // param beats the host CDN's cache — see ImportOptions.fresh.
+    res = await fetchImpl(withBust(url, bust), {
+      signal: ctrl.signal,
+      credentials: 'omit',
+      redirect: 'follow',
+      cache: bust === null ? 'default' : 'no-cache',
+    });
   } catch (e) {
     const detail = e instanceof Error && e.name === 'AbortError' ? 'timed out' : (e as Error).message;
     return fail(
@@ -147,6 +182,7 @@ async function importFromManifest(
   manifestText: string,
   baseUrl: URL,
   fetchImpl: FetchLike,
+  bust: string | null,
 ): Promise<ImportResult> {
   let manifest: unknown;
   try {
@@ -173,7 +209,7 @@ async function importFromManifest(
   }
   const entryCheck = checkImportUrl(entryUrl.href);
   if (!entryCheck.ok) return fail(`entrypoint: ${entryCheck.error}`);
-  const code = await fetchText(entryUrl.href, IMPORT_LIMITS.maxCodeChars, `entrypoint (${m.entrypoint})`, fetchImpl);
+  const code = await fetchText(entryUrl.href, IMPORT_LIMITS.maxCodeChars, `entrypoint (${m.entrypoint})`, fetchImpl, bust);
   if (!code.ok) return code;
 
   // Mixin configs applicable to this web host (#21) ride relative too and
@@ -189,7 +225,7 @@ async function importFromManifest(
     }
     const configCheck = checkImportUrl(configUrl.href);
     if (!configCheck.ok) return fail(`mixins (${config}): ${configCheck.error}`);
-    const text = await fetchText(configUrl.href, IMPORT_LIMITS.maxMixinsChars, `mixins (${config})`, fetchImpl);
+    const text = await fetchText(configUrl.href, IMPORT_LIMITS.maxMixinsChars, `mixins (${config})`, fetchImpl, bust);
     if (!text.ok) return text;
     const parsed = parseMixinsJson(text.text);
     if (!parsed.ok) return fail(`mixins (${config}): ${parsed.error}`);
@@ -243,29 +279,33 @@ function importFromCode(codeText: string, url: URL): ImportResult {
 export async function importModFromUrl(
   rawUrl: string,
   fetchImpl: FetchLike = fetch,
+  options: ImportOptions = {},
 ): Promise<ImportResult> {
   const checked = checkImportUrl(rawUrl);
   if (!checked.ok) return checked;
   const { url } = checked;
+  // One bust value per import, so the manifest and the files it points at all
+  // come from the same freshness horizon.
+  const bust = options.fresh ? Date.now().toString(36) : null;
 
   if (/\.json$/i.test(url.pathname)) {
-    const manifest = await fetchText(url.href, IMPORT_LIMITS.maxManifestChars, 'manifest', fetchImpl);
+    const manifest = await fetchText(url.href, IMPORT_LIMITS.maxManifestChars, 'manifest', fetchImpl, bust);
     if (!manifest.ok) return manifest;
-    return importFromManifest(manifest.text, url, fetchImpl);
+    return importFromManifest(manifest.text, url, fetchImpl, bust);
   }
   if (/\.m?js$/i.test(url.pathname)) {
-    const code = await fetchText(url.href, IMPORT_LIMITS.maxCodeChars, 'mod file', fetchImpl);
+    const code = await fetchText(url.href, IMPORT_LIMITS.maxCodeChars, 'mod file', fetchImpl, bust);
     if (!code.ok) return code;
     return importFromCode(code.text, url);
   }
 
-  const body = await fetchText(url.href, IMPORT_LIMITS.maxCodeChars, 'mod file', fetchImpl);
+  const body = await fetchText(url.href, IMPORT_LIMITS.maxCodeChars, 'mod file', fetchImpl, bust);
   if (!body.ok) return body;
   if (body.contentType.includes('json')) {
     if (body.text.length > IMPORT_LIMITS.maxManifestChars) {
       return fail(`manifest: file is ${body.text.length.toLocaleString()} characters — the import limit is ${IMPORT_LIMITS.maxManifestChars.toLocaleString()}`);
     }
-    return importFromManifest(body.text, url, fetchImpl);
+    return importFromManifest(body.text, url, fetchImpl, bust);
   }
   // Raw-file hosts often serve JSON as text/plain — sniff before assuming JS.
   try {
@@ -279,7 +319,7 @@ export async function importModFromUrl(
       if (body.text.length > IMPORT_LIMITS.maxManifestChars) {
         return fail(`manifest: file is ${body.text.length.toLocaleString()} characters — the import limit is ${IMPORT_LIMITS.maxManifestChars.toLocaleString()}`);
       }
-      return importFromManifest(body.text, url, fetchImpl);
+      return importFromManifest(body.text, url, fetchImpl, bust);
     }
   } catch {
     // Not JSON — treat as code below.

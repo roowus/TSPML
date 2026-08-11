@@ -14,6 +14,12 @@
  * The re-fetch reuses `importModFromUrl` wholesale, so every import rule
  * (browser-direct fetch, host checks, caps, manifest-relative resolution)
  * applies unchanged: reload is a repeat of the import, not a second path.
+ * One deliberate difference: the re-fetch runs with `fresh: true` — browser
+ * HTTP cache bypassed and a cache-busting param appended — because the whole
+ * point of reload is "I just pushed a new build", and a plain fetch would be
+ * silently satisfied by the browser's HTTP cache for the host's entire
+ * max-age (raw.githubusercontent.com: 300s). See ImportOptions.fresh for
+ * what each half defeats.
  *
  * Failures keep the stored copy — a host being down must not eat a working
  * mod — and are reported per mod, never thrown.
@@ -30,6 +36,13 @@ export interface RefreshOutcome {
   readonly refetched: string[];
   /** Per-mod fetch/parse failures; the stored copy was kept for each. */
   readonly failures: { readonly id: string; readonly error: string }[];
+  /**
+   * Ids of mods with no `sourceUrl` to re-fetch from. Pasted mods, but ALSO
+   * mods imported from a URL before the reload feature stamped `sourceUrl` —
+   * to their owner those look reloadable and silently aren't, so the page
+   * uses this to say so instead of letting reload no-op.
+   */
+  readonly noSource: string[];
 }
 
 /**
@@ -41,13 +54,19 @@ export interface RefreshOutcome {
 export async function refreshFromSources(
   mods: readonly UserModRecord[],
   only?: UserModRecord,
-  importImpl: (url: string) => Promise<ImportResult> = importModFromUrl,
+  importImpl: (url: string) => Promise<ImportResult> = (url) =>
+    importModFromUrl(url, fetch, { fresh: true }),
 ): Promise<RefreshOutcome> {
   const refetched: string[] = [];
   const failures: { id: string; error: string }[] = [];
+  const noSource: string[] = [];
   const next = await Promise.all(
     mods.map(async (mod): Promise<UserModRecord> => {
-      if (!mod.sourceUrl || (only !== undefined && mod !== only)) return mod;
+      if (only !== undefined && mod !== only) return mod;
+      if (!mod.sourceUrl) {
+        noSource.push(userModId(mod) ?? '(no id)');
+        return mod;
+      }
       const id = userModId(mod) ?? '(no id)';
       const result = await importImpl(mod.sourceUrl);
       if (!result.ok) {
@@ -65,5 +84,5 @@ export async function refreshFromSources(
       };
     }),
   );
-  return { next, refetched, failures };
+  return { next, refetched, failures, noSource };
 }
