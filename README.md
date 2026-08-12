@@ -1,6 +1,6 @@
-# TSPML — The Second Poly Mod Loader
+# TSPML — The Skibiti PolyModLoader
 
-A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game — inspired by [Fabric](https://fabricmc.net/) for Minecraft. An incumbent loader ([PolyModLoader](https://polymodloader.com/)) already exists; TSPML aims to be what Fabric is to Minecraft modding.
+A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game. Mods are written against a stable API and declarative mixins instead of the minified game bundle, so they keep working (or degrade safely to vanilla) when the game updates. [PolyModLoader](https://polymodloader.com/) pioneered PolyTrack modding; TSPML makes different trade-offs.
 
 **What's actually different:** mods target **stable names**, not the minified bundle, and a
 `bundleHash` gate **fails closed** — when the game updates, every surface degrades to vanilla
@@ -10,17 +10,16 @@ physics** ([#43](https://github.com/roowus/TSPML/issues/43)). An honest comparis
 against their source at `v0.6.2-2`, is in
 [`docs/research/pml-api-and-moat-reassessment.md`](./docs/research/pml-api-and-moat-reassessment.md).
 
-> **Status: M5 complete + M6/M7 started — the portal plays a transformed, modded PolyTrack with a real mod loaded.**
+> **Status: live.** The portal at [tspml.vercel.app](https://tspml.vercel.app) plays a transformed, modded PolyTrack end to end; docs at [tspml-docs.vercel.app](https://tspml-docs.vercel.app).
 >
-> ✅ 6 Tier-1 events fire inside the running game (`car.control`, `car.created`, `race.started`, `track.afterLoad` + `checkpoint.passed`/`race.finished` wired).
-> ✅ Keybinds registry (`api.keybinds.register`).
-> ✅ **Real mod loading** — `@tspml/loader` loads a mod package whose entrypoint subscribes to events + registers keybinds.
-> ✅ **Mod-declared mixins** — mods author Tier-2 patches (`before`/`after`/`around`/`replace`) targeting **stable names** resolved fail-closed via `@tspml/mappings`.
-> ✅ Warn-only safety classifier (`classifySafety`).
-> ✅ `create-tspml-mod` scaffold CLI.
-> ✅ `@tspml/api` publish-ready (types for modder autocomplete).
+> - All 7 Tier-1 events fire inside the running game (`car.control`, `car.created`, `race.started`, `checkpoint.passed`, `checkpoint.respawn`, `race.finished`, `track.afterLoad`).
+> - Keybinds, tracks, and audio registries (keybinds survive game-frame reloads).
+> - Real mod loading: paste a mod or import it by URL, right in the portal — including pasted mixins.
+> - Mod-declared mixins: Tier-2 patches (`before`/`after`/`around`/`replace`/`modifyArg`/`modifyReturn`/`modifyConstant`) targeting **stable names** resolved fail-closed via `@tspml/mappings`, with `__TSPML_PARAMn__` param-ordinal placeholders so injects survive re-minification.
+> - Reload button re-fetches URL-imported mods; share links carry mod URLs (never code) behind a confirm-first prompt.
+> - Warn-only safety classifier (`classifySafety`); `create-tspml-mod` scaffold CLI; `@tspml/api` types package.
 >
-> **148 unit tests, CI green.** All headlessly verified via Playwright. See [`docs/project/progress.md`](./docs/project/progress.md) + [`docs/research/portal-browser-test-findings.md`](./docs/research/portal-browser-test-findings.md).
+> **500+ unit tests + 5 CI smokes, all green.** Headlessly verified against the real game via Playwright. See [`docs/project/progress.md`](./docs/project/progress.md).
 
 ## Quick start (create a mod)
 
@@ -51,9 +50,9 @@ MODS ──▶ stable API (events + keybinds) / mixin escape hatch
        PolyTrack (fetched live through the portal proxy, never redistributed)
 ```
 
-**Three layers (Fabric analog):**
+**Three layers:**
 1. **Loader core** (clean TS) — discovers mod packages, parses `mod.json`, semver-resolves, topo-sorts, invokes entrypoints with per-mod error isolation. Includes the warn-only safety classifier.
-2. **Mappings file** (the Yarn analog) — versioned JSON, one per PolyTrack build, mapping stable names (`Car`, `Car.controlCar`) → concrete `TargetSpec` (anchor + selector). Fail-closed on bundle-hash mismatch.
+2. **Mappings file** — versioned JSON, one per PolyTrack build, mapping stable names (`Car`, `Car.controlCar`) → concrete `TargetSpec` (anchor + selector). Fail-closed on bundle-hash mismatch.
 3. **API bridge** (loader-owned) — the runtime `EventBus` + `Keybinds` registry, exposed to mods as `api.events` + `api.keybinds`.
 
 See [`docs/design/architecture.md`](./docs/design/architecture.md).

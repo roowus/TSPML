@@ -2,7 +2,7 @@
   "name": "tspml",
   "version": "0.0.0",
   "private": true,
-  "description": "TSPML — The Second Poly Mod Loader: a Fabric-inspired mod loader for PolyTrack.",
+  "description": "TSPML — The Skibiti PolyModLoader: a mod loader for PolyTrack with a stable API and declarative mixins.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.26.2",
