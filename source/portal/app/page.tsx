@@ -990,10 +990,6 @@ export default function PlayPage(): ReactElement {
       <header className="topbar">
         <div>
           <h1>TSPML — PolyTrack, modded</h1>
-          <p className="tagline">
-            The real game through a service worker + <code>/api/proxy</code>, mod-transformed on
-            the way.
-          </p>
         </div>
         <div className="topbar-side">
           <a
@@ -1055,9 +1051,10 @@ export default function PlayPage(): ReactElement {
                   onClick={toggleFullscreen}
                   title={isFullscreen ? 'Exit fullscreen (Esc works too)' : 'Play fullscreen'}
                 >
+                  {/* smoke-ui asserts /exit/i on this label in fullscreen. */}
                   {isFullscreen ? (
                     <>
-                      <Icon name="minimize" /> Exit fullscreen
+                      <Icon name="minimize" /> Exit
                     </>
                   ) : (
                     <>
@@ -1105,22 +1102,16 @@ export default function PlayPage(): ReactElement {
                       );
                     })}
                   </ol>
-                  {/* Live tail of the boot log — the answer to "what is it
-                      doing?" while the bar sits on a step. Full log lives in
-                      the sidebar's Log section. */}
-                  {bootLog.length > 0 ? (
+                  {/* Latest boot-log line — the answer to "what is it doing?"
+                      while the bar sits on a step. Full log lives in the
+                      sidebar's Log section. */}
+                  {bootLog.length > 0 && !bootDone ? (
                     <div className="boot-log" aria-hidden="true">
-                      {bootLog.slice(-4).map((l, i) => (
-                        <div key={`${l.t}-${i}`} className="boot-log-line">
-                          <span className="log-time">{l.t}</span> {l.msg}
-                        </div>
-                      ))}
+                      <div className="boot-log-line">
+                        {bootLog[bootLog.length - 1]?.msg}
+                      </div>
                     </div>
                   ) : null}
-                  <span className="stage-hint">
-                    The game mounts once the service worker controls this page, so
-                    its track/leaderboard requests are proxied (issue #9).
-                  </span>
                 </div>
               )}
             </div>
@@ -1171,9 +1162,8 @@ export default function PlayPage(): ReactElement {
               {sharePrompt.urls.length > 0 ? (
                 <>
                   <p className="meta">
-                    Each is a link to mod files the browser will fetch — nothing is
-                    imported or run until you confirm. Mod code runs unsandboxed in
-                    this page; only import from authors you trust.
+                    Nothing imports until you confirm. Mod code runs unsandboxed —
+                    only import from authors you trust.
                   </p>
                   <ul className="share-url-list">
                     {sharePrompt.urls.map((u) => (
@@ -1227,14 +1217,14 @@ export default function PlayPage(): ReactElement {
 
           {/* The restart banner leads the sidebar: it is the one thing here that
               asks the user to act, and it must not hide below the fold. */}
+          {/* Smoke contract: the /need a restart/ text and the "reload now"
+              button label are both asserted by smoke-user-mods. */}
           {needsRestart ? (
             <div className="restart-banner">
               <Icon name="warn" /> Mixin changes need a restart —{' '}
               <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
                 reload now
-              </button>{' '}
-              to apply them to the game. (The running game keeps the bundle it was
-              served; entrypoint-only changes apply live.)
+              </button>
             </div>
           ) : null}
 
@@ -1301,11 +1291,10 @@ export default function PlayPage(): ReactElement {
                   </button>
                 </div>
                 <p className="meta">
-                  Carries {sharePanel.included.length} enabled URL-imported mod
-                  {sharePanel.included.length === 1 ? '' : 's'} (links only, never code). Whoever
-                  opens it sees the list and confirms before anything imports.
+                  {sharePanel.included.length} mod{sharePanel.included.length === 1 ? '' : 's'} —
+                  links only, never code; the recipient confirms first.
                   {sharePanel.noSource.length > 0
-                    ? ` Pasted mods can’t ride a link and were left out: ${sharePanel.noSource.join(', ')} — send those another way.`
+                    ? ` Pasted mods can’t ride a link: ${sharePanel.noSource.join(', ')} left out.`
                     : ''}
                 </p>
               </div>
@@ -1360,7 +1349,7 @@ export default function PlayPage(): ReactElement {
                               {mod.sourceUrl}
                             </a>
                           ) : (
-                            <span className="origin-text">pasted — lives only in this browser</span>
+                            <span className="origin-text">pasted (this browser only)</span>
                           )}
                         </div>
                         <div className="row-buttons mod-actions">
@@ -1419,13 +1408,13 @@ export default function PlayPage(): ReactElement {
                 <Icon name="warn" /> {persistWarning}
               </p>
             ) : null}
+            {/* Smoke contract: "manifest declares mixins" must appear within
+                80 chars of the mod id (smoke-user-mods leg 2). */}
             {mixinsSkipped.length > 0 ? (
               <p className="warn">
-                <Icon name="warn" /> <code>{mixinsSkipped.join(', ')}</code>: the manifest declares
-                mixins but no <code>mixins.json</code> was pasted — they were{' '}
-                <strong>not applied</strong>. Re-add the mod with its{' '}
-                <code>mixins.json</code> in the third box. The mod’s entrypoint
-                (events, keybinds, tracks, audio) still runs.
+                <Icon name="warn" /> <code>{mixinsSkipped.join(', ')}</code>: manifest declares
+                mixins but no <code>mixins.json</code> was pasted — not applied.
+                Re-add the mod with its <code>mixins.json</code>; the entrypoint still runs.
               </p>
             ) : null}
             {mixinOverCap.length > 0 ? (
@@ -1436,9 +1425,8 @@ export default function PlayPage(): ReactElement {
             ) : null}
             {mixinEnvSkipped.length > 0 ? (
               <p className="warn">
-                <Icon name="warn" /> <code>{mixinEnvSkipped.join(', ')}</code>: the manifest declares
-                its mixins for a different environment (this portal is{' '}
-                <code>web</code>) — they were <strong>not applied</strong>.
+                <Icon name="warn" /> <code>{mixinEnvSkipped.join(', ')}</code>: mixins target a
+                different environment (this portal is <code>web</code>) — not applied.
               </p>
             ) : null}
 
@@ -1451,7 +1439,7 @@ export default function PlayPage(): ReactElement {
                   and clicks the "Add mod" button — the paste method must stay the
                   default so all three exist in the DOM in that order. */}
               <label className="add-label">
-                How do you want to add it?
+                Add from
                 <select
                   className="add-select"
                   value={addMethod}
@@ -1463,24 +1451,19 @@ export default function PlayPage(): ReactElement {
                 >
                   <option value="paste">Paste the mod’s files</option>
                   <option value="url">Import from a URL</option>
-                  <option value="id">Import by mod / modpack ID (coming soon)</option>
+                  <option value="id">Mod / modpack ID (coming soon)</option>
                 </select>
               </label>
               {addMethod === 'paste' ? (
                 <p className="meta">
-                  A mod is two files (plus one optional). Paste each into its box —
-                  only <strong>1</strong> and <strong>2</strong> are required. The
-                  mod stays in this browser’s storage.
+                  Paste each file into its box — only 1 and 2 are required.
                 </p>
               ) : null}
               {addMethod === 'url' ? (
                 <>
                   <p className="meta">
-                    Paste a direct link to the mod’s <code>mod.json</code> (its
-                    entrypoint and mixins are fetched next to it) or to a single
-                    built <code>.js</code> file (a minimal manifest is generated).
-                    Your browser fetches it directly, so the host must allow
-                    cross-origin reads — raw GitHub/gist links and CDNs work.
+                    A direct link to the mod’s <code>mod.json</code> or to a single
+                    built <code>.js</code> file. Raw GitHub/gist links and CDNs work.
                   </p>
                   <label className="add-label">
                     <span className="field-tag req">required</span> mod URL
@@ -1497,9 +1480,8 @@ export default function PlayPage(): ReactElement {
                     />
                   </label>
                   <p className="warn">
-                    Mod code runs unsandboxed in this page, in your browser — only
-                    import from authors you trust. The safety classifier labels each
-                    mod but never blocks.
+                    Mod code runs unsandboxed in your browser — only import from
+                    authors you trust.
                   </p>
                   {addError ? (
                     <p className="warn">
@@ -1518,15 +1500,13 @@ export default function PlayPage(): ReactElement {
               ) : null}
               {addMethod === 'id' ? (
                 <p className="meta">
-                  Not available yet — a registry of mod and modpack IDs (a saved
-                  list of mod URLs you can share as one ID) is the next slice of
-                  issue #80. Until then, use <strong>Import from a URL</strong> or{' '}
-                  <strong>Paste the mod’s files</strong>.
+                  Not available yet — use <strong>Import from a URL</strong> or{' '}
+                  <strong>Paste the mod’s files</strong> for now.
                 </p>
               ) : null}
               <div className={addMethod === 'paste' ? undefined : 'add-hidden'}>
                 <label className="add-label">
-                  <span className="field-tag req">required</span> 1 · mod.json — the mod’s manifest
+                  <span className="field-tag req">required</span> 1 · mod.json
                   <textarea
                     rows={5}
                     spellCheck={false}
@@ -1536,9 +1516,8 @@ export default function PlayPage(): ReactElement {
                   />
                 </label>
                 <label className="add-label">
-                  <span className="field-tag req">required</span> 2 · entrypoint.js — the{' '}
-                  <strong>built</strong> code (ES module, default export;{' '}
-                  <code>pnpm build</code> output, not TypeScript source)
+                  <span className="field-tag req">required</span> 2 · entrypoint.js (built
+                  ES module, default export)
                   <textarea
                     rows={7}
                     spellCheck={false}
@@ -1548,8 +1527,7 @@ export default function PlayPage(): ReactElement {
                   />
                 </label>
                 <label className="add-label">
-                  <span className="field-tag opt">optional</span> 3 · mixins.json — Tier-2 game
-                  patches; leave empty unless the mod ships one (applied on the next game load)
+                  <span className="field-tag opt">optional</span> 3 · mixins.json
                   <textarea
                     rows={5}
                     spellCheck={false}
@@ -1559,9 +1537,8 @@ export default function PlayPage(): ReactElement {
                   />
                 </label>
                 <p className="warn">
-                  Mod code runs unsandboxed in this page, in your browser. Only add
-                  code you trust or wrote. The safety classifier labels each mod but
-                  never blocks.
+                  Mod code runs unsandboxed in your browser — only add code you
+                  trust or wrote.
                 </p>
                 {addError ? (
                     <p className="warn">
@@ -1623,9 +1600,12 @@ export default function PlayPage(): ReactElement {
             <ul className="rows mod-cards">
               {loadedMods.length === 0 ? (
                 <li>
+                  {/* Smoke contract: 'loading…'/'waiting for game…' are the
+                      placeholder strings smoke.mjs greps to prove the list
+                      populated. */}
                   <div className="meta">
                     {modsStatus !== '…'
-                      ? 'none — add a mod above to see it here'
+                      ? 'none — add a mod above'
                       : swState === 'active'
                         ? 'loading…'
                         : 'waiting for game…'}
@@ -1669,7 +1649,7 @@ export default function PlayPage(): ReactElement {
               bridge:{' '}
               {controlCount > 0
                 ? `car.control × ${controlCount.toLocaleString()}`
-                : 'idle (start a race)'}
+                : 'idle'}
             </div>
             <div className="status-row">
               <span
@@ -1678,9 +1658,7 @@ export default function PlayPage(): ReactElement {
                 aria-hidden="true"
               />
               registry:{' '}
-              {keybindCount > 0
-                ? `keybind F × ${keybindCount}`
-                : 'press F (TSPML demo keybind)'}
+              {keybindCount > 0 ? `keybind F × ${keybindCount}` : 'idle'}
             </div>
             <div className="status-row">
               <span
@@ -1722,11 +1700,6 @@ export default function PlayPage(): ReactElement {
               />
               audio: {audioStatus}
             </div>
-            <p className="meta">
-              Live signals from the bridge: <code>car.control</code> ticks while you
-              race, and once <code>tracks</code>/<code>audio</code> read attached a
-              mod can add tracks to the game’s Custom list and override its sounds.
-            </p>
           </section>
 
           <section className="side-section">
@@ -1764,12 +1737,12 @@ function ServiceWorkerBadge({
 }): ReactElement {
   const label =
     state === 'active'
-      ? 'service worker active'
+      ? 'ready'
       : state === 'registering'
-        ? 'registering service worker…'
+        ? 'starting…'
         : state === 'error'
           ? 'service worker unavailable'
-          : 'service worker idle';
+          : 'waiting…';
   const color = state === 'active' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--amber)';
   return (
     <p className="sw-badge" style={{ color }}>

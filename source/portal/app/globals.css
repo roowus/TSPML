@@ -85,13 +85,6 @@ body {
   display: inline;
 }
 
-.tagline {
-  margin: 0 0 0 10px;
-  display: inline;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
 .topbar-side {
   display: flex;
   align-items: baseline;
