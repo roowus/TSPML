@@ -536,9 +536,12 @@ body {
   gap: 8px;
 }
 
+/* The li IS the .mod-card, and this selector outranks it — so the card's
+   padding must live HERE, not on .mod-card (where `.rows li`-reset specificity
+   silently zeroed it and left the tile touching the card corner). */
 .rows.mod-cards li {
   border-top: 0;
-  padding: 0;
+  padding: 11px 12px;
 }
 
 .mod-card {
@@ -546,8 +549,7 @@ body {
   /* Top-aligned, not centered: cards grow (origin line, source view) and a
      centered tile floats weirdly mid-card once they do. */
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 12px;
   background: var(--panel-deep);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -656,7 +658,14 @@ body {
 /* The card's action row sits under the text on its own line — buttons never
    fight a long id for width. */
 .row-buttons.mod-actions {
-  margin-top: 9px;
+  margin-top: 10px;
+}
+
+/* Inside a card the meta lines share one rhythm: 5px between every line,
+   10px before the action row (set above) — the uneven 4/9px mix read as
+   part of the unpolished feel. */
+.mod-card .meta {
+  margin-top: 5px;
 }
 
 /* Post-share feedback under the section head (nothing-to-share / copy failed). */
