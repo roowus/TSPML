@@ -63,6 +63,22 @@ export function userModId(record: UserModRecord): string | null {
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
+/**
+ * The manifest's `homepage` as a clickable docs link, or null. The manifest is
+ * author-supplied and unvalidated here, so only http(s) URLs come back — a
+ * `javascript:` href in a rendered anchor would run in the portal's origin.
+ */
+export function userModHomepage(record: UserModRecord): string | null {
+  const raw = record.manifest.homepage;
+  if (typeof raw !== 'string') return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

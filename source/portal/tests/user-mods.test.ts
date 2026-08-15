@@ -14,6 +14,7 @@ import {
   saveUserMods,
   upsertUserMod,
   userEntrySpecifier,
+  userModHomepage,
   userModId,
   type UserModRecord,
 } from '../lib/user-mods.js';
@@ -147,6 +148,32 @@ describe('user-mods storage', () => {
       'tspml.userMods.v1': JSON.stringify([pasted, { ...record({ id: 'bad' }), sourceUrl: 42 }]),
     });
     expect(readUserMods(corrupt)).toEqual([pasted]);
+  });
+});
+
+describe('userModHomepage (mod docs link)', () => {
+  const withHomepage = (homepage: unknown) => {
+    const base = record();
+    return { ...base, manifest: { ...base.manifest, homepage } };
+  };
+
+  it('returns an http(s) homepage', () => {
+    expect(userModHomepage(withHomepage('https://example.com/docs'))).toBe('https://example.com/docs');
+    expect(userModHomepage(withHomepage('http://example.com/'))).toBe('http://example.com/');
+  });
+
+  it('returns null when absent or not a string', () => {
+    expect(userModHomepage(record())).toBeNull();
+    expect(userModHomepage(withHomepage(42))).toBeNull();
+    expect(userModHomepage(withHomepage(['https://example.com']))).toBeNull();
+  });
+
+  it('rejects non-http(s) and unparseable values — the manifest is author-supplied', () => {
+    expect(userModHomepage(withHomepage('javascript:alert(1)'))).toBeNull();
+    expect(userModHomepage(withHomepage('data:text/html,hi'))).toBeNull();
+    expect(userModHomepage(withHomepage('file:///etc/passwd'))).toBeNull();
+    expect(userModHomepage(withHomepage('not a url'))).toBeNull();
+    expect(userModHomepage(withHomepage('//protocol-relative.example'))).toBeNull();
   });
 });
 

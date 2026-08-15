@@ -833,6 +833,12 @@ body {
   border-color: #3d444d;
 }
 
+/* .btn also dresses anchors (the mod card's "docs" link) — kill the default
+   link underline so it reads as one of the row's buttons. */
+a.btn {
+  text-decoration: none;
+}
+
 .btn-small {
   padding: 3px 9px;
   font-size: 11px;
