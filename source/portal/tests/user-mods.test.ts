@@ -15,6 +15,7 @@ import {
   upsertUserMod,
   userEntrySpecifier,
   userModHomepage,
+  userModIcon,
   userModId,
   type UserModRecord,
 } from '../lib/user-mods.js';
@@ -174,6 +175,60 @@ describe('userModHomepage (mod docs link)', () => {
     expect(userModHomepage(withHomepage('file:///etc/passwd'))).toBeNull();
     expect(userModHomepage(withHomepage('not a url'))).toBeNull();
     expect(userModHomepage(withHomepage('//protocol-relative.example'))).toBeNull();
+  });
+});
+
+describe('userModIcon (mod card icon)', () => {
+  const withIcon = (icon: unknown, sourceUrl?: string) => {
+    const base = record();
+    return { ...base, manifest: { ...base.manifest, icon }, ...(sourceUrl === undefined ? {} : { sourceUrl }) };
+  };
+
+  it('returns an absolute http(s) icon URL', () => {
+    expect(userModIcon(withIcon('https://example.com/icon.png'))).toBe('https://example.com/icon.png');
+    expect(userModIcon(withIcon('http://example.com/icon.png'))).toBe('http://example.com/icon.png');
+  });
+
+  it('returns a data:image URI — a pasted mod has no host to serve from', () => {
+    const uri = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(userModIcon(withIcon(uri))).toBe(uri);
+    expect(userModIcon(withIcon('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'))).toMatch(
+      /^data:image\/svg/,
+    );
+  });
+
+  it('resolves a relative icon against sourceUrl for URL-imported mods', () => {
+    expect(userModIcon(withIcon('icon.png', 'https://raw.example.com/my-mod/1.0.0/mod.json'))).toBe(
+      'https://raw.example.com/my-mod/1.0.0/icon.png',
+    );
+    expect(userModIcon(withIcon('../assets/icon.png', 'https://raw.example.com/my-mod/1.0.0/mod.json'))).toBe(
+      'https://raw.example.com/my-mod/assets/icon.png',
+    );
+  });
+
+  it('returns null for a relative icon on a pasted mod — no base to resolve against', () => {
+    expect(userModIcon(withIcon('icon.png'))).toBeNull();
+  });
+
+  it('returns null when absent, empty, or not a string', () => {
+    expect(userModIcon(record())).toBeNull();
+    expect(userModIcon(withIcon(''))).toBeNull();
+    expect(userModIcon(withIcon(42))).toBeNull();
+    expect(userModIcon(withIcon(['https://example.com/icon.png']))).toBeNull();
+  });
+
+  it('rejects scriptable and non-image schemes — the manifest is author-supplied', () => {
+    expect(userModIcon(withIcon('javascript:alert(1)'))).toBeNull();
+    expect(userModIcon(withIcon('data:text/html,<script>1</script>'))).toBeNull();
+    expect(userModIcon(withIcon('file:///etc/passwd'))).toBeNull();
+    // A relative path resolving to a non-http scheme via a weird base stays out too.
+    expect(userModIcon(withIcon('javascript:alert(1)', 'https://example.com/mod.json'))).toBeNull();
+  });
+
+  it('refuses kodub hosts — those URLs route through the game proxy', () => {
+    expect(userModIcon(withIcon('https://kodub.com/icon.png'))).toBeNull();
+    expect(userModIcon(withIcon('https://www.kodub.com/icon.png'))).toBeNull();
+    expect(userModIcon(withIcon('icon.png', 'https://kodub.com/mod.json'))).toBeNull();
   });
 });
 

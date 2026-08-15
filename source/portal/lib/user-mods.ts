@@ -79,6 +79,36 @@ export function userModHomepage(record: UserModRecord): string | null {
   }
 }
 
+/**
+ * The manifest's `icon` as a renderable `<img>` src, or null. Same trust
+ * posture as {@link userModHomepage}: the field is author-supplied, so only
+ * shapes that are inert inside an `<img>` element come back —
+ * - **http(s) URLs**, absolute or (for URL-imported mods) relative to the
+ *   record's `sourceUrl`, mirroring how the import path resolves `entrypoint`
+ *   against the manifest URL. A pasted mod has no base, so a relative icon
+ *   honestly falls back to the letter tile instead of guessing a host.
+ * - **`data:image/*` URIs**, because a pasted mod's only copy is this
+ *   browser's storage — there is no host to serve an icon from. SVG-as-image
+ *   contexts don't execute scripts, and a data: URI in an img src can't
+ *   navigate anywhere, so this stays display-only.
+ * kodub hosts are refused like the import path refuses them: the service
+ * worker rewrites those into the game proxy, which images must not transit.
+ */
+export function userModIcon(record: UserModRecord): string | null {
+  const raw = record.manifest.icon;
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  if (/^data:image\//i.test(raw)) return raw;
+  let url: URL;
+  try {
+    url = record.sourceUrl === undefined ? new URL(raw) : new URL(raw, record.sourceUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  if (url.hostname === 'kodub.com' || url.hostname.endsWith('.kodub.com')) return null;
+  return url.href;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
