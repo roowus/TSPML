@@ -169,7 +169,28 @@ constants + opcode-byte histogram — no offsets, no indices). Measured against 
 garbage.
 
 `locateBySignature` **fails closed on ambiguity as well as absence** — same posture as
-the `bundleHash` gate. It locates only; there is no patcher, deliberately.
+the `bundleHash` gate.
+
+## `wasm-patch.mjs` — the writer half (#43)
+
+Built on the locator. A **patch plan** is data: a pinned `wasmHash` (sha256 of the exact
+binary the plan was verified against) plus `{ name, signature, oldValue, newValue }`
+entries. `applyF32Patches(buf, plan)` gates, in order, all fail-closed:
+
+1. the binary's hash must equal the pin — a new PolyTrack release trips this by design;
+   re-derive with the locator, verify by hand, pin the new hash;
+2. the signature must locate **exactly one** function;
+3. `oldValue` must match **exactly one** `f32.const` site in it (the ±clamp shape from
+   the spike is refused, not guessed at);
+4. values must be finite; two patches may not resolve to the same offset.
+
+Application is **all-or-nothing** (one failing patch = vanilla bytes back), the input
+buffer is never mutated, and the success report always carries
+`leaderboardRisk: 'warn'` — physics tuning is exactly the category the warn-only
+classifier exists to label. The player decides; nothing blocks.
+
+What remains for M11 is the *plumbing*, not the mechanism: a mod-facing manifest
+surface for physics plans and the portal serving the patched bytes.
 
 Also found: the physics binary is **byte-identical across 0.6.0/0.6.1/0.6.2**, so
 there is no second version to cross-validate against yet — the first real test is the
@@ -244,13 +265,13 @@ evidence ranking (`lexical > structural > edge` on stable-name collisions):
 ## Tests
 
 ```sh
-pnpm test    # 123 unit tests — CI-runnable, no bundle needed
+pnpm test    # 132 unit tests — CI-runnable, no bundle needed
 ```
 
 Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
 webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
-Node-invocation helper (5, #25), `wasm-locate` (16, #43), `fingerprint` (20, #1),
-`select` (17, #1) and `edges` (15, #1).
+Node-invocation helper (5, #25), `wasm-locate` (16, #43), `wasm-patch` (9, #43),
+`fingerprint` (20, #1), `select` (17, #1) and `edges` (15, #1).
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.
