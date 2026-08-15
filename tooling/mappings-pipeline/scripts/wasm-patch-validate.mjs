@@ -35,7 +35,7 @@ const plan = {
   patches: [{ name: 'probe', signature: chosen.sig, oldValue: chosen.site.value, newValue: chosen.site.value * 2 }],
 };
 const r = applyF32Patches(buf, plan);
-if (!r.ok) {
+if (r.ok !== true) {
   console.log('REFUSED:', r.reason);
   process.exit(1);
 }
@@ -47,4 +47,4 @@ console.log('risk:', r.report.leaderboardRisk);
 
 const stale = { ...plan, wasmHash: '0'.repeat(64) };
 const rs = applyF32Patches(buf, stale);
-console.log('stale-pin plan:', rs.ok ? 'APPLIED (BAD)' : `refused — ${rs.reason.slice(0, 60)}`);
+console.log('stale-pin plan:', rs.ok !== true ? `refused — ${rs.reason.slice(0, 60)}` : 'APPLIED (BAD)');
