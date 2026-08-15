@@ -38,8 +38,8 @@ my-mod/
   "description": "...",
   "authors": ["alice"],                    // string | { name, contact }
   "license": "MIT",                        // SPDX
-  "icon": "icon.png",
-  "homepage": "https://...",
+  "icon": "icon.png",                      // shown on the mod's portal card; http(s) URL, path relative to mod.json (URL imports), or data:image/* URI (pasted mods)
+  "homepage": "https://...",               // http(s) URL; the portal shows it as a "docs" link on the mod's card
 
   "environment": "*",                      // "*" | "web" | "desktop" | "worker" — a mismatch with the host soft-disables the mod (#21)
 
