@@ -49,6 +49,7 @@ describe('parseVersionManifest', () => {
         license: 'MIT',
         icon: 'icon.png',
         homepage: 'https://example.com',
+        docs: 'https://example.com/docs',
         environment: 'worker',
         depends: { 'tspml-api': '^1.0.0' },
         recommends: {},
@@ -68,6 +69,7 @@ describe('parseVersionManifest', () => {
     expect(m.authors).toEqual([{ name: 'alice', contact: 'alice@example.com' }]);
     expect(m.environment).toBe('worker');
     expect(m.vanillaSafe).toBe(true);
+    expect(m.docs).toBe('https://example.com/docs');
   });
 
   it('rejects an invalid id, naming the field', () => {

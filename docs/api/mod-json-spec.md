@@ -39,7 +39,8 @@ my-mod/
   "authors": ["alice"],                    // string | { name, contact }
   "license": "MIT",                        // SPDX
   "icon": "icon.png",                      // shown on the mod's portal card; http(s) URL, path relative to mod.json (URL imports), or data:image/* URI (pasted mods)
-  "homepage": "https://...",               // http(s) URL; the portal shows it as a "docs" link on the mod's card
+  "homepage": "https://...",               // the repo/project page; the portal shows it as a "site" link on the mod's card
+  "docs": "https://...",                   // usage documentation for PLAYERS; the portal's "docs" button opens this (no fallback to homepage — a repo is not docs)
 
   "environment": "*",                      // "*" | "web" | "desktop" | "worker" — a mismatch with the host soft-disables the mod (#21)
 

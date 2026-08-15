@@ -120,7 +120,7 @@ function parseVersionManifestImpl(input: unknown, idHint: string | undefined): V
   const targets = validateTargets(m.targets, idHint);
 
   // optional strings
-  for (const key of ['description', 'license', 'icon', 'homepage'] as const) {
+  for (const key of ['description', 'license', 'icon', 'homepage', 'docs'] as const) {
     if (key in m && m[key] !== undefined) {
       if (!isString(m[key])) {
         throw new ManifestError(
@@ -206,6 +206,7 @@ function parseVersionManifestImpl(input: unknown, idHint: string | undefined): V
   if (m.license !== undefined) manifest.license = m.license as string;
   if (m.icon !== undefined) manifest.icon = m.icon as string;
   if (m.homepage !== undefined) manifest.homepage = m.homepage as string;
+  if (m.docs !== undefined) manifest.docs = m.docs as string;
   if (environment !== undefined) manifest.environment = environment;
   if (depends !== undefined) manifest.depends = depends;
   if (recommends !== undefined) manifest.recommends = recommends;

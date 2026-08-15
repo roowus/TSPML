@@ -55,6 +55,9 @@ export interface VersionManifest {
   license?: string;
   icon?: string;
   homepage?: string;
+  /** URL of the mod's usage documentation — what the portal's "docs" button
+   *  opens. `homepage` is typically the repo; this is the page a PLAYER reads. */
+  docs?: string;
   environment?: Environment;
   /** ES module; default export extends TspmlMod or is a factory (api, game) => {}. */
   entrypoint: string;

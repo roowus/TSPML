@@ -13,6 +13,7 @@ import {
   readUserMods,
   saveUserMods,
   upsertUserMod,
+  userModDocs,
   userModHomepage,
   userModIcon,
   userModId,
@@ -1349,6 +1350,7 @@ export default function PlayPage(): ReactElement {
                   const id = userModId(mod) ?? `(no id #${i + 1})`;
                   const version = typeof mod.manifest.version === 'string' ? mod.manifest.version : null;
                   const homepage = userModHomepage(mod);
+                  const docs = userModDocs(mod);
                   return (
                     <li key={id} className={mod.enabled ? 'mod-card' : 'mod-card mod-card-off'}>
                       {/* The tile and body wrapper are <i>/<div> on purpose so a
@@ -1417,19 +1419,32 @@ export default function PlayPage(): ReactElement {
                           >
                             remove
                           </button>
-                          {/* The manifest's optional `homepage`: the mod's own
-                              docs/instructions. userModHomepage only returns
-                              http(s) URLs, so this anchor can't smuggle a
+                          {/* "docs" opens the manifest's dedicated `docs` URL —
+                              usage documentation, NOT the repo. `homepage`
+                              (typically the repo) gets its own honestly-named
+                              "site" link. Both helpers return http(s) URLs
+                              only, so these anchors can't smuggle a
                               javascript: href out of a pasted manifest. */}
+                          {docs ? (
+                            <a
+                              className="btn btn-small"
+                              href={docs}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={`Open this mod’s documentation: ${docs}`}
+                            >
+                              <Icon name="external" /> docs
+                            </a>
+                          ) : null}
                           {homepage ? (
                             <a
                               className="btn btn-small"
                               href={homepage}
                               target="_blank"
                               rel="noreferrer"
-                              title={`Open this mod’s docs: ${homepage}`}
+                              title={`Open this mod’s site: ${homepage}`}
                             >
-                              <Icon name="external" /> docs
+                              <Icon name="external" /> site
                             </a>
                           ) : null}
                         </div>

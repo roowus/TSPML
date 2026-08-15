@@ -14,6 +14,7 @@ import {
   saveUserMods,
   upsertUserMod,
   userEntrySpecifier,
+  userModDocs,
   userModHomepage,
   userModIcon,
   userModId,
@@ -152,7 +153,31 @@ describe('user-mods storage', () => {
   });
 });
 
-describe('userModHomepage (mod docs link)', () => {
+describe('userModDocs (the docs button)', () => {
+  const withDocs = (docs: unknown) => {
+    const base = record();
+    return { ...base, manifest: { ...base.manifest, docs } };
+  };
+
+  it('returns an http(s) docs URL', () => {
+    expect(userModDocs(withDocs('https://example.com/how-to-use'))).toBe('https://example.com/how-to-use');
+  });
+
+  it('does NOT fall back to homepage — the repo is not documentation', () => {
+    const base = record();
+    const rec = { ...base, manifest: { ...base.manifest, homepage: 'https://github.com/alice/cool-cars' } };
+    expect(userModDocs(rec)).toBeNull();
+    expect(userModHomepage(rec)).toBe('https://github.com/alice/cool-cars');
+  });
+
+  it('rejects non-http(s) values — the manifest is author-supplied', () => {
+    expect(userModDocs(withDocs('javascript:alert(1)'))).toBeNull();
+    expect(userModDocs(withDocs(42))).toBeNull();
+    expect(userModDocs(record())).toBeNull();
+  });
+});
+
+describe('userModHomepage (the site link)', () => {
   const withHomepage = (homepage: unknown) => {
     const base = record();
     return { ...base, manifest: { ...base.manifest, homepage } };

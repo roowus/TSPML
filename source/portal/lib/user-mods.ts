@@ -64,12 +64,12 @@ export function userModId(record: UserModRecord): string | null {
 }
 
 /**
- * The manifest's `homepage` as a clickable docs link, or null. The manifest is
+ * A manifest URL field as a clickable link, or null. The manifest is
  * author-supplied and unvalidated here, so only http(s) URLs come back — a
  * `javascript:` href in a rendered anchor would run in the portal's origin.
  */
-export function userModHomepage(record: UserModRecord): string | null {
-  const raw = record.manifest.homepage;
+function userModHttpUrl(record: UserModRecord, key: 'homepage' | 'docs'): string | null {
+  const raw = record.manifest[key];
   if (typeof raw !== 'string') return null;
   try {
     const url = new URL(raw);
@@ -77,6 +77,23 @@ export function userModHomepage(record: UserModRecord): string | null {
   } catch {
     return null;
   }
+}
+
+/** The manifest's `homepage` (typically the repo or project page) — the card's
+ *  "site" link. */
+export function userModHomepage(record: UserModRecord): string | null {
+  return userModHttpUrl(record, 'homepage');
+}
+
+/**
+ * The manifest's `docs` — the card's "docs" button. A DEDICATED field on
+ * purpose: `homepage` is almost always the repo, and a button named "docs"
+ * that opens a repo landing page misleads the player. No fallback to
+ * `homepage` for the same reason — a mod that wants the button declares
+ * where its usage documentation actually lives.
+ */
+export function userModDocs(record: UserModRecord): string | null {
+  return userModHttpUrl(record, 'docs');
 }
 
 /**
