@@ -8,7 +8,14 @@ import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
-import { parseMixinsJson, readUserMods, saveUserMods, upsertUserMod, userModId } from '@/lib/user-mods';
+import {
+  parseMixinsJson,
+  readUserMods,
+  saveUserMods,
+  upsertUserMod,
+  userModHomepage,
+  userModId,
+} from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
 import { importModFromUrl } from '@/lib/mod-import';
 import { refreshFromSources } from '@/lib/mod-reload';
@@ -1312,6 +1319,7 @@ export default function PlayPage(): ReactElement {
                 {userMods.map((mod, i) => {
                   const id = userModId(mod) ?? `(no id #${i + 1})`;
                   const version = typeof mod.manifest.version === 'string' ? mod.manifest.version : null;
+                  const homepage = userModHomepage(mod);
                   return (
                     <li key={id} className={mod.enabled ? 'mod-card' : 'mod-card mod-card-off'}>
                       {/* The tile and body wrapper are <i>/<div> on purpose so a
@@ -1382,6 +1390,21 @@ export default function PlayPage(): ReactElement {
                           >
                             remove
                           </button>
+                          {/* The manifest's optional `homepage`: the mod's own
+                              docs/instructions. userModHomepage only returns
+                              http(s) URLs, so this anchor can't smuggle a
+                              javascript: href out of a pasted manifest. */}
+                          {homepage ? (
+                            <a
+                              className="btn btn-small"
+                              href={homepage}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={`Open this mod’s docs: ${homepage}`}
+                            >
+                              <Icon name="external" /> docs
+                            </a>
+                          ) : null}
                         </div>
                         {sourceOpenId === id ? (
                           <div className="source-view">
