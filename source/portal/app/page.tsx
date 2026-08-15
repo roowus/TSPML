@@ -14,6 +14,7 @@ import {
   saveUserMods,
   upsertUserMod,
   userModHomepage,
+  userModIcon,
   userModId,
 } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
@@ -87,6 +88,34 @@ interface LoadedModRow {
   id: string;
   status: 'loaded' | 'failed';
   reason?: string;
+}
+
+/**
+ * The mod card's 30×30 tile: the manifest's icon image when one is set (and
+ * loads), the id's first letter otherwise. The element stays an `<i>` — the
+ * smoke contract needs each row's FIRST `<span>` to be the status pill, and an
+ * `<img>` inside the `<i>` keeps that true.
+ *
+ * `icon` has already been through {@link userModIcon} (http(s)/data:image
+ * only), so this never renders an author-controlled string anywhere scriptable.
+ * A broken image (404, wrong type, blocked by the host) swaps back to the
+ * letter via onError instead of showing the browser's broken-image glyph;
+ * the error state resets when the icon URL changes so a fixed URL retries.
+ */
+function ModTile({ id, icon }: { id: string; icon: string | null }): ReactElement {
+  const [failedIcon, setFailedIcon] = useState<string | null>(null);
+  const showImg = icon !== null && icon !== failedIcon;
+  return (
+    <i className="mod-tile" aria-hidden="true">
+      {showImg ? (
+        // eslint-disable-next-line @next/next/no-img-element -- arbitrary
+        // author-hosted origins; next/image needs a domain allowlist.
+        <img src={icon} alt="" onError={() => setFailedIcon(icon)} />
+      ) : (
+        id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'
+      )}
+    </i>
+  );
 }
 
 /**
@@ -1325,9 +1354,7 @@ export default function PlayPage(): ReactElement {
                       {/* The tile and body wrapper are <i>/<div> on purpose so a
                           row's FIRST <span> is the status pill — same shape as
                           the Loaded-mods rows the smoke reads. */}
-                      <i className="mod-tile" aria-hidden="true">
-                        {id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'}
-                      </i>
+                      <ModTile id={id} icon={userModIcon(mod)} />
                       {/* Card structure, top to bottom: (1) id + on/off pill,
                           (2) facts line (version · mixins), (3) origin on its
                           own single line (truncated, full URL in the title —
@@ -1640,9 +1667,15 @@ export default function PlayPage(): ReactElement {
                      the FIRST <span> is the status — the tile is an <i> and the
                      body a <div> so the status-pill keeps that slot. */
                   <li key={mod.id} className={mod.status === 'loaded' ? 'mod-card' : 'mod-card mod-card-failed'}>
-                    <i className="mod-tile" aria-hidden="true">
-                      {mod.id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'}
-                    </i>
+                    {/* Every loaded mod IS a user mod (no bundled demos), so
+                        its icon comes from the stored record with the same id. */}
+                    <ModTile
+                      id={mod.id}
+                      icon={(() => {
+                        const rec = userMods.find((m) => userModId(m) === mod.id);
+                        return rec ? userModIcon(rec) : null;
+                      })()}
+                    />
                     <div className="mod-card-body">
                       <div className="row-head">
                         <code>{mod.id}</code>
