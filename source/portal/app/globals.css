@@ -578,11 +578,27 @@ body {
   font-style: normal;
   font-size: 14px;
   font-weight: 700;
+  /* A manifest icon image fills the tile; the clip keeps it inside the
+     rounded frame. */
+  overflow: hidden;
+}
+
+.mod-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .mod-card-off .mod-tile {
   background: var(--border);
   color: var(--muted);
+}
+
+/* Disabled cards keep their muted look even with an icon set. */
+.mod-card-off .mod-tile img {
+  filter: grayscale(1);
+  opacity: 0.55;
 }
 
 .mod-card-failed .mod-tile {
