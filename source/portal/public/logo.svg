@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The Skibiti PolyModLoader: a low-poly faceted tile (PolyTrack's look)
+       carrying a winding racetrack with a dashed centerline. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="0.55" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="dash" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="4" y="4" width="56" height="56" rx="14"/>
+    </clipPath>
+  </defs>
+
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#bg)"/>
+
+  <!-- Low-poly facets: translucent triangles give the tile its faceted read. -->
+  <g clip-path="url(#tile)">
+    <polygon points="4,4 40,4 4,34" fill="#ffffff" opacity="0.10"/>
+    <polygon points="40,4 60,4 60,26" fill="#ffffff" opacity="0.05"/>
+    <polygon points="60,60 60,28 30,60" fill="#0f172a" opacity="0.14"/>
+    <polygon points="4,60 4,42 22,60" fill="#0f172a" opacity="0.08"/>
+  </g>
+
+  <!-- The track: an S-curve road with a dashed centerline. -->
+  <g clip-path="url(#tile)">
+    <path d="M12 53 C 34 53 30 30 42 21 C 48 16.5 51 14 52 8"
+          fill="none" stroke="#0f172a" stroke-width="15.5" stroke-linecap="round" opacity="0.28"/>
+    <path d="M12 52 C 34 52 30 29 42 20 C 48 15.5 51 13 52 7"
+          fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round"/>
+    <path d="M12 52 C 34 52 30 29 42 20 C 48 15.5 51 13 52 7"
+          fill="none" stroke="url(#dash)" stroke-width="3.2" stroke-linecap="round"
+          stroke-dasharray="5.5 6.5"/>
+  </g>
+</svg>
