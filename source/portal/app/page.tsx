@@ -35,7 +35,7 @@ import type { UserMixinReport } from '@/lib/user-patches';
 import { teardown } from '@/lib/teardown';
 
 /**
- * Play page (milestone M2 proof of concept).
+ * Play page.
  *
  * Registers the service worker (scope "/"), then renders the REAL game by
  * iframing the proxied game root `/api/proxy/?version=<v>`. Because the iframe
@@ -1025,8 +1025,12 @@ export default function PlayPage(): ReactElement {
   return (
     <main className={isTheater ? 'app theater' : 'app'}>
       <header className="topbar">
-        <div>
-          <h1>TSPML — PolyTrack, modded</h1>
+        <div className="brand">
+          {/* eslint-disable-next-line @next/next/no-img-element -- a 22px
+              static SVG; next/image adds nothing here. */}
+          <img src="/logo.svg" alt="" className="brand-logo" />
+          <h1>TSPML</h1>
+          <span className="brand-sub">play PolyTrack with mods</span>
         </div>
         <div className="topbar-side">
           <a
@@ -1793,6 +1797,12 @@ export default function PlayPage(): ReactElement {
               </div>
             </details>
           </section>
+
+          <footer className="side-footer">
+            TSPML is a fan-made tool and is not affiliated with Kodub. It never
+            redistributes PolyTrack; the portal transforms your own live copy
+            of the game.
+          </footer>
         </aside>
       </div>
     </main>
