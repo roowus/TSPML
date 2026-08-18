@@ -33,6 +33,7 @@ import {
 } from '@/lib/user-patches';
 import type { UserMixinReport } from '@/lib/user-patches';
 import { teardown } from '@/lib/teardown';
+import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
 
 /**
  * Play page.
@@ -569,6 +570,7 @@ export default function PlayPage(): ReactElement {
         };
         next = upsertUserMod(next, rec);
         log(`added mod '${userModId(rec) ?? '(no id)'}' (from the share link)`);
+        trackModAdded(userModId(rec), 'share');
       }
       setShareImportBusy(false);
       setSharePrompt(null);
@@ -612,6 +614,8 @@ export default function PlayPage(): ReactElement {
       ...s.loaded.map((id) => ({ id, status: 'loaded' as const })),
       ...s.failed.map((f) => ({ id: f.id, status: 'failed' as const, reason: f.reason })),
     ];
+    // Usage analytics: ids only — reasons can quote manifest contents.
+    trackModsLoaded(s.loaded, s.failed.map((f) => f.id));
     setLoadedMods(rows);
     setMixinsSkipped(s.mixinsSkipped);
     setModsStatus(
@@ -870,6 +874,7 @@ export default function PlayPage(): ReactElement {
     setDraftCode('');
     setDraftMixins('');
     log(`added mod '${userModId(rec) ?? '(no id)'}' (pasted)`);
+    trackModAdded(userModId(rec), 'paste');
     updateUserMods(next);
   };
 
@@ -909,6 +914,7 @@ export default function PlayPage(): ReactElement {
       log(
         `added mod '${userModId(rec) ?? '(no id)'}' (imported from URL${result.mod.note ? `; ${result.mod.note}` : ''})`,
       );
+      trackModAdded(userModId(rec), 'url');
       updateUserMods(next);
     });
   };
@@ -939,6 +945,7 @@ export default function PlayPage(): ReactElement {
           })
           .map((m) => `${userModId(m)}@${typeof m.manifest.version === 'string' ? m.manifest.version : '?'}`);
         log(`re-fetched from source: ${versions.join(', ')}`);
+        for (const id of r.refetched) trackModAdded(id, 'reload');
       }
       if (r.noSource.length > 0) log(`reloaded from the stored copy (no source URL): ${r.noSource.join(', ')}`);
       for (const f of r.failures) log(`re-fetch FAILED for '${f.id}': ${f.error.slice(0, 120)}`);

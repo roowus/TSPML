@@ -133,6 +133,7 @@ surface a **restart banner** rather than pretending to apply live.
 | `lib/user-patches.ts` | The #62 plan mechanism: caps, plan build/fingerprint (page side), defensive re-parse (server side), and the in-bundle report prelude. |
 | `lib/bundle-cache.ts` | In-process memo of the **base** transformed bundle (the plain-GET path) — deterministic per upstream, so a warm instance skips the babel pass. Promise-memoized (the page's prewarm and the SW's real fetch share one compute), short TTL, errors never cached. The #62 POST path is never memoized (per-user report, `no-store`). |
 | `lib/mod-import.ts` | "Import from a URL" (#80 first slice): the **browser** fetches a `mod.json` (entrypoint + web-host mixins resolved relative to it) or a single built `.js` (minimal manifest synthesized) — never `/api/proxy`, which stays Kodub-only. Refuses kodub/`/api/` URLs, including ones a manifest resolves to; enforces the #62 caps at import time. |
+| `lib/analytics.ts` | Google Analytics 4 wrapper + the mod-usage events (`mod_added`, `mod_loaded`, `mod_load_failed`, `mods_session`). Fully inert unless `NEXT_PUBLIC_GA_ID` is set; sends **mod ids only** — never mod code, mixin contents, import URLs, or share URLs. |
 | `public/sample-mod/` | A tiny real mod (`mod.json` + factory entrypoint) the portal serves itself — a known-good same-origin target for "Import from a URL" (and the smoke's URL leg). |
 | `public/sw.js` | Static service worker; inline copy of `rewriteGameUrl` + a `fetch` listener + the #62 plan-to-POST replay for the bundle fetch. |
 | `tests/rewrite.test.ts` | vitest unit tests for the rewrite. |
@@ -228,6 +229,29 @@ so a red smoke is interpretable: canary red = the game shipped a new build.
 | `POLYTRACK_VERSION` | `0.6.2` | Default game version used by `/api/proxy` when the request omits `?version=`. |
 | `NEXT_PUBLIC_POLYTRACK_VERSION` | `0.6.2` | Same, exposed to the browser so the Play page knows which version to iframe. |
 | `TSPML_TRANSFORM` | _(unset)_ | `1` enables the AST rewrite of `main.bundle.js`. Off ⇒ the portal is a pure proxy. |
+| `NEXT_PUBLIC_GA_ID` | _(unset)_ | GA4 measurement id (`G-XXXXXXXXXX`). Unset ⇒ no analytics script, no events, nothing to opt out of. See [Analytics](#analytics). |
+
+## Analytics
+
+Off by default. Set `NEXT_PUBLIC_GA_ID` to a GA4 measurement id (Vercel →
+project → Settings → Environment Variables, then redeploy — it is inlined at
+build time, so a redeploy is required) and the portal loads `gtag.js` and
+reports page views plus four custom events:
+
+| Event | Params | Answers |
+| --- | --- | --- |
+| `mod_added` | `mod_id`, `method` (`paste`/`url`/`share`/`reload`) | Which mods people add, and how they get them |
+| `mod_loaded` | `mod_id` | Which mods actually run (one per mod per load pass) |
+| `mod_load_failed` | `mod_id` | Which mods are failing in the wild |
+| `mods_session` | `count` | How many mods a typical session runs |
+
+**What is deliberately never sent:** mod code, mixin/patch contents, import
+URLs, share URLs, failure reason strings, and anything else free-form. A URL
+can name a private repo or a user's own host, and a failure reason can quote
+manifest contents — the Log section in the sidebar shows those to the user
+instead. Events carry the manifest `id` slug and coarse counts, nothing more.
+`lib/analytics.ts` is the only module that talks to GA, and
+`tests/analytics.test.ts` pins both the payload shape and the unset-id no-op.
 
 ## Deployment (tspml.vercel.app)
 
