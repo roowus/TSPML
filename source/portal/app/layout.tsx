@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import Script from 'next/script';
+import { GA_ID } from '@/lib/analytics';
 import './globals.css';
 
 /**
@@ -36,7 +38,26 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Google Analytics 4 — only when NEXT_PUBLIC_GA_ID is set at build
+            time. IP anonymization is GA4 default; custom events (mod usage,
+            ids only — never code or URLs) live in lib/analytics.ts. */}
+        {GA_ID !== '' ? (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+              strategy="afterInteractive"
+            />
+            <Script id="ga-init" strategy="afterInteractive">
+              {`window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${GA_ID}');`}
+            </Script>
+          </>
+        ) : null}
+      </body>
     </html>
   );
 }
