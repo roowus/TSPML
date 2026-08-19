@@ -1,20 +1,31 @@
 # TSPML documentation
 
-**TSPML** — *The Skibiti PolyModLoader* — a versatile-yet-simple mod loader for the online 3D racing game [PolyTrack](https://www.kodub.com/apps/polytrack): a stable API, declarative mixins, and mods that survive game updates.
+**TSPML** — *The Skibiti PolyModLoader* — a mod loader for the online 3D racing game [PolyTrack](https://www.kodub.com/apps/polytrack): a stable API, declarative mixins, and mods that survive game updates.
 
-> Start here: [getting started (write your first mod)](./getting-started.md) · [why TSPML exists](./research/pml-shortcomings-and-tspml-improvements.md) → [the architecture](./design/architecture.md) → [the roadmap](./project/roadmap.md).
+> Start here: [getting started (write your first mod)](./getting-started.md) → [the architecture](./design/architecture.md) → [the roadmap](./project/roadmap.md).
 
 ## Research
 
 Background facts, all sourced.
 
 - [PolyTrack — game internals](./research/polytrack-internals.md)
-- [PolyModLoader (PML) — incumbent analysis](./research/polymodloader-analysis.md)
 - [Deobfuscated bundles — the mappings substrate](./research/deobfuscated-bundles.md)
-- [Fabric architecture & its JS translation](./research/fabric-architecture.md)
-- [**PML shortcomings → TSPML improvements**](./research/pml-shortcomings-and-tspml-improvements.md) *(the "why TSPML" doc — read with the re-scoring below)*
-- [**PML's API story + an honest moat re-scoring**](./research/pml-api-and-moat-reassessment.md) *(2026-08-03, vs. `v0.6.2-2`: two of our claims corrected; they're ahead on physics)*
 - [M1 mappings drift spike — go/no-go](./research/mappings-drift-spike.md) *(result: GO, semi-automated)*
+- [M3 transform spike — go/no-go](./research/transform-spike.md) *(result: VIABLE — mixin transforms work on the real bundle)*
+- [Portal browser-test findings](./research/portal-browser-test-findings.md) *(transform run-validated in a browser)*
+- [Editor internals — scavenging notes](./research/editor-api-scavenging.md)
+- [Structural fingerprints](./research/structural-fingerprints.md) · [WASM structural location](./research/wasm-structural-location.md)
+
+### Background reading (historical)
+
+Early design notes written while surveying the modding landscape, including tools
+for other games. They are kept for provenance and are **not** required to
+understand or use TSPML — the docs above stand on their own.
+
+- [Prior-art survey of PolyTrack modding](./research/polymodloader-analysis.md)
+- [Comparison notes and scope re-scoring](./research/pml-api-and-moat-reassessment.md)
+- [Gaps that motivated the design](./research/pml-shortcomings-and-tspml-improvements.md)
+- [Layered loader architectures in other ecosystems](./research/fabric-architecture.md)
 - [M3 transform spike — go/no-go](./research/transform-spike.md) *(result: VIABLE — JS-Mixin works on the real bundle)*
 - [Portal browser-test findings](./research/portal-browser-test-findings.md) *(transform run-validated in a browser; current blockers = game's own origin/online gates)*
 
@@ -23,7 +34,7 @@ Background facts, all sourced.
 The architecture and its rationale.
 
 - [Architecture](./design/architecture.md)
-- [Mappings system (the Yarn analog)](./design/mappings-system.md)
+- [Mappings system](./design/mappings-system.md)
 - [Injection & delivery](./design/injection-and-delivery.md)
 - [Hook system](./design/hook-system.md)
 - [Safety & fairness](./design/safety-and-fairness.md)

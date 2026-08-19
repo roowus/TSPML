@@ -1,6 +1,6 @@
-# Mappings system (the Yarn analog)
+# Mappings system
 
-> The single most important component and TSPML's moat. The PolyTrack modding ecosystem has **no stable mod-facing API surface** today — PML codes against mangled names + raw substring tokens, and the "deobfuscated" bundles are manual and non-auto-regenerable. TSPML fills exactly this gap. **Caveat (review): the auto-regeneration pipeline has never been validated against a real version bump — the M1 spike is a hard go/no-go gate.**
+> The single most important component. PolyTrack ships as a minified bundle with no stable mod-facing API: every class and method arrives under a short generated name that can change on any rebuild. The mappings file is the translation layer that gives those moving targets fixed names, so a mod can say `Car.controlCar` and mean it across releases. **Caveat (review): the auto-regeneration pipeline has never been validated against a real version bump — the M1 spike is a hard go/no-go gate.**
 
 ## What it is
 
@@ -63,9 +63,9 @@ On each new PolyTrack release:
 4. Propagate stable names to matched modules; flag unmatched as `unresolved`.
 5. Emit a candidate map + diff report for human review; commit to a versioned registry.
 
-**Target:** a candidate map within hours of a release (Fabric's ~24–48 h goal). **Honest scope:** the bulk of *game-logic* modules (Car control, Track loading, checkpoint logic) have no stable string anchor and must be matched by fragile structural neighbor similarity — so "within hours" is aspirational until the M1 drift experiment proves a usable match rate. If game-logic match < ~80%, fall back to an **honestly-declared human-curated map** (per-update cost ≈ PML) and drop the "auto within hours" claim.
+**Target:** a candidate map within hours of a release. **Honest scope:** the bulk of *game-logic* modules (Car control, Track loading, checkpoint logic) have no stable string anchor and must be matched by fragile structural neighbor similarity — so "within hours" is aspirational until the M1 drift experiment proves a usable match rate. If game-logic match < ~80%, fall back to an **honestly-declared human-curated map**, accept the per-update hand-mapping cost, and drop the "auto within hours" claim.
 
-## Graceful degradation (fixes PML's two failure modes)
+## Graceful degradation
 
 Every symbol resolution returns either a bound target or a typed `ResolutionFailure`. Each hook declares criticality `{ symbol, required: true|false }`:
 
@@ -73,12 +73,12 @@ Every symbol resolution returns either a bound target or a typed `ResolutionFail
 - **optional + unresolved** → skip that hook, keep the rest of the mod.
 - A **compatibility report** UI lists, per mod, what resolved / was skipped / failed.
 
-The loader **never** silently no-ops (PML's ambiguous-token bug) and **never** aborts all mods on one failure (PML's boot-throw).
+Two outcomes are ruled out by construction: a hook that silently does nothing because its target could not be found, and one mod's resolution failure taking down the whole boot.
 
 ## Fail-closed on stale maps (review correction)
 
-On `bundleHash` **mismatch**, **never** apply AST/physics/ranked locators from a non-matching map — a "nearest" map would resolve stable names to *wrong* concrete locators (silent mis-target, the exact failure the design accuses PML of). Permit **only** runtime-fallback event hooks whose target shape verifies at bind time. Treat "nearest map" as cosmetic-only. Physics/ranked paths stay disabled until an exact-match map is fetched.
+On `bundleHash` **mismatch**, **never** apply AST/physics/ranked locators from a non-matching map — a "nearest" map would resolve stable names to *wrong* concrete locators, patching whatever now happens to sit at that address. That silent mis-target is the single worst outcome available to a mod loader, which is why the hash gate exists. Permit **only** runtime-fallback event hooks whose target shape verifies at bind time. Treat "nearest map" as cosmetic-only. Physics/ranked paths stay disabled until an exact-match map is fetched.
 
 ## Legal posture
 
-Ship **only the map** (metadata) — never the deobfuscated source or the game bundle — applied against the user's own live game copy. This mirrors how Minecraft mapping projects (Yarn/Mojang mappings) distribute mapping data, not the game. Do **not** lean on the Mojang-tolerates-Yarn analogy as legal cover: Kodub has stated no position. Keep a takedown-compliance plan (registry pull, map withdrawal). Produce the first map from an auto-pipeline run against the live bundle (not the no-license `cwcinc` dump) once the pipeline lands.
+Ship **only the map** (metadata) — never the deobfuscated source or the game bundle — applied against the user's own live game copy. Distributing mapping data rather than game code is the established shape for this kind of project in other modding ecosystems, but do **not** treat that as legal cover: those precedents involve different rightsholders who took their own positions, and Kodub has stated none. Keep a takedown-compliance plan (registry pull, map withdrawal). Produce the first map from an auto-pipeline run against the live bundle (not the no-license `cwcinc` dump) once the pipeline lands.

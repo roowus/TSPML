@@ -296,8 +296,8 @@ vercel deploy --prebuilt --prod
 ## Known limitations & caveats
 
 - **ToS gray area (origin-forwarding).** The proxy sets `Origin`/`Referer` to
-  the official desktop origin so leaderboards/multiplayer trust it (PML's
-  Electron trick). This plus running a modified client copy can violate Kodub's
+  the official desktop origin so leaderboards/multiplayer trust it. This plus
+  running a modified client copy can violate Kodub's
   terms even with zero redistribution. The portal fetches the user's **live**
   game copy and never bundles one; TSPML is warn-only on fairness and will
   comply with takedowns. See

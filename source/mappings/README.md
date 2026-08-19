@@ -1,7 +1,7 @@
 # @tspml/mappings
 
 Versioned symbol map for PolyTrack plus a **fail-closed** resolver that binds
-stable names to concrete minified locators — the Yarn analog. Mods target stable
+stable names to concrete minified locators. Mods target stable
 names only; this package maps stable → concrete at bind time. Status: **M2**,
 module-level granularity, bootstrapped from the [M1 drift
 spike](../../docs/research/mappings-drift-spike.md) (0.6.0-renamed → 0.6.2,
@@ -28,8 +28,9 @@ locator or a typed failure. The **critical rule**:
 > match `map.bundleHash`, the resolver returns `{ ok: false, reason: 'stale-map' }`
 > and **never** returns a locator.
 
-A stale map would resolve stable names to *wrong* concrete code — the exact
-silent mis-target the design accuses PML of. So a stale map fails closed; the
+A stale map would resolve stable names to *wrong* concrete code, patching
+whatever now sits at that location instead of missing outright. That silent
+mis-target is the worst failure available here, so a stale map fails closed; the
 caller must fetch an exact-match map before binding any AST/physics/ranked hook.
 The hash comparison normalizes an optional `sha256:` prefix (a caller may pass
 bare hex); this cannot cause a false match — two different bundles differ in at
