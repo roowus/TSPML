@@ -9,7 +9,14 @@
 import { readFile } from 'node:fs/promises';
 
 import { MAP_FORMAT_VERSION } from './types.js';
-import type { BundleHash, GameMap, ModuleEntry, TargetSpec, UnresolvedEntry } from './types.js';
+import type {
+  BundleHash,
+  ChunkEntry,
+  GameMap,
+  ModuleEntry,
+  TargetSpec,
+  UnresolvedEntry,
+} from './types.js';
 
 /** Thrown when a map file is missing, unparseable, or schema-invalid. */
 export class MapParseError extends Error {
@@ -143,6 +150,44 @@ function validateTargetSpec(raw: unknown, key: string): TargetSpec {
 }
 
 /**
+ * Validate one `chunks` entry (#98).
+ *
+ * Stricter than it looks like it needs to be, for two reasons:
+ *
+ *  - `id` must be DIGITS and must equal its own key. A host builds the request
+ *    path `<id>.bundle.js` from this value, so anything else is a path-traversal
+ *    primitive sitting in the allowlist. `assertVersion` in the pipeline's
+ *    fetch.mjs refuses loose versions for exactly this reason; same rule here.
+ *  - `hash` must be a real sha256. A malformed pin cannot match any live hash, so
+ *    a lenient parse would produce an entry that is permanently stale — a chunk
+ *    silently never transformed, which is the kind of quiet no-op this project
+ *    treats as worse than a crash.
+ */
+function validateChunkEntry(raw: unknown, key: string): ChunkEntry {
+  assert(isObject(raw), `chunks['${key}'] must be an object`);
+  assert(
+    isString(raw.id) && /^\d{1,6}$/.test(raw.id),
+    `chunks['${key}'].id must be 1-6 digits (it becomes the '<id>.bundle.js' request path)`,
+  );
+  assert(raw.id === key, `chunks['${key}'].id must equal its key (got '${String(raw.id)}')`);
+  assert(
+    isString(raw.hash) && BUNDLE_HASH_RE.test(raw.hash),
+    `chunks['${key}'].hash must be "sha256:<64 hex>"`,
+  );
+  assert(
+    isNumber(raw.bytes) && raw.bytes > 0,
+    `chunks['${key}'].bytes must be a positive number`,
+  );
+  assert(isString(raw.role) && raw.role.length > 0, `chunks['${key}'].role must be a non-empty string`);
+  return {
+    id: raw.id,
+    hash: raw.hash as BundleHash,
+    bytes: raw.bytes,
+    role: raw.role,
+  };
+}
+
+/**
  * Validate an already-parsed object as a {@link GameMap}. Throws `MapParseError`
  * on any structural violation. This is the single chokepoint: `loadMap` and any
  * future network/IPC importer should route through it.
@@ -175,6 +220,17 @@ export function validateMap(raw: unknown): GameMap {
     }
   }
 
+  // `chunks` (#98, optional): chunk id -> ChunkEntry. Absent means "this build
+  // declares no transformable chunks" — the pre-#98 main-bundle-only surface.
+  let chunks: Record<string, ChunkEntry> | undefined;
+  if (raw.chunks !== undefined) {
+    assert(isObject(raw.chunks), 'chunks must be an object');
+    chunks = {};
+    for (const [key, value] of Object.entries(raw.chunks)) {
+      chunks[key] = validateChunkEntry(value, key);
+    }
+  }
+
   return {
     formatVersion: raw.formatVersion,
     gameVersion: raw.gameVersion,
@@ -188,6 +244,7 @@ export function validateMap(raw: unknown): GameMap {
     modules,
     unresolved,
     ...(targets ? { targets } : {}),
+    ...(chunks ? { chunks } : {}),
   };
 }
 

@@ -1423,5 +1423,31 @@
         "kind": "factory"
       }
     }
+  },
+  "chunks": {
+    "112": {
+      "id": "112",
+      "hash": "sha256:1094551ba359761a1a22d7b13a10f39a995c6efafe56504a093cd946110331f1",
+      "bytes": 108037,
+      "role": "track editor"
+    },
+    "535": {
+      "id": "535",
+      "hash": "sha256:c74f3117ab7484ac6b2aa4b9796dda3c3875142aad612e1c746a630a5419a374",
+      "bytes": 13182,
+      "role": "track verifier UI"
+    },
+    "604": {
+      "id": "604",
+      "hash": "sha256:030f3b7e8ee93d5d8339cda5a3341b3b07172b0a057cac6112a27b13dfa3f95a",
+      "bytes": 74464,
+      "role": "profile selection UI"
+    },
+    "657": {
+      "id": "657",
+      "hash": "sha256:3a98d17d2858c80bd23af315fed0dd3cf582fa5fde5c48d29de6ec503a0c9038",
+      "bytes": 6391,
+      "role": "settings / options UI"
+    }
   }
 }

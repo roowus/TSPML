@@ -4,6 +4,7 @@ import {
   loadDefaultMap,
   MAP_FORMAT_VERSION,
   MapParseError,
+  transformableChunkIds,
   validateMap,
 } from '../src/index.js';
 
@@ -70,6 +71,66 @@ describe('loadDefaultMap (the bundled 0.6.2 map)', () => {
     expect(map.unresolved.length).toBe(2);
     expect(Object.keys(map.modules).length + map.unresolved.length).toBe(66);
   });
+
+  it('declares exactly the four chunks 0.6.2 lazy-loads (#98)', async () => {
+    const map = await loadDefaultMap();
+    // The set is not a judgement call: it is every `i.e(<id>)` call site in the
+    // 0.6.2 webpack runtime — the same list the game itself will request. Probing
+    // the CDN for ids would be wrong (it still serves stale chunks from earlier
+    // builds with a 200), so this count is the tripwire for a chunk list edited
+    // by hand rather than read off the runtime.
+    expect(transformableChunkIds(map)).toEqual(['112', '535', '604', '657']);
+  });
+
+  it('pins the exact bytes fetched from the CDN for each chunk', async () => {
+    const map = await loadDefaultMap();
+    // Literal pins, like EXPECTED_BUNDLE_HASH above, because a WRONG pin fails in
+    // the silent direction: it can never match live bytes, so the chunk is
+    // permanently stale and simply never transforms. Nothing crashes and no test
+    // that only checks shape would notice. These are the sha256/byte-length of
+    // 0.6.2/<id>.bundle.js as actually fetched; they are the tripwire for a
+    // hand-edited or half-regenerated chunks section.
+    expect(map.chunks).toEqual({
+      '112': {
+        id: '112',
+        hash: 'sha256:1094551ba359761a1a22d7b13a10f39a995c6efafe56504a093cd946110331f1',
+        bytes: 108037,
+        role: 'track editor',
+      },
+      '535': {
+        id: '535',
+        hash: 'sha256:c74f3117ab7484ac6b2aa4b9796dda3c3875142aad612e1c746a630a5419a374',
+        bytes: 13182,
+        role: 'track verifier UI',
+      },
+      '604': {
+        id: '604',
+        hash: 'sha256:030f3b7e8ee93d5d8339cda5a3341b3b07172b0a057cac6112a27b13dfa3f95a',
+        bytes: 74464,
+        role: 'profile selection UI',
+      },
+      '657': {
+        id: '657',
+        hash: 'sha256:3a98d17d2858c80bd23af315fed0dd3cf582fa5fde5c48d29de6ec503a0c9038',
+        bytes: 6391,
+        role: 'settings / options UI',
+      },
+    });
+  });
+
+  it('pins each chunk with its own distinct hash', async () => {
+    const map = await loadDefaultMap();
+    const hashes = Object.values(map.chunks ?? {}).map((c) => c.hash);
+    // Per-chunk pins are the point of the section (#98). Reusing the main bundle's
+    // hash, or one chunk's for another, would silently break the fail-closed gate
+    // in the direction that MATTERS: it would accept bytes nobody verified.
+    expect(new Set(hashes).size).toBe(hashes.length);
+    expect(hashes).not.toContain(map.bundleHash);
+    for (const chunk of Object.values(map.chunks ?? {})) {
+      expect(chunk.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(chunk.bytes).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe('validateMap', () => {
@@ -127,5 +188,55 @@ describe('validateMap', () => {
 
   it('rejects a non-object root', () => {
     expect(() => validateMap('nope')).toThrowError(MapParseError);
+  });
+});
+
+describe('validateMap — chunks (#98)', () => {
+  const CHUNK_HASH =
+    'sha256:1111111111111111111111111111111111111111111111111111111111111111';
+  function withChunk(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return baseMap({
+      chunks: { '112': { id: '112', hash: CHUNK_HASH, bytes: 108037, role: 'track editor', ...over } },
+    });
+  }
+
+  it('accepts a well-formed chunks section', () => {
+    const map = validateMap(withChunk());
+    expect(map.chunks?.['112']).toEqual({
+      id: '112',
+      hash: CHUNK_HASH,
+      bytes: 108037,
+      role: 'track editor',
+    });
+  });
+
+  it('treats an absent chunks section as "no transformable chunks"', () => {
+    // The pre-#98 surface. Absent must not become an empty-but-present object:
+    // a host distinguishes "declares none" from "declares an allowlist".
+    expect(validateMap(baseMap()).chunks).toBeUndefined();
+  });
+
+  it('rejects a non-digit chunk id — it becomes a request path', () => {
+    // The whole reason this is strict: a host builds `<id>.bundle.js` from it.
+    expect(() => validateMap(withChunk({ id: '../../evil' }))).toThrowError(/digits/);
+  });
+
+  it('rejects an id that disagrees with its key', () => {
+    // Lookup is by key; the transform pin and the fetched path would diverge.
+    expect(() => validateMap(withChunk({ id: '604' }))).toThrowError(/must equal its key/);
+  });
+
+  it('rejects a malformed chunk hash', () => {
+    // A pin that can never match would make the chunk permanently, silently vanilla.
+    expect(() => validateMap(withChunk({ hash: 'sha256:nope' }))).toThrowError(/hash/);
+  });
+
+  it('rejects a non-positive bytes and an empty role', () => {
+    expect(() => validateMap(withChunk({ bytes: 0 }))).toThrowError(/bytes/);
+    expect(() => validateMap(withChunk({ role: '' }))).toThrowError(/role/);
+  });
+
+  it('rejects a non-object chunks section', () => {
+    expect(() => validateMap(baseMap({ chunks: [] }))).toThrowError(/chunks/);
   });
 });
