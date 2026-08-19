@@ -5,8 +5,8 @@
 ## Locked product decisions (from the project owner, 2026-07-30)
 
 **ADR-001 — Delivery flagship: Vercel-hosted portal website.**
-*Decision:* The primary way to play modded is a portal website (like `web.polymodloader.com`) hosted on Vercel, using a CORS proxy + origin handling to load the real game. The browser extension and userscript are secondary fallbacks.
-*Rationale:* Owner preference for a zero-install web experience matching the incumbent.
+*Decision:* The primary way to play modded is a portal website hosted on Vercel, using a CORS proxy + origin handling to load the real game. The browser extension and userscript are secondary fallbacks.
+*Rationale:* Owner preference for a zero-install web experience — open a URL and play, with nothing to download.
 *Tradeoff accepted:* This path inherits origin-trust + ToS gray areas (CSP blocks iframing/CORS; origin must be forwarded via proxy). Mitigations in [injection-and-delivery.md](../design/injection-and-delivery.md) and [safety-and-fairness.md](../design/safety-and-fairness.md). The extension remains the resilient fallback.
 
 **ADR-002 — Online fairness: warn-only.**
@@ -15,11 +15,11 @@
 
 **ADR-003 — Language: TypeScript.**
 *Decision:* TypeScript throughout (loader, bridge, tooling, portal) + a published `@tspml/api` types package. Mods may be plain JS.
-*Rationale:* Type safety + typed mod-authoring autocomplete (the "Yarn dev names" DX win).
+*Rationale:* Type safety, and autocomplete on stable names while authoring a mod — the editor can tell you what `Car` exposes because the API declares it.
 
-**ADR-004 — PML compatibility: narrow importer.**
-*Decision:* Import car skins, audio, and custom blocks (covers most existing PML mods). Do **not** emulate PML's mixin engine.
-*Rationale:* A full emulator would reintroduce the exact per-update fragility TSPML exists to eliminate (self-defeating, per the design review). Deep-mixin PML mods get a porting guide instead.
+**ADR-004 — Importing mods from other loaders: narrow importer.**
+*Decision:* Import car skins, audio, and custom blocks. Do **not** emulate another loader's mixin engine.
+*Rationale:* An emulator would have to reproduce whatever the other engine patches, which reintroduces the exact per-update fragility TSPML exists to eliminate (self-defeating, per the design review). Mods that rely on deep mixins get a porting guide instead.
 
 ## Review-driven corrections (2026-07-30, from the adversarial design review)
 
@@ -34,9 +34,9 @@
 
 **ADR-009 — The portal cannot iframe/fetch the real game directly.** It works only via the service-worker + `/api/proxy` path. The "zero-install play on tspml.dev of the real game" is achieved through proxying, not embedding.
 
-## Audit correction to the PML-shortcomings analysis (2026-07-30)
+## Audit correction to the early scope analysis (2026-07-30)
 
-**ADR-010 — PML can reach physics.** The research draft's claim that "sim-worker mixins are unimplemented post-0.6.0 / physics mods are blocked" is **wrong** against the 0.6.1 source (`registerSimWorkerMixin` + `getSimURL()` are implemented). TSPML's physics advantage is **DX + determinism-quarantine + a stable event surface**, not "enabling what PML couldn't." Recorded in [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
+**ADR-010 — Physics modding is not new ground, so don't claim it as one.** An early research draft asserted that reaching the physics sim worker was an open problem no existing tool had solved. Reading the 0.6.1 sources showed that is **wrong** — sim-worker patching is implemented and shipping elsewhere. What TSPML actually offers for physics is a **stable event surface, determinism quarantine, and the authoring experience around them**, not access that was previously unavailable. Corrected in [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
 
 ## M3 transform spike result (2026-07-30)
 
@@ -46,7 +46,7 @@
 
 ## Gate neutralized + portal plays end-to-end (2026-07-31)
 
-**ADR-013 — The unofficial-version gate is cleared via the game's own mod-loader hook (not a bundle transform); the portal now plays PolyTrack end-to-end.** Tracing the gate in the unpacked 0.6.2 bundle showed it reads `window.polytrackModConfiguration` (the same hook PML uses to identify a mod load). Supplying `{modName, author}` sets `Qo()=true`, which clears the gameplay gate and re-badges the banner "Unofficial TSPML mod by roowus". **Decision:** neutralize the gate by injecting `<script>window.polytrackModConfiguration=…</script>` into the proxied HTML `<head>` (before the deferred bundles), gated on `TSPML_TRANSFORM=1` — **delivery-layer HTML injection, not bundle surgery, and no origin-spoof.** This is both cleaner than a transform *and* the only viable option (the check lives outside the webpack module graph, so a module-anchor transform can't reach it). Outcome (headless-verified): the transformed game boots → gate clears → assets + a track load → a **real race on "Summer 1"** with full HUD renders, green `TSPML ✔ LIVE` badge live, 149× 200 / 0 failed requests. The earlier "Failed to load track" (#9) — hit by the user on a plain first visit — was the SW not yet *controlling* the page when the game fetched the track; **fixed by mounting the game iframe only after `navigator.serviceWorker` `controllerchange`** (no manual reload). Only an online `502` remains (#7, M8). The smoke test now PASSES on gate-clearance (`pastGate`) and runs without a reload. See [portal-browser-test-findings.md](../research/portal-browser-test-findings.md).
+**ADR-013 — The unofficial-version gate is cleared via the game's own mod-loader hook (not a bundle transform); the portal now plays PolyTrack end-to-end.** Tracing the gate in the unpacked 0.6.2 bundle showed it reads `window.polytrackModConfiguration` — a global the game itself checks so a mod loader can announce itself. Supplying `{modName, author}` sets `Qo()=true`, which clears the gameplay gate and re-badges the banner "Unofficial TSPML mod by roowus". **Decision:** neutralize the gate by injecting `<script>window.polytrackModConfiguration=…</script>` into the proxied HTML `<head>` (before the deferred bundles), gated on `TSPML_TRANSFORM=1` — **delivery-layer HTML injection, not bundle surgery, and no origin-spoof.** This is both cleaner than a transform *and* the only viable option (the check lives outside the webpack module graph, so a module-anchor transform can't reach it). Outcome (headless-verified): the transformed game boots → gate clears → assets + a track load → a **real race on "Summer 1"** with full HUD renders, green `TSPML ✔ LIVE` badge live, 149× 200 / 0 failed requests. The earlier "Failed to load track" (#9) — hit by the user on a plain first visit — was the SW not yet *controlling* the page when the game fetched the track; **fixed by mounting the game iframe only after `navigator.serviceWorker` `controllerchange`** (no manual reload). Only an online `502` remains (#7, M8). The smoke test now PASSES on gate-clearance (`pastGate`) and runs without a reload. See [portal-browser-test-findings.md](../research/portal-browser-test-findings.md).
 
 ## M9 regen/diff/verify pipeline (2026-08-01)
 

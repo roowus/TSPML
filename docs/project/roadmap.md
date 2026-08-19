@@ -18,42 +18,40 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | **M7 — Dev harness + scaffold + types** | ✅ Done | `create-tspml-mod` CLI (one-command scaffolding); `@tspml/api` publish-ready (types for modder autocomplete); **`@tspml/dev-harness`** — Vite dev server that proxies + transforms the real game in-process (no service worker) and **hot-swaps the mod entrypoint on save** while the game keeps running. Headlessly verified (game boots, gate clears, Tier-1 events fire, mod hot-reloads, game survives). |
 | **M8 — Online/origin handling** | 🚧 Blocked | Root cause found: `vps.kodub.com` is **bot-protected** (bot/TLS-fingerprint drop, not just origin). The **extension path** (real browser on kodub.com origin) is the resilient fix. |
 | **M9 — Auto-mappings pipeline** | ✅ Done | `regen.mjs` orchestrates **fetch → unpack → gen-map → diff → verify-targets**: a one-command candidate-map regen + human-review report (`*.candidate.json`, never clobbers committed). Pure `diff`/`verify-targets` logic unit-tested (26 tests); validated end-to-end on real 0.6.0/0.6.2 bundles. |
-| **M10 — PML narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry; it now has **two**: `api.tracks` ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code) and `api.audio` ([#11](https://github.com/roowus/TSPML/issues/11) — sound overrides, superseding PML's `soundManager`), both verified against the live game. Car-styles/settings remain non-viable (frozen catalogs). |
-| **M11 — Physics WASM patching** | 🆕 Planned | **Newly identified capability gap ([#43](https://github.com/roowus/TSPML/issues/43)).** PML `v0.6.2` shipped `registerPhysicsMixin` (byte-offset `PATCH_F32`/`PATCH_I32` into `polytrack_physics.wasm`); TSPML has **no** answer. Physics tuning is a headline mod category and anchor discipline cannot reach WASM constants. See [pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md). |
+| **M10 — Narrow importer + registry + polish** | 🚧 Unblocked | The importer needed at least one working **content** registry; it now has **two**: `api.tracks` ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code) and `api.audio` ([#11](https://github.com/roowus/TSPML/issues/11) — sound overrides), both verified against the live game. Car-styles/settings remain non-viable (frozen catalogs). |
+| **M11 — Physics WASM patching** | 🆕 Planned | **Capability gap ([#43](https://github.com/roowus/TSPML/issues/43)).** Physics tuning is a headline mod category, and anchor discipline cannot reach constants baked into `polytrack_physics.wasm` — those live in a compiled binary with no names to anchor to. The locator and writer now exist (see the mappings-pipeline README); what remains is the mod-facing plumbing. See [pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md). |
 
 ## Strategy correction (2026-08-03)
 
-A source-level re-read of PML at **`v0.6.2-2`** revised two claims this roadmap was built on
-— full detail in
+Reading the prior art at source level revised two claims this roadmap had been built on.
+Full detail in
 [pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md):
 
-1. **"PML breaks every release" is an overclaim.** Their hardcoded mangled identifiers were
-   **byte-identical** 0.6.1 → 0.6.2, and the 0.6.0 → 0.6.1 delta was four string constants.
-   They adapted across two game versions in **11 days**. Our advantage is the **failure
-   mode** — detected-and-fail-closed vs. discovered-by-breakage-and-possibly-silent — **not
-   the frequency**, and not the cost of their update.
-2. **They are ahead on physics.** `registerPhysicsMixin` is a real capability we lack (M11).
+1. **"Hardcoded identifiers break every release" is an overclaim.** Measured across real
+   PolyTrack versions, mangled identifiers were **byte-identical** 0.6.1 → 0.6.2, and the
+   0.6.0 → 0.6.1 delta was four string constants. So the argument for mappings is the
+   **failure mode**, not the frequency: a mismatch is detected and fails closed, rather than
+   being discovered by breakage and possibly not at all. Do not claim updates are frequent.
+2. **Physics patching is not new ground.** It is a real capability TSPML lacks until M11.
 
 **Consequences for direction:**
 
-- **The mappings pipeline's *automation* is now the load-bearing investment**, not the
-  mappings idea itself. If our release-day cost is not decisively lower than "edit four
-  constants", centralization is a thin story. Measure it honestly on the first real 0.6.3.
-- **Stop marketing the API as a differentiator in kind.** They have an official API mod
-  (`pml-api`); it is a year-stale stub whose only act is creating an empty `EventTarget`,
-  and it calls a method the loader has since removed. "Shipped and tested vs. unstarted" is
-  the honest claim, and it is still a good one.
-- **Keep the API in-tree.** `pml-api` rotted precisely because it lives outside the loader.
-  Ours is imported by the portal and harness and covered in the same CI run — that is the
-  concrete argument for our layering, and it is stronger than the abstract one.
-- **`pml2` risk downgraded.** Last commit 2025-07-31, twelve months cold. The predicted
-  self-disruption did not happen; the effort went into 0.6.2 of the existing loader.
+- **The mappings pipeline's *automation* is the load-bearing investment**, not the mappings
+  idea by itself. If release-day cost is not decisively lower than editing a handful of
+  constants by hand, the whole map is a thin story. Measure it honestly on the first real
+  0.6.3.
+- **Do not sell the API as differentiated in kind.** "Shipped, typed, and tested" is the
+  honest claim, and it is a good one on its own without a comparison attached.
+- **Keep the API in-tree.** An API package that lives outside the loader rots — this is the
+  observed failure of every prior attempt. Ours is imported by the portal and the harness
+  and covered by the same CI run, which is a concrete argument for the layering rather than
+  an abstract one.
 
 ## Open follow-up issues
 
 | # | Title | Scope |
 |---|---|---|
-| [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching (PML has it) | Capability gap vs. PML 0.6.2's `registerPhysicsMixin`. Gates M11. |
+| [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching | Constants compiled into `polytrack_physics.wasm` are unreachable from bundle anchors. Gates M11. |
 | [#80](https://github.com/roowus/TSPML/issues/80) | Import mods by URL + modpacks (txt URL-list or saved modpack ID) | Distribution UX on top of #62's runtime user mods: one-URL mod install, and whole-pack install from a plain-text link list or a backend-resolved modpack ID (links-only DB, client-side fetch, per-mod validation — never a server-side store of user code). |
 
 Closed since the last update: [#21](https://github.com/roowus/TSPML/issues/21)
@@ -68,7 +66,7 @@ and the spec now tells the truth about capabilities/vanillaSafe/special ids),
 listeners to the new frame window while keeping every registered binding; previously
 only the FIRST frame's window ever got listeners, so any in-place iframe reload or
 React remount silently killed every mod keybind), [#6](https://github.com/roowus/TSPML/issues/6)
-(`breaks` is now Fabric-accurate: the declaring mod is **soft-disabled** — excluded
+(`breaks` now soft-disables rather than aborting: the declaring mod is excluded
 from the load order with a `breaks-disabled` warning and a per-mod `'disabled'`
 status, dependents cascading — instead of one incompatibility declaration aborting
 the entire load), [#64](https://github.com/roowus/TSPML/issues/64)

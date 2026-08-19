@@ -1,6 +1,6 @@
 # Contributing to TSPML
 
-Thanks for your interest! TSPML is a Fabric-like mod loader for PolyTrack — please read the [disclaimers](./README.md#-disclaimers) first.
+Thanks for your interest! TSPML is a mod loader for PolyTrack — please read the [disclaimers](./README.md#-disclaimers) first.
 
 ➡️ **Full guides live in [`docs/contributing/`](./docs/contributing/):**
 

@@ -1,6 +1,6 @@
 # Architecture
 
-> TSPML copies **Fabric's layering**, not PML's mechanics. The thesis: concentrate *all* version-coupling in two maintained artifacts (the **mappings file** + the **API bridge**) so ordinary mods target stable names and ride through PolyTrack updates without recompilation.
+> The thesis: concentrate *all* version-coupling in two maintained artifacts (the **mappings file** + the **API bridge**) so ordinary mods target stable names and ride through PolyTrack updates without recompilation.
 
 > **Implementation status (M4-M5 ✅, M6-M9 🚧):** the layered design below is now **proven end-to-end** — 6 Tier-1 events fire inside the running game, mods load + subscribe, mod-declared mixins target stable names resolved fail-closed via the mappings, and a warn-only safety classifier labels mods. The portal plays a transformed, modded PolyTrack headlessly verified. See [progress.md](../project/progress.md) + [roadmap.md](../project/roadmap.md).
 
@@ -29,11 +29,11 @@
 
 ## The three layers
 
-1. **Loader core** (`source/loader`) — clean TS, no minification coupling. Discovers mod packages, parses `mod.json`, resolves semver dependencies (`depends`/`recommends`/`suggests`/`conflicts`/`breaks` — `breaks` soft-disables the declaring mod rather than aborting, #6; `environment` and `targets` mismatches soft-disable the same way when the host states them in the `ResolveContext`, #21), topologically orders mods (cycle detection + explicit conflict errors), and invokes entrypoints `mod.default(api, game)`. This is a near 1:1 port of Fabric Loader and is the most transferable part.
+1. **Loader core** (`source/loader`) — clean TS, no minification coupling. Discovers mod packages, parses `mod.json`, resolves semver dependencies (`depends`/`recommends`/`suggests`/`conflicts`/`breaks` — `breaks` soft-disables the declaring mod rather than aborting, #6; `environment` and `targets` mismatches soft-disable the same way when the host states them in the `ResolveContext`, #21), topologically orders mods (cycle detection + explicit conflict errors), and invokes entrypoints `mod.default(api, game)`. Nothing in this layer knows anything about PolyTrack's internals, which is what makes it the most transferable part.
 
-2. **Mappings file** (`source/mappings`) — the Yarn/Intermediary analog and TSPML's moat. A versioned JSON, one per PolyTrack build, mapping stable names (`Car.controlCar`, `Track.afterLoad`, `physics.postStep`) → concrete locators (`exportRef` / `prototypeFn` / `callExpression` anchor). Mods target **stable names only**; the resolver maps stable → concrete at bind time. See [mappings-system.md](./mappings-system.md).
+2. **Mappings file** (`source/mappings`) — the layer that absorbs every game update. A versioned JSON, one per PolyTrack build, mapping stable names (`Car.controlCar`, `Track.afterLoad`, `physics.postStep`) → concrete locators (`exportRef` / `prototypeFn` / `callExpression` anchor). Mods target **stable names only**; the resolver maps stable → concrete at bind time. See [mappings-system.md](./mappings-system.md).
 
-3. **API bridge** (`source/api-bridge`) — the loader-owned, *version-coupled* layer. A small set of maintained patches wiring the stable EventEmitter + registry surface to real game functions. **When PolyTrack updates, only this layer + the mappings file change; mods keep working.** This is exactly Fabric API's "one internal mixin per concern" principle.
+3. **API bridge** (`source/api-bridge`) — the loader-owned, *version-coupled* layer. A small set of maintained patches wiring the stable EventEmitter + registry surface to real game functions, kept deliberately small: one internal patch per concern, so a game update touches a handful of known places rather than scattering through the codebase. **When PolyTrack updates, only this layer + the mappings file change; mods keep working.**
 
 ## Hook system (two tiers)
 
@@ -49,10 +49,10 @@ See [hook-system.md](./hook-system.md).
 
 See [injection-and-delivery.md](./injection-and-delivery.md).
 
-## Guiding principles (from Fabric)
+## Guiding principles
 
 - **Concentrate fragility.** Only the bridge + mappings are version-coupled; everything else rides through updates.
 - **Events for everyone, mixins for power users.** Route ~90% of mods to the stable API; reserve surgical edits for the few that need them.
-- **Fail loudly, fail small.** Per-hook `required` flags + typed `ResolutionFailure` + a per-mod compatibility report. Never a boot-abort (PML's "Token not found"), never a silent no-op (PML's ambiguous-token mis-target). **Fail-closed** on stale maps.
+- **Fail loudly, fail small.** Per-hook `required` flags + typed `ResolutionFailure` + a per-mod compatibility report. One mod failing to resolve never aborts the boot, and a hook that cannot be placed is reported rather than skipped in silence. **Fail-closed** on stale maps.
 - **Ship metadata, not the game.** Fetch the user's live copy; transform in place; never redistribute the bundle.
-- **Keep the core tiny and modular.** Resist hand-modding every internal — that is the Forge-ism that slows updates.
+- **Keep the core tiny and modular.** Resist hand-patching every internal. The more of the game the loader reaches into, the more of it has to be re-checked on every release.
