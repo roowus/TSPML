@@ -6,6 +6,7 @@
 // path with an injected `importUserMod`, because vitest here runs in node where a
 // Blob URL cannot feed `import()`. The real Blob-URL import is exercised by the
 // headless smoke, which is where browser-only behaviour belongs.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { TspmlApi } from '@tspml/api';
 import {
@@ -20,7 +21,8 @@ import {
   userModId,
   type UserModRecord,
 } from '../lib/user-mods.js';
-import { loadMods } from '../lib/mod-loader.js';
+import { loadMods, PORTAL_RESOLVE_CONTEXT } from '../lib/mod-loader.js';
+import { TSPML_API_VERSION, TSPML_LOADER_VERSION } from '@tspml/shared';
 
 /** A minimal in-memory Storage stand-in. */
 function memoryStorage(initial: Record<string, string> = {}): Pick<Storage, 'getItem' | 'setItem'> & {
@@ -62,7 +64,9 @@ function fakeApi(): TspmlApi {
     tracks: { register: () => () => {}, dispose: () => {} },
     audio: { register: () => () => {}, dispose: () => {} },
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    version: '0.0.0',
+    // What page.tsx actually puts here (#73) — a hardcoded stub would make the
+    // "runtime version equals the checked version" test assert on itself.
+    version: TSPML_LOADER_VERSION,
   } as unknown as TspmlApi;
 }
 
@@ -468,5 +472,79 @@ describe('loadMods with user mods', () => {
 
   it('entry specifiers are namespaced so user mods cannot shadow bundled specifiers', () => {
     expect(userEntrySpecifier('x')).toBe('user:x');
+  });
+});
+
+describe('special dependency ids resolve in the portal (#73)', () => {
+  /** A mod declaring `depends` on one of the three ambient ids. */
+  function dependingOn(depId: string, range: string): UserModRecord {
+    const r = record({ id: `needs-${depId}` });
+    (r.manifest as Record<string, unknown>).depends = { [depId]: range };
+    return r;
+  }
+
+  it.each([
+    ['tspml', TSPML_LOADER_VERSION],
+    ['tspml-api', TSPML_API_VERSION],
+  ])('a mod depending on %s at its exact version loads', async (depId, version) => {
+    const summary = await loadMods(fakeApi(), {
+      userMods: [dependingOn(depId, version)],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.failed).toEqual([]);
+    expect(summary.loaded).toContain(`needs-${depId}`);
+  });
+
+  it('the spec-recommended caret range resolves for both ids', async () => {
+    // This is the case #73 was filed about: the spec's own example is a caret
+    // range, and against the old 0.0.0 it failed as "not installed".
+    const summary = await loadMods(fakeApi(), {
+      userMods: [dependingOn('tspml', '^0.5.0'), dependingOn('tspml-api', '^0.5.0')],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.failed).toEqual([]);
+    expect(summary.loaded).toEqual(expect.arrayContaining(['needs-tspml', 'needs-tspml-api']));
+  });
+
+  it('still REFUSES a range the running version does not satisfy', async () => {
+    // Resolving the ids must not degrade into accepting everything — a mod
+    // written against a future API has to be told, not silently run. The
+    // portal reports this rather than throwing: the mod is not loaded, and
+    // the reason names the id and both versions.
+    const entered: string[] = [];
+    const summary = await loadMods(fakeApi(), {
+      userMods: [dependingOn('tspml-api', '^99.0.0')],
+      importUserMod: async () => ({
+        default: () => {
+          entered.push('ran');
+        },
+      }),
+    });
+    expect(summary.loaded).toEqual([]);
+    expect(entered).toEqual([]);
+    expect(summary.failed).toHaveLength(1);
+    expect(summary.failed[0]?.reason).toContain('tspml-api');
+    expect(summary.failed[0]?.reason).toContain('^99.0.0');
+    expect(summary.failed[0]?.reason).toContain(TSPML_API_VERSION);
+  });
+
+  it('the resolve context states all three ambient ids', () => {
+    expect(PORTAL_RESOLVE_CONTEXT.loaderVersion).toBe(TSPML_LOADER_VERSION);
+    expect(PORTAL_RESOLVE_CONTEXT.apiVersion).toBe(TSPML_API_VERSION);
+    expect(PORTAL_RESOLVE_CONTEXT.polytrackVersion).toBeTruthy();
+  });
+
+  it('page.tsx derives api.version from the shared constant, not a literal', () => {
+    // The drift #73 names has two halves, and only one is reachable by running
+    // loadMods: the resolve context is imported here, but what page.tsx hands
+    // mods on `api.version` is a module-scope constant this suite never
+    // executes (it is a 'use client' React page). Re-pointing it at a literal
+    // compiles, runs, and every behavioural test above stays green while mods
+    // read a version their `depends` range was never checked against. The
+    // failure mode is silence, so the check has to read the code.
+    const source = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+    const decl = /^const TSPML_VERSION = (.+);$/m.exec(source);
+    expect(decl, 'page.tsx must declare const TSPML_VERSION at module scope').not.toBeNull();
+    expect(decl?.[1]).toBe('TSPML_LOADER_VERSION');
   });
 });

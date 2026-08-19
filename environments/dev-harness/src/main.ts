@@ -13,14 +13,17 @@
 import { Audio, EventBus, Keybinds, Tracks } from "@tspml/api-bridge";
 import type { GameAudioManager, GameTrackCodec, GameTrackManager } from "@tspml/api-bridge";
 import type { TspmlApi } from "@tspml/api";
-import { readEarlyCaptures } from "@tspml/shared";
+import { readEarlyCaptures, TSPML_LOADER_VERSION } from "@tspml/shared";
 import { trackModApi } from "./tracking-api";
 import type { Subscribable } from "./tracking-api";
 // The dev mod, aliased to its SOURCE so edits hot-reload (see vite.config.ts).
 import initialFactory from "tspml:dev-mod";
 
 const GAME_VERSION = "0.6.2";
-const TSPML_VERSION = "0.0.0-dev";
+// The real loader version (#73), not a `-dev` string: a mod under the harness
+// should see the same version the portal reports, or a `depends` range that
+// resolves in one host silently fails in the other.
+const TSPML_VERSION = TSPML_LOADER_VERSION;
 
 type ModFactory = (api: TspmlApi) => unknown;
 type FrameWindow = Window & { __tspml?: unknown };
