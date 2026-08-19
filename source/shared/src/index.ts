@@ -8,6 +8,8 @@
  *    `@tspml/transform`.
  * 2. {@link EARLY_CAPTURE_STUB} — the pre-bridge shim a surface injects into the
  *    game's HTML, without which the codec capture is silently dropped.
+ * 3. {@link TSPML_LOADER_VERSION} / {@link TSPML_API_VERSION} — what TSPML reports
+ *    about itself when a mod declares `depends` on `tspml` / `tspml-api` (#73).
  *
  * What does NOT belong here: anything surface-specific. The portal's mappings
  * `{symbol}` resolution and sha256 hash-gate, the harness's Vite middleware, the
@@ -27,3 +29,4 @@ export {
   readEarlyCaptures,
 } from "./early-capture.js";
 export type { EarlyCaptures } from "./early-capture.js";
+export { TSPML_API_VERSION, TSPML_LOADER_VERSION } from "./versions.js";

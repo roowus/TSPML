@@ -5,7 +5,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent a
 import { Audio, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
 import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
 import type { TspmlApi } from '@tspml/api';
-import { readEarlyCaptures } from '@tspml/shared';
+import { readEarlyCaptures, TSPML_LOADER_VERSION } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
 import {
@@ -71,8 +71,12 @@ type SwState = 'idle' | 'registering' | 'active' | 'error';
 
 const GAME_VERSION = process.env.NEXT_PUBLIC_POLYTRACK_VERSION ?? '0.6.2';
 const GAME_FRAME_SRC = `/api/proxy/?version=${GAME_VERSION}`;
-/** TSPML loader version exposed on the `api` object. */
-const TSPML_VERSION = '0.0.0';
+/**
+ * TSPML loader version exposed on the `api` object. Same constant the resolve
+ * context states for the `tspml` special dep id (#73), so what a mod reads at
+ * runtime and what its `depends` range was checked against cannot disagree.
+ */
+const TSPML_VERSION = TSPML_LOADER_VERSION;
 
 // The stage/sidebar split. The width is persisted so a chosen layout survives
 // reloads; the clamp keeps both panes usable (the sidebar's content needs
