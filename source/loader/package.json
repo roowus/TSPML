@@ -1,6 +1,6 @@
 {
   "name": "@tspml/loader",
-  "version": "0.0.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Clean loader core. Discovers mod packages, parses mod.json, semver-resolves dependencies, topologically orders mods, and invokes entrypoints. Has no coupling to minified game internals.",

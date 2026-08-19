@@ -15,6 +15,7 @@ import type { TspmlApi } from '@tspml/api';
 import type { Mod, ModDescriptor, ResolveContext } from '@tspml/loader';
 import { classifySafety, load, modFromManifest, parseVersionManifest, resolveDependencies } from '@tspml/loader';
 import type { SafetyReport } from '@tspml/loader';
+import { TSPML_API_VERSION, TSPML_LOADER_VERSION } from '@tspml/shared';
 import type { UserModRecord } from './user-mods';
 import { importFromSource, USER_ENTRY_PREFIX, userEntrySpecifier, userModId } from './user-mods';
 import { mixinEnvironmentAppliesToHost, PORTAL_HOST_ENVIRONMENT } from './mixin-env';
@@ -65,12 +66,17 @@ export interface LoadModsOptions {
 /**
  * What the portal IS, stated once (#21): a web host running the pinned game
  * version. `NEXT_PUBLIC_POLYTRACK_VERSION` is inlined at build time in the
- * page too — reading it here keeps the two in lockstep. `tspml`/`tspml-api`
- * dep resolution stays version-less for now (#73: the packages report 0.x
- * placeholders, so pinning them would reject honest `depends` ranges).
+ * page too — reading it here keeps the two in lockstep.
+ *
+ * All three special dependency ids now resolve (#73). `tspml` and `tspml-api`
+ * come from `@tspml/shared` rather than being written here, because the page
+ * also hands `TSPML_VERSION` to mods on the api object — two literals that
+ * must agree is the drift #73 was filed about.
  */
 export const PORTAL_RESOLVE_CONTEXT: ResolveContext = {
+  apiVersion: TSPML_API_VERSION,
   hostEnvironment: PORTAL_HOST_ENVIRONMENT,
+  loaderVersion: TSPML_LOADER_VERSION,
   polytrackVersion: process.env.NEXT_PUBLIC_POLYTRACK_VERSION ?? '0.6.2',
 };
 
