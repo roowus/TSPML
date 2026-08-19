@@ -1,6 +1,6 @@
 # Injection & delivery
 
-> **Locked decision:** the flagship is a **Vercel-hosted portal website** (like `web.polymodloader.com`) that plays the modded game, using a **CORS proxy + origin handling** to load the real game. The browser extension and userscript are **secondary** resilient fallbacks.
+> **Locked decision:** the flagship is a **Vercel-hosted portal website** that plays the modded game in the browser, using a **CORS proxy + origin handling** to load the real game. The browser extension and userscript are **secondary** resilient fallbacks.
 
 ## The hard problem (CSP + CORS)
 
@@ -33,7 +33,7 @@ So the portal works **only** via a **service worker + server-side proxy** that f
 ```
 
 - The **service worker** is registered on the portal origin; it intercepts the game's own `kodub.com` fetches and routes them through `/api/proxy`, so the transformed game "thinks" it's talking to Kodub while all traffic is proxied and origin-corrected.
-- **`/api/proxy`** (Vercel function) fetches server-side and forwards `Origin`/`Referer` to the official desktop origin (`app-polytrack-desktop.kodub.com`) for the leaderboard/multiplayer endpoints — the same trick PML's Electron uses, done server-side. This is the "figure out the origin" piece and an acknowledged **ToS gray area** (see [safety-and-fairness.md](./safety-and-fairness.md)).
+- **`/api/proxy`** (Vercel function) fetches server-side and forwards `Origin`/`Referer` to the official desktop origin (`app-polytrack-desktop.kodub.com`) for the leaderboard/multiplayer endpoints. Those endpoints accept requests from the game's own desktop client, so a browser-hosted copy has to present the origin they expect. This is the "figure out the origin" piece and an acknowledged **ToS gray area** (see [safety-and-fairness.md](./safety-and-fairness.md)).
 - **No game bundle is ever committed to the repo** — everything is fetched live (or cached) through the proxy.
 
 ## Secondary paths (resilient fallback)

@@ -1,6 +1,11 @@
 # Progress
 
 > Running changelog. Update at each milestone.
+>
+> Entries are **append-only and dated**: each one records what was true and what was
+> believed on that day, including framing and comparisons that later work moved away
+> from. They are not edited afterwards. For how TSPML is described today, read the
+> [README](../../README.md) and [docs/README.md](../README.md) instead.
 
 ## 2026-07-30 — M0: Reset & docs-first foundation ✅
 

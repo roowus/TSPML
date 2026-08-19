@@ -1,14 +1,8 @@
 # TSPML — The Skibiti PolyModLoader
 
-A versatile-yet-simple mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game. Mods are written against a stable API and declarative mixins instead of the minified game bundle, so they keep working (or degrade safely to vanilla) when the game updates. [PolyModLoader](https://polymodloader.com/) pioneered PolyTrack modding; TSPML makes different trade-offs.
+A mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the online 3D racing game. Write a mod, paste it into the portal, and play the game with it running.
 
-**What's actually different:** mods target **stable names**, not the minified bundle, and a
-`bundleHash` gate **fails closed** — when the game updates, every surface degrades to vanilla
-rather than silently patching the wrong code. That failure mode is the point. PML is a capable,
-actively-maintained loader with users, mods, and mobile support, and it is **ahead of us on
-physics** ([#43](https://github.com/roowus/TSPML/issues/43)). An honest comparison, verified
-against their source at `v0.6.2-2`, is in
-[`docs/research/pml-api-and-moat-reassessment.md`](./docs/research/pml-api-and-moat-reassessment.md).
+Mods are written against a stable API and declarative mixins rather than against the minified game bundle. A mod refers to `Car` and `Car.controlCar`, not to whatever one-letter name the minifier picked this week. Those stable names are resolved through a per-build mappings file that is pinned to a bundle hash, so when PolyTrack updates one of two things happens: the mappings still match and mods keep working, or they do not match and every affected surface degrades to vanilla. There is no third case where a mod quietly patches the wrong function. That failure mode is the whole design.
 
 > **Status: live.** The portal at [tspml.vercel.app](https://tspml.vercel.app) plays a transformed, modded PolyTrack end to end; docs at [tspml-docs.vercel.app](https://tspml-docs.vercel.app).
 >
@@ -62,7 +56,7 @@ See [`docs/design/architecture.md`](./docs/design/architecture.md).
 - **Delivery:** a Vercel-hosted portal website that plays the modded game via a CORS proxy + service worker; browser extension as the resilient fallback (for online features blocked by `vps.kodub.com`'s bot protection).
 - **Fairness:** warn-only (`classifySafety` classifies + surfaces risks; never hard-blocks).
 - **Language:** TypeScript + a publishable `@tspml/api` types package.
-- **PML compat:** narrow importer (skins/audio/blocks) — no mixin emulator.
+- **Importing mods from other loaders:** a narrow importer covering skins, audio, and blocks. Mixins are not emulated.
 
 See [`docs/project/decision-log.md`](./docs/project/decision-log.md) (ADR-001 through ADR-013).
 

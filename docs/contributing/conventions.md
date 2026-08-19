@@ -25,7 +25,7 @@
 ## Never commit
 
 - The PolyTrack game bundle, WASM, or deobfuscated source (legal posture — ship only our code + mappings metadata).
-- Build output (`dist/`, compiled JS/`.d.ts`), `node_modules`, `.vercel`, secrets. (Build artifacts are gitignored — no CI-bot-committed compiled output, unlike PML.)
+- Build output (`dist/`, compiled JS/`.d.ts`), `node_modules`, `.vercel`, secrets. Build artifacts are gitignored; nothing commits compiled output back into the repo.
 
 ## Commits
 
@@ -55,8 +55,7 @@
   shell invocations). Root cause: TSPML's legitimate vocabulary — *inject into the
   minified bundle*, *hook `setCarState`*, *patch plan*, *service worker intercepts
   requests*, *bypass the version gate* — pattern-matches exploit development out of
-  context, even though it is standard game-modding terminology (same domain as
-  Fabric/Forge). Handling: a flagged **message** is transient (nothing rolled back —
+  context, even though it is standard game-modding terminology. Handling: a flagged **message** is transient (nothing rolled back —
   re-verify in-flight edits and continue); a blocked **command** should be retried
   once as-is, then rewritten in a simpler form (e.g. `pnpm --filter <pkg> exec …`
   instead of `cd <dir> && ENV=1 pnpm …`). Neither is a verdict on the work. Tracked

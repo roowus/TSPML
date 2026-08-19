@@ -42,15 +42,15 @@ There is **no** runtime `api.mixin.before(...)` on `TspmlApi` today. A future ru
 
 ## Operations (transform-time)
 
-| `op` | Fabric analog | Behavior |
-|---|---|---|
-| `before` | `@Inject` HEAD | inject statement source at the head of the method/factory body |
-| `after` | `@Inject` RETURN | inject before each return (or at end if none) |
-| `around` | wrap | rebind original body to `proceed` (default name); inject becomes the new body |
-| `replace` | `@Overwrite` | overwrite the body — **last resort, single-winner** |
-| `modifyArg` | `@ModifyArg` | replace arg `index` of calls to `callee` inside the target |
-| `modifyReturn` | — | wrap each returned value: `return (wrap)(X)` |
-| `modifyConstant` | `@ModifyConstant` | replace an `ObjectProperty` value selected by key |
+| `op` | Behavior |
+|---|---|
+| `before` | inject statement source at the head of the method/factory body |
+| `after` | inject before each return (or at end if none) |
+| `around` | rebind original body to `proceed` (default name); inject becomes the new body |
+| `replace` | overwrite the body — **last resort, single-winner** |
+| `modifyArg` | replace arg `index` of calls to `callee` inside the target |
+| `modifyReturn` | wrap each returned value: `return (wrap)(X)` |
+| `modifyConstant` | replace an `ObjectProperty` value selected by key |
 
 Payloads are **JS source strings** (`inject` / `wrap` / `replaceWith`), parsed by Babel and inserted into the AST.
 

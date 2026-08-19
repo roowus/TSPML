@@ -1,6 +1,6 @@
 # Events & registries (Tier 1)
 
-> The stable API surface most mods use — an `EventEmitter` + namespaced registries wired by the loader-owned bridge. Status: **the typed event bus is implemented** (`@tspml/api` types + `@tspml/api-bridge` `EventBus`, M4 slice 1) with **per-listener error isolation** (a throwing listener is caught + logged, never blocking siblings or the game — a direct PML fix) and unsubscribe-returning `on`/`once`. Signatures below finalize as the bridge wires each event to a real game function. Grounded in real deobfuscated symbols (see [deobfuscated-bundles.md](../research/deobfuscated-bundles.md)).
+> The stable API surface most mods use — an `EventEmitter` + namespaced registries wired by the loader-owned bridge. Status: **the typed event bus is implemented** (`@tspml/api` types + `@tspml/api-bridge` `EventBus`, M4 slice 1) with **per-listener error isolation** (a throwing listener is caught and logged; it never blocks sibling listeners or the game) and unsubscribe-returning `on`/`once`. Signatures below finalize as the bridge wires each event to a real game function. Grounded in real deobfuscated symbols (see [deobfuscated-bundles.md](../research/deobfuscated-bundles.md)).
 
 ## Lifecycle (on the `api` object)
 
@@ -8,7 +8,7 @@
 api.events.on('loader.preInit',  (api) => {});   // before any game code; only place for global hooks
 api.events.on('loader.init',     (api) => {});
 api.events.on('loader.ready',    () => {});       // main menu visible
-api.events.on('loader.onUnload', () => {});       // cleanup (fixes PML's missing-cleanup bug)
+api.events.on('loader.onUnload', () => {});       // cleanup — release anything you attached
 ```
 
 ### Cleanup: how a mod actually unloads
@@ -104,7 +104,7 @@ api.events.on('network.connect',    () => {});
 api.events.on('network.disconnect', () => {});
 ```
 
-`on/off` rebuild an array-backed invoker (Fabric `ArrayBackedEvent`) — lock-free, hot-path fast.
+`on/off` rebuild an array-backed invoker, so dispatch walks a plain array with no allocation or locking on the hot path.
 
 ### Per-car race events (#10)
 
@@ -148,7 +148,7 @@ Because `carId` is the same id `car.created` and `car.control` report, you can s
 correlate across events if you need per-car state — but you no longer *have to* in
 order to answer "was that me?".
 
-## Registries (Fabric Registry analog)
+## Registries
 
 ```ts
 api.blocks.registerCategory(id, defaultId);
@@ -170,7 +170,7 @@ api.ui.addWidget(id, { render, mount, unmount });
 api.keybinds.register(name, id, defaultBind, cb);
 api.settings.registerCategory(name);
 api.settings.register(name, id, type, defaultOption, options?); // type: 'boolean' | 'slider' | 'custom'
-api.settings.getSetting(id);                   // returns TYPED value (fixes PML's always-string wart)
+api.settings.getSetting(id);                   // returns a TYPED value, not a string to parse
 ```
 
 > **Viability in PolyTrack 0.6.2 (discovered M4-G):** the game's content catalogs
@@ -187,7 +187,7 @@ api.settings.getSetting(id);                   // returns TYPED value (fixes PML
 >   [hook-system.md](../design/hook-system.md).
 >
 > The **mixin system (M5, Tier 2)** is the escape hatch for content/behavior the
-> registries can't reach. See [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
+> registries can't reach. See [mixin-reference.md](./mixin-reference.md).
 
 ### `api.tracks` — custom tracks (implemented)
 

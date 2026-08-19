@@ -1,7 +1,7 @@
 # @tspml/loader
 
 Clean loader core for TSPML (milestone M1). Discovers mod packages, parses and
-validates `mod.json` / `manifest.json`, semver-resolves the Fabric-style
+validates `mod.json` / `manifest.json`, semver-resolves the declared
 dependency graph (`depends` / `recommends` / `suggests` / `conflicts` / `breaks`
 / `includes` / `provides`), topologically orders mods with cycle detection and
 explicit conflict reporting, and invokes entrypoints (`default(api, game)`) in

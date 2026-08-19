@@ -157,9 +157,10 @@ Convenience scripts (`package.json`): `pnpm fetch 0.7.0`, `pnpm gen`, `pnpm diff
 
 ## `wasm-locate.mjs` — structural location inside the physics WASM (#43 spike)
 
-Not part of the five-stage pipeline; it answers a separate question. PML patches
-`polytrack_physics.wasm` by **raw byte offset**, whose failure mode is the bad one — a
-stale offset doesn't miss, it writes a float into whatever now lives at that address.
+Not part of the five-stage pipeline; it answers a separate question. The obvious way to
+patch `polytrack_physics.wasm` is by **raw byte offset**, and that has the worst possible
+failure mode — a stale offset doesn't miss, it writes a float into whatever now lives at
+that address.
 
 `src/wasm-locate.mjs` tests whether a constant can be located **structurally**
 instead, by fingerprinting the function that contains it (sorted multiset of float
@@ -280,6 +281,5 @@ bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are loc
 
 The PolyTrack bundle is proprietary. `fetch` downloads the user's own live game copy
 into the **gitignored** `.cache/` for offline analysis; **the bundle is never
-committed** — only mapping metadata (the JSON map) ships, mirroring how Minecraft
-mapping projects (Yarn/Mojang) distribute mapping data, not the game. `.cache/` is in
+committed** — only mapping metadata (the JSON map) ships, never game code. `.cache/` is in
 `.gitignore`; verify this before any commit.

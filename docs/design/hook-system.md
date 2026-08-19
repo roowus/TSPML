@@ -1,12 +1,12 @@
 # Hook system
 
-> Two tiers, exactly mirroring Fabric's "events for everyone, mixins for power users" split.
+> Two tiers: events for everyone, mixins for power users.
 
 ## Tier 1 — event bus + registries (preferred; ~90% of mods)
 
-A stable `EventEmitter` wired by the loader-owned API bridge to real game functions. Mods do `api.events.on('physics.postStep', cb)` and never see minified code. Registration/unregistration rebuilds an array-backed invoker (Fabric's `ArrayBackedEvent`) so dispatch is lock-free and hot-path fast.
+A stable `EventEmitter` wired by the loader-owned API bridge to real game functions. Mods do `api.events.on('physics.postStep', cb)` and never see minified code. Registration and unregistration rebuild an array-backed invoker, so dispatch walks a plain array with no allocation or locking on the hot path.
 
-**Lifecycle:** `loader.preInit(api)` (before any game code; only place for global hooks), `loader.init(api)`, `loader.ready()` (main menu visible), `loader.onUnload()` (cleanup — fixes PML's missing-cleanup bug), `worker.init(api)`/`worker.message` (worker-context mods).
+**Lifecycle:** `loader.preInit(api)` (before any game code; only place for global hooks), `loader.init(api)`, `loader.ready()` (main menu visible), `loader.onUnload()` (cleanup), `worker.init(api)`/`worker.message` (worker-context mods).
 
 **Cleanup is implemented** (#17) — `LoadResult.unload()` disposes every loaded mod in **reverse** load order, isolated per mod, idempotent, and awaited. A class-form mod implements `onUnload(api)`; a factory-form mod returns a disposer. Note the split: the loader *calls* mod cleanup, but does not *emit* `loader.onUnload` — the mod-facing `TspmlApi.events` is typed `TspmlEventSubscriber` (`on`/`once`/`off`, no `emit`), so emitting is the host's job. That was prose-only until [#18](https://github.com/roowus/TSPML/issues/18): hosts handed mods the concrete emit-capable `EventBus` through `as unknown as ModApi`, and the double cast meant nothing checked it. The subscriber type is what makes the split real — a mod that calls `api.events.emit` now fails to compile. The portal does that job in `lib/teardown.ts`, on React unmount **and** `pagehide`, emitting `loader.onUnload` *before* anything is torn down so a handler still has a live bridge to release against; the portal smoke asserts a real page teardown actually runs a real mod's disposer. See [events-and-registries.md](../api/events-and-registries.md#cleanup-how-a-mod-actually-unloads).
 
@@ -17,7 +17,7 @@ A stable `EventEmitter` wired by the loader-owned API bridge to real game functi
 - `car.created` / `car.stateUpdate` / `car.styleChanged`
 - `checkpoint.passed` / `checkpoint.respawn` — **per-car**, payload `{ index, carId, isReplay }` (`respawn` fires once per reset press, at the checkpoint respawned **at** — [#64](https://github.com/roowus/TSPML/issues/64))
 - `race.started` / `race.finished` — **per-car**, payload `{ carId, isReplay }` / `{ frames, carId, isReplay }`
-- `input.keyDown` / `input.keyUp` (clean stream, self-gated — replaces PML's fires-on-every-match keybind surface)
+- `input.keyDown` / `input.keyUp` (a clean, self-gated stream: one event per physical key transition, not one per matching binding)
 - `ui.render`
 - `network.message` / `network.connect` / `network.disconnect` (capability-gated)
 
@@ -39,15 +39,15 @@ can produce a ghost (a ghost needs a saved record; smokes launch a fresh profile
 player-vs-ghost distinction is proven by running the real transform over a synthetic
 two-car bundle in `source/shared/tests/per-car-events.test.ts`.
 
-**Registries (Fabric Registry analog; stable, versioned):**
-- `api.blocks` — custom track pieces (supersedes `pmlapi.editorExtras`; grounded in `PartObject`/`trackParts`)
+**Registries (stable, versioned):**
+- `api.blocks` — custom track pieces (grounded in `PartObject`/`trackParts`)
 - `api.cars` — car skins/styles (`getCarStyle`/`setCarStyle`/`carColors`/`VisualCar`)
 - `api.audio` — `register({key,url})` / `unregister(key)` / `list()`: override any of the
   game's clips by URL, or add new ones (**implemented**, [#11](https://github.com/roowus/TSPML/issues/11);
-  supersedes `pmlapi.soundManager`; see *instance capture* below)
+  see *instance capture* below)
 - `api.tracks` — register custom tracks by import code (**implemented**, [#12](https://github.com/roowus/TSPML/issues/12); see *instance capture* below)
 - `api.ui` — HUD widgets/panels
-- `api.keybinds` / `api.settings` — where `getSetting` returns **typed** values (fixes PML's always-string wart)
+- `api.keybinds` / `api.settings` — where `getSetting` returns a **typed** value, so a numeric setting arrives as a number rather than a string you have to parse
 
 ### Instance capture — reaching past the bootstrap wall
 
@@ -143,24 +143,24 @@ track store's late-running constructor — so it needed no stub slot.
 
 ## Tier 2 — mixin surgery (escape hatch)
 
-Declarative function surgery against **stable names**. Operations (most → least surgical — Fabric's guiding rule):
+Declarative function surgery against **stable names**. Reach for the least invasive operation that does the job: the smaller the edit, the more likely it survives a game update and coexists with other mods.
 
-| Op | Fabric analog | Behavior |
-|---|---|---|
-| `before(target, handler)` | `@Inject` HEAD | run before; `handler(args)` |
-| `after(target, handler)` | `@Inject` RETURN | run after; `handler(args, result)` |
-| `around(target, handler)` | wrap | `handler(args, proceed)` → full control, can short-circuit |
-| `modifyArg(target, callsite, i, fn)` | `@ModifyArg` | change one argument of an internal call (AST locator) |
-| `modifyReturn(target, fn)` | — | transform return value |
-| `replace(target, handler)` | `@Overwrite` | full overwrite; **last resort, single-winner** |
+| Op | Behavior |
+|---|---|
+| `before(target, handler)` | run before; `handler(args)` |
+| `after(target, handler)` | run after; `handler(args, result)` |
+| `around(target, handler)` | `handler(args, proceed)` → full control, can short-circuit |
+| `modifyArg(target, callsite, i, fn)` | change one argument of an internal call (AST locator) |
+| `modifyReturn(target, fn)` | transform return value |
+| `replace(target, handler)` | full overwrite; **last resort, single-winner** |
 
 A `target` is a stable path resolved through the mappings file, e.g. `{ symbol: "Car.controlCar", point: "HEAD" }` or `{ symbol: "Car.update", invoke: "Car.applyPhysics" }` for an INVOKE site.
 
-## Conflict policy (mirrors Fabric explicitly)
+## Conflict policy
 
 - `before` / `after` / `around` / `modifyArg` / `modifyReturn` **chain** across mods (ordered by declared priority).
-- `replace` is **single-winner** — two mods replacing the same target produce a **load-time CONFLICT ERROR** (never a silent override, never PML's ambiguous-first-match).
-- **`around` semantics (review correction):** defined as **nesting by priority** — `proceed()` invokes the next wrapper in the chain or the original; short-circuit propagation is documented. A short-circuitable `around` is more permissive than Fabric's single-winner redirects, so mods that may short-circuit should declare it (`may-short-circuit`) so others can detect incompatibility at load.
+- `replace` is **single-winner** — two mods replacing the same target produce a **load-time CONFLICT ERROR**. Never a silent override, and never a first-one-wins race decided by load order.
+- **`around` semantics (review correction):** defined as **nesting by priority** — `proceed()` invokes the next wrapper in the chain or the original; short-circuit propagation is documented. Because an `around` that short-circuits can suppress every wrapper beneath it, mods that may do so should declare `may-short-circuit` and others can detect the incompatibility at load.
 
 ## Physics model — execute INSIDE the worker (review correction)
 
