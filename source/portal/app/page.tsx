@@ -26,9 +26,12 @@ import type { ShareBuildResult, ShareParseResult } from '@/lib/mod-share';
 import { Icon } from './icons';
 import {
   buildUserPatchPlan,
+  CHUNK_REPORT_EVENT,
+  modAppliedOn,
   PLAN_CACHE,
   planFingerprint,
   REPORT_GLOBAL,
+  surfaceReports,
   USER_PATCH_LIMITS,
 } from '@/lib/user-patches';
 import type { UserMixinReport } from '@/lib/user-patches';
@@ -148,6 +151,19 @@ function isMixinReport(v: unknown): v is UserMixinReport {
     (v as { v?: unknown }).v === 1 &&
     Array.isArray((v as { mods?: unknown }).mods)
   );
+}
+
+/**
+ * Snapshot the frame's report for React state (#98).
+ *
+ * The chunk prelude MUTATES the live object in place (`m.chunks[file] = r`), so the
+ * global's identity never changes when a chunk lands. Handing that same reference back
+ * to `setMixinReport` would be a no-op re-render and the chunk's rows would never
+ * appear. Copying one level down — the object plus its `chunks` map — is exactly enough
+ * to make both the report and the map new to React.
+ */
+function snapshotMixinReport(r: UserMixinReport): UserMixinReport {
+  return r.chunks ? { ...r, chunks: { ...r.chunks } } : { ...r };
 }
 
 /**
@@ -300,6 +316,11 @@ export default function PlayPage(): ReactElement {
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
   const modsLoadedRef = useRef(false);
+  // #98: detaches the previous frame's chunk-report listener. handleFrameLoad runs
+  // on EVERY load and each one is a new window, so without this an in-place game
+  // reload would leave a listener bound to a dead document (harmless) and, worse,
+  // stack a fresh one every reload.
+  const chunkReportOffRef = useRef<(() => void) | null>(null);
   // The api handed to mods, kept so add/remove/toggle can RELOAD the mod set
   // after the initial frame load. Null until the frame loads.
   const apiRef = useRef<PortalApi | null>(null);
@@ -720,7 +741,7 @@ export default function PlayPage(): ReactElement {
     // rather than showing stale/no rows.
     const rawReport = w[REPORT_GLOBAL];
     if (isMixinReport(rawReport)) {
-      setMixinReport(rawReport);
+      setMixinReport(snapshotMixinReport(rawReport));
       setMixinNotice(null);
       const applied = rawReport.mods.reduce((n, m) => n + m.applied, 0);
       const declared = rawReport.mods.reduce((n, m) => n + m.declared, 0);
@@ -734,6 +755,23 @@ export default function PlayPage(): ReactElement {
         log('user mixins NOT applied — bundle served without the patch plan');
       }
     }
+    // #98: a lazily-loaded chunk is transformed too, but it executes whenever the
+    // game happens to need it — opening the editor, minutes after this handler ran.
+    // Its prelude merges itself into the same global and fires CHUNK_REPORT_EVENT;
+    // re-reading the (mutated) global on that signal is what carries the chunk's rows
+    // into the UI. Reading the global rather than the event's `detail` keeps ONE
+    // source of truth: whatever the frame actually holds, including any chunk that
+    // landed between two events.
+    chunkReportOffRef.current?.();
+    const onChunkReport = (): void => {
+      const merged = w[REPORT_GLOBAL];
+      if (!isMixinReport(merged)) return;
+      setMixinReport(snapshotMixinReport(merged));
+      setMixinNotice(null);
+    };
+    w.addEventListener(CHUNK_REPORT_EVENT, onChunkReport);
+    chunkReportOffRef.current = () => w.removeEventListener(CHUNK_REPORT_EVENT, onChunkReport);
+
     servedFingerprintRef.current = parkedFingerprintRef.current;
     setNeedsRestart(false);
     // #67: handleFrameLoad runs on EVERY iframe load, and each load can mean a
@@ -985,6 +1023,8 @@ export default function PlayPage(): ReactElement {
     window.addEventListener('pagehide', run);
     return () => {
       window.removeEventListener('pagehide', run);
+      chunkReportOffRef.current?.();
+      chunkReportOffRef.current = null;
       run();
     };
   }, [bus, tracks, audio]);
@@ -1642,34 +1682,67 @@ export default function PlayPage(): ReactElement {
               ) : null}
               {mixinReport && mixinReport.mods.length > 0 ? (
                 <>
-                  {mixinReport.planStatus !== 'applied' ? (
-                    <p className="warn">
-                      <Icon name="warn" /> plan {mixinReport.planStatus} — no user mixin was applied.
-                    </p>
-                  ) : null}
-                  <ul className="rows">
-                    {mixinReport.mods.map((m) => (
-                      <li key={m.modId}>
-                        <div className="row-head">
-                          <code>{m.modId}</code>
-                          <span
-                            className="status-pill"
-                            style={{
-                              color:
-                                m.applied === m.declared ? 'var(--green)' : m.applied > 0 ? 'var(--amber)' : 'var(--red)',
-                            }}
-                          >
-                            {m.applied}/{m.declared} applied
-                          </span>
-                        </div>
-                        {m.failed.map((f, i) => (
-                          <div key={i} className="meta">
-                            <Icon name="error" /> {f.reason}: {f.detail.slice(0, 96)}
-                          </div>
-                        ))}
-                      </li>
-                    ))}
-                  </ul>
+                  {/* #98: one block PER SERVED FILE (main, then each lazily-loaded
+                      chunk that has landed so far). Chunk blocks appear mid-session,
+                      when the game first loads that chunk. The heading is shown only
+                      once a chunk exists — with main alone the layout is the pre-#98
+                      one, so nothing new is asked of the common case. */}
+                  {surfaceReports(mixinReport).map((s, si, all) => (
+                    <div key={s.file}>
+                      {all.length > 1 ? (
+                        <p className="meta">
+                          <code>{s.file}</code>
+                          {si === 0 ? ' (main bundle)' : ' (loaded on demand)'}
+                        </p>
+                      ) : null}
+                      {s.report.planStatus !== 'applied' ? (
+                        <p className="warn">
+                          <Icon name="warn" /> plan {s.report.planStatus} — no user mixin was applied.
+                        </p>
+                      ) : null}
+                      <ul className="rows">
+                        {s.report.mods.map((m) => {
+                          // A mixin anchored inside a chunk is attempted on EVERY
+                          // surface, so 0/1 here while it applied elsewhere is the
+                          // expected reading, not a failure. Say where it did land
+                          // instead of leaving a red pill to be misread.
+                          const elsewhere =
+                            m.applied === 0 ? modAppliedOn(all, m.modId, s.file) : [];
+                          return (
+                            <li key={m.modId}>
+                              <div className="row-head">
+                                <code>{m.modId}</code>
+                                <span
+                                  className="status-pill"
+                                  style={{
+                                    color:
+                                      m.applied === m.declared
+                                        ? 'var(--green)'
+                                        : m.applied > 0
+                                          ? 'var(--amber)'
+                                          : elsewhere.length > 0
+                                            ? 'var(--muted)'
+                                            : 'var(--red)',
+                                  }}
+                                >
+                                  {m.applied}/{m.declared} applied
+                                </span>
+                              </div>
+                              {elsewhere.length > 0 ? (
+                                <div className="meta">applied on {elsewhere.join(', ')}</div>
+                              ) : (
+                                m.failed.map((f, i) => (
+                                  <div key={i} className="meta">
+                                    <Icon name="error" /> {f.reason}: {f.detail.slice(0, 96)}
+                                  </div>
+                                ))
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
                 </>
               ) : null}
             </section>

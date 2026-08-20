@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server';
 import { EARLY_CAPTURE_SCRIPT_TAG } from '@tspml/shared';
 
 import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
-import { applyDemoTransform } from '@/lib/demo-transform';
+import { applyDemoTransform, surfaceForPath } from '@/lib/demo-transform';
+import type { TransformSurface } from '@/lib/transform-surface';
 import { getBaseTransformedBundle } from '@/lib/bundle-cache';
 import { parseUserPatchPlan, reportPrelude, USER_PATCH_LIMITS } from '@/lib/user-patches';
 import type { UserMixinReport, UserPatchSet } from '@/lib/user-patches';
@@ -112,13 +113,20 @@ function corsHeaders(request: NextRequest, headers: Headers): void {
   }
 }
 
-/** True when the proxy should serve a *transformed* main.bundle.js (demo mode). */
-function shouldTransform(host: string, segments: string[]): boolean {
-  return (
-    !!process.env.TSPML_TRANSFORM &&
-    host === DEFAULT_GAME_HOST &&
-    segments.join('/') === 'main.bundle.js'
-  );
+/**
+ * The transform surface for this request, or null to proxy verbatim (#98).
+ *
+ * "Transformable" was one hardcoded filename until #98; it is now main.bundle.js PLUS
+ * the chunk ids the map declares, because the game lazy-loads real feature code as
+ * `<id>.bundle.js` and nothing inside one could otherwise be patched. The allowlist
+ * and the per-chunk pin are map DATA — see lib/transform-surface.ts.
+ *
+ * Still env-gated: with TSPML_TRANSFORM unset, nothing is a surface and every path
+ * takes the verbatim proxy route exactly as before.
+ */
+function transformSurface(host: string, segments: string[]): TransformSurface | null {
+  if (!process.env.TSPML_TRANSFORM) return null;
+  return surfaceForPath(host === DEFAULT_GAME_HOST, segments);
 }
 
 /** The POST path's parsed plan (#62): `sets` to compose into the transform
@@ -161,13 +169,15 @@ async function proxyGet(
   reqHeaders.set('origin', DESKTOP_ORIGIN);
   reqHeaders.set('referer', DESKTOP_ORIGIN + '/');
 
+  const surface = transformSurface(host, segments);
+
   // ── Demo transform mode, plain-GET path: memoized ──────────────────────────
   // The base transform is deterministic per upstream bundle (no user data), so
   // a warm instance serves it from the in-process memo instead of re-fetching
   // 1.8 MB from Kodub and re-running the babel pass (~7s → ~0.1s). The POST
   // path below stays per-request: it embeds this user's report (#62).
-  if (shouldTransform(host, segments) && user === null) {
-    const r = await getBaseTransformedBundle(upstream, reqHeaders);
+  if (surface !== null && user === null) {
+    const r = await getBaseTransformedBundle(upstream, reqHeaders, surface);
     const h = new Headers();
     corsHeaders(request, h);
     if (!r.ok) {
@@ -188,6 +198,10 @@ async function proxyGet(
     h.set('x-tspml-transformed', bundle.transformed ? '1' : '0');
     h.set('x-tspml-vanilla-hash', bundle.vanillaHash);
     h.set('x-tspml-bundle-cache', r.cacheHit ? 'hit' : 'miss');
+    // Which surface answered (#98). Without it a chunk served vanilla by a stale pin
+    // is indistinguishable from one that was never a surface at all — and both look
+    // like an ordinary proxied file from outside.
+    h.set('x-tspml-surface', surface.kind === 'main' ? 'main' : `chunk:${surface.chunkId}`);
     if (bundle.detail) h.set('x-tspml-detail', bundle.detail.slice(0, 200));
     return new NextResponse(bundle.body, { status: bundle.status, headers: h });
   }
@@ -210,21 +224,27 @@ async function proxyGet(
   // bundle as the `window.__tspmlUserMixins` prelude. Never memoized — the
   // response is per-request (it embeds this user's report; see lib/bundle-cache
   // for the boundary).
-  if (shouldTransform(host, segments) && user !== null) {
+  if (surface !== null && user !== null) {
     const src = await upstreamRes.text();
     const { code, transformed, detail, vanillaHash, userReport } = await applyDemoTransform(
       src,
       user.sets,
+      surface,
     );
     // A refused plan (bad shape / oversized body) still gets an honest prelude:
     // plan-level status, no per-mod rows (the mods were never parsed out).
-    const report: UserMixinReport | null =
+    const base: UserMixinReport | null =
       user.degradedStatus !== null
         ? { v: 1, planStatus: user.degradedStatus, mods: [] }
         : userReport;
+    // Which file the rows describe (#98) — this also selects the prelude SHAPE: a
+    // chunk merges itself into the main report instead of replacing it.
+    const report: UserMixinReport | null =
+      base === null ? null : { ...base, surface: surface.file };
     const body = report ? `${reportPrelude(report)}${code}` : code;
     const h = new Headers();
     h.set('content-type', 'text/javascript; charset=utf-8');
+    h.set('x-tspml-surface', surface.kind === 'main' ? 'main' : `chunk:${surface.chunkId}`);
     // A POST-carried plan makes the response per-request (it embeds this
     // user's report) — no-store, never shared. (The plain GET is served by the
     // memoized branch above.)
@@ -304,12 +324,13 @@ export async function GET(
 }
 
 /**
- * POST /api/proxy/main.bundle.js (#62): the SW replays the game's bundle GET as
- * a POST whose body is the user patch plan (see lib/user-patches.ts). The plan
- * is parsed FAIL-SOFT — this response is the `<script>` the game executes, so a
- * bad plan must degrade to the base transform (with an honest prelude report),
- * never 4xx and break the boot. Only the bundle-in-transform-mode path accepts
- * POST at all; anything else is 405 (the SW never POSTs elsewhere).
+ * POST /api/proxy/main.bundle.js (or an allowlisted `<id>.bundle.js`, #98): the SW
+ * replays the game's bundle GET as a POST whose body is the user patch plan (see
+ * lib/user-patches.ts). The plan is parsed FAIL-SOFT — this response is the
+ * `<script>` the game executes, so a bad plan must degrade to the base transform
+ * (with an honest prelude report), never 4xx and break the boot. Only a
+ * transform-surface path accepts POST at all; anything else is 405 (the SW never
+ * POSTs elsewhere).
  */
 export async function POST(
   request: NextRequest,
@@ -318,7 +339,7 @@ export async function POST(
   const { path } = await ctx.params;
   const segments = (path ?? []).filter(Boolean);
   const host = request.nextUrl.searchParams.get('host') ?? DEFAULT_GAME_HOST;
-  if (!shouldTransform(host, segments)) {
+  if (transformSurface(host, segments) === null) {
     const headers = new Headers();
     headers.set('allow', 'GET, OPTIONS');
     corsHeaders(request, headers);

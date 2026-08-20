@@ -6,9 +6,13 @@ import { describe, expect, it } from 'vitest';
 import type { UserModRecord } from '../lib/user-mods.js';
 import {
   buildUserPatchPlan,
+  CHUNK_REPORT_EVENT,
+  modAppliedOn,
   parseUserPatchPlan,
   planFingerprint,
+  REPORT_GLOBAL,
   reportPrelude,
+  surfaceReports,
   USER_PATCH_LIMITS,
 } from '../lib/user-patches.js';
 import type { UserMixinReport, UserPatchPlan } from '../lib/user-patches.js';
@@ -158,5 +162,159 @@ describe('reportPrelude', () => {
     // And it parses back to the same report when evaluated as JS.
     const json = prelude.slice(prelude.indexOf('=') + 1, prelude.lastIndexOf(';'));
     expect(JSON.parse(json)).toEqual(report);
+  });
+
+  it('treats an explicit main surface exactly like an absent one', () => {
+    const report: UserMixinReport = { v: 1, planStatus: 'applied', mods: [], surface: 'main.bundle.js' };
+    expect(reportPrelude(report).startsWith(';window.__tspmlUserMixins=')).toBe(true);
+  });
+});
+
+/**
+ * The CHUNK prelude (#98) is RUN, not string-matched.
+ *
+ * It is the one piece of this feature that ships as generated source executed inside
+ * the game frame, and every property that matters is a runtime one: does it merge or
+ * clobber, does it fire, does it survive arriving first. A `toContain` on the emitted
+ * text would pass on code that throws the moment the game evaluates it — and a throw
+ * there lands inside the game's own script, not ours.
+ */
+function runPrelude(win: Record<string, unknown>, code: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- executing the
+  // generated prelude is the entire point; the input is our own serializer's output.
+  new Function('window', 'CustomEvent', code)(win, CustomEvent);
+}
+
+/** A window stand-in with just the two things the prelude touches. */
+function fakeWindow(): Record<string, unknown> & EventTarget {
+  const target = new EventTarget();
+  return Object.assign(target, {
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+    dispatchEvent: target.dispatchEvent.bind(target),
+  }) as Record<string, unknown> & EventTarget;
+}
+
+const mainReport: UserMixinReport = {
+  v: 1,
+  planStatus: 'applied',
+  surface: 'main.bundle.js',
+  mods: [{ modId: 'editor-mod', declared: 1, applied: 0, failed: [{ reason: 'not-found', detail: 'no match' }] }],
+};
+const chunkReport: UserMixinReport = {
+  v: 1,
+  planStatus: 'applied',
+  surface: '112.bundle.js',
+  mods: [{ modId: 'editor-mod', declared: 1, applied: 1, failed: [] }],
+};
+
+describe('reportPrelude — chunk surfaces (#98)', () => {
+  it('MERGES into the main report instead of replacing it', () => {
+    const w = fakeWindow();
+    runPrelude(w, reportPrelude(mainReport));
+    runPrelude(w, reportPrelude(chunkReport));
+    const merged = w[REPORT_GLOBAL] as UserMixinReport;
+    // The clobber is the failure this guards: a plain assignment would blank every
+    // row the mixin panel is already showing, mid-session, with nothing logged.
+    expect(merged.mods).toEqual(mainReport.mods);
+    expect(merged.surface).toBe('main.bundle.js');
+    expect(merged.chunks?.['112.bundle.js']).toEqual(chunkReport);
+  });
+
+  it('dispatches the chunk event so a listener that missed iframe load still hears it', () => {
+    const w = fakeWindow();
+    runPrelude(w, reportPrelude(mainReport));
+    const seen: UserMixinReport[] = [];
+    w.addEventListener(CHUNK_REPORT_EVENT, (e) => {
+      seen.push((e as CustomEvent<UserMixinReport>).detail);
+    });
+    runPrelude(w, reportPrelude(chunkReport));
+    // Without this signal the rows exist in the frame and never reach the UI: the
+    // page reads the global on iframe `load`, which fired long before the chunk ran.
+    expect(seen).toEqual([chunkReport]);
+  });
+
+  it('creates the container when a chunk somehow runs FIRST', () => {
+    // Transform off for main, or a load order nobody predicted. Throwing here would
+    // throw inside the game's own script.
+    const w = fakeWindow();
+    expect(() => runPrelude(w, reportPrelude(chunkReport))).not.toThrow();
+    const merged = w[REPORT_GLOBAL] as UserMixinReport;
+    expect(merged.mods).toEqual([]);
+    expect(merged.chunks?.['112.bundle.js']).toEqual(chunkReport);
+  });
+
+  it('survives a non-object sitting on the global', () => {
+    const w = fakeWindow();
+    w[REPORT_GLOBAL] = 'not a report';
+    expect(() => runPrelude(w, reportPrelude(chunkReport))).not.toThrow();
+    expect((w[REPORT_GLOBAL] as UserMixinReport).chunks?.['112.bundle.js']).toEqual(chunkReport);
+  });
+
+  it('accumulates several chunks without any of them evicting another', () => {
+    const w = fakeWindow();
+    runPrelude(w, reportPrelude(mainReport));
+    runPrelude(w, reportPrelude(chunkReport));
+    runPrelude(w, reportPrelude({ ...chunkReport, surface: '535.bundle.js' }));
+    const merged = w[REPORT_GLOBAL] as UserMixinReport;
+    expect(Object.keys(merged.chunks ?? {})).toEqual(['112.bundle.js', '535.bundle.js']);
+  });
+
+  it('escapes </ in a chunk prelude too', () => {
+    const nasty: UserMixinReport = {
+      ...chunkReport,
+      mods: [{ modId: 'm', declared: 1, applied: 0, failed: [{ reason: 'x', detail: '</script><b>' }] }],
+    };
+    expect(reportPrelude(nasty)).not.toContain('</script>');
+  });
+});
+
+describe('surfaceReports / modAppliedOn — per-file display (#98)', () => {
+  const merged: UserMixinReport = { ...mainReport, chunks: { '112.bundle.js': chunkReport } };
+
+  it('lists main first, then chunks', () => {
+    expect(surfaceReports(merged).map((s) => s.file)).toEqual(['main.bundle.js', '112.bundle.js']);
+  });
+
+  it('defaults a surface-less (pre-#98) report to the main bundle', () => {
+    const legacy: UserMixinReport = { v: 1, planStatus: 'applied', mods: [] };
+    expect(surfaceReports(legacy).map((s) => s.file)).toEqual(['main.bundle.js']);
+  });
+
+  it('orders chunks NUMERICALLY, not lexicographically', () => {
+    // '1120' before '535' is what a string sort produces, and it reads as a bug in
+    // a panel listing files the player can see the game load in the other order.
+    const many: UserMixinReport = {
+      ...mainReport,
+      chunks: {
+        '1120.bundle.js': chunkReport,
+        '535.bundle.js': chunkReport,
+        '112.bundle.js': chunkReport,
+      },
+    };
+    expect(surfaceReports(many).map((s) => s.file)).toEqual([
+      'main.bundle.js',
+      '112.bundle.js',
+      '535.bundle.js',
+      '1120.bundle.js',
+    ]);
+  });
+
+  it('reports where a mod applied when it shows 0 on this surface', () => {
+    const all = surfaceReports(merged);
+    // The plan carries every mod's patches to every surface, so a mixin anchored in
+    // the editor chunk legitimately reads 0/1 on main. Naming the file it DID apply
+    // to is the difference between "your mixin is broken" and "your mixin is fine".
+    expect(modAppliedOn(all, 'editor-mod', 'main.bundle.js')).toEqual(['112.bundle.js']);
+  });
+
+  it('never names the surface being displayed', () => {
+    const all = surfaceReports(merged);
+    expect(modAppliedOn(all, 'editor-mod', '112.bundle.js')).toEqual([]);
+  });
+
+  it('says nothing for a mod that applied nowhere', () => {
+    const all = surfaceReports(merged);
+    expect(modAppliedOn(all, 'no-such-mod', 'main.bundle.js')).toEqual([]);
   });
 });
