@@ -1,8 +1,14 @@
 // One-shot local validation of the #43 writer against the real cached physics
 // binary (gitignored .cache/ — local read only, never committed or uploaded).
 // Picks a uniquely-fingerprinted function with a distinctive single-occurrence
-// f32 constant, applies a doubling patch, and proves: exactly 4 bytes changed,
-// at the reported offset, and a stale-hash plan refuses.
+// f32 constant, applies a doubling patch, and proves: every changed byte lies
+// inside the 4-byte f32 field at the reported offset, the field reads back as the
+// new value, and a stale-hash plan refuses.
+//
+// Note the property is CONTAINMENT, not a count. The writer always stores 4 bytes,
+// but a diff only counts bytes that actually differ, and f32 neighbours share most
+// of their encoding — 2.0 to 4.0 flips a single byte. Asserting "4 bytes changed"
+// would fail on a correct patch.
 import fs from 'node:fs';
 import { f32ConstSites, fingerprintAll } from '../src/wasm-locate.mjs';
 import { applyF32Patches, wasmHash } from '../src/wasm-patch.mjs';
@@ -41,7 +47,13 @@ if (r.ok !== true) {
 }
 const diffs = [];
 for (let i = 0; i < buf.length; i++) if (buf[i] !== r.bytes[i]) diffs.push(i);
-console.log('bytes changed:', diffs.length, 'first at', diffs[0], '— report payloadOffset', r.report.applied[0].payloadOffset);
+const at = r.report.applied[0].payloadOffset;
+const contained = diffs.every((i) => i >= at && i < at + 4);
+console.log('bytes changed:', diffs.length, 'at', diffs.join(','), '— all inside the f32 at', at, ':', contained);
+if (!contained || diffs.length === 0) {
+  console.log('FAIL: a patch must change something, and only within its own field');
+  process.exit(1);
+}
 console.log('new value read back:', r.bytes.readFloatLE(r.report.applied[0].payloadOffset), 'expected', Math.fround(chosen.site.value * 2));
 console.log('risk:', r.report.leaderboardRisk);
 
