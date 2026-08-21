@@ -16,6 +16,7 @@ import type {
   ModuleEntry,
   TargetSpec,
   UnresolvedEntry,
+  WasmEntry,
 } from './types.js';
 
 /** Thrown when a map file is missing, unparseable, or schema-invalid. */
@@ -198,6 +199,40 @@ function validateChunkEntry(raw: unknown, key: string): ChunkEntry {
 }
 
 /**
+ * Validate one `wasm` entry (#43).
+ *
+ * `file` is the tight one. It is a served FILENAME rather than a numeric id, so it
+ * cannot be validated by `^\d+$` the way a chunk id is — and it reaches a request
+ * path, which makes a lenient parse a path-traversal primitive sitting in the
+ * allowlist. Hence an explicit charset with no dots-runs, no slashes, and a required
+ * `.wasm` suffix, plus the key/value agreement check chunks already make.
+ *
+ * The hash is held to the same standard for the same reason as a chunk pin: a
+ * malformed pin can never match live bytes, so it would mean a binary that is
+ * permanently stale and silently never patched.
+ */
+function validateWasmEntry(raw: unknown, key: string): WasmEntry {
+  assert(isObject(raw), `wasm['${key}'] must be an object`);
+  assert(
+    isString(raw.file) && /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.wasm$/.test(raw.file),
+    `wasm['${key}'].file must be a plain '<name>.wasm' filename (it becomes a request path, so no slashes or traversal)`,
+  );
+  assert(raw.file === key, `wasm['${key}'].file must equal its key (got '${String(raw.file)}')`);
+  assert(
+    isString(raw.hash) && BUNDLE_HASH_RE.test(raw.hash),
+    `wasm['${key}'].hash must be "sha256:<64 hex>"`,
+  );
+  assert(isNumber(raw.bytes) && raw.bytes > 0, `wasm['${key}'].bytes must be a positive number`);
+  assert(isString(raw.role) && raw.role.length > 0, `wasm['${key}'].role must be a non-empty string`);
+  return {
+    file: raw.file,
+    hash: raw.hash as BundleHash,
+    bytes: raw.bytes,
+    role: raw.role,
+  };
+}
+
+/**
  * Validate an already-parsed object as a {@link GameMap}. Throws `MapParseError`
  * on any structural violation. This is the single chokepoint: `loadMap` and any
  * future network/IPC importer should route through it.
@@ -230,6 +265,17 @@ export function validateMap(raw: unknown): GameMap {
     chunks = {};
     for (const [key, value] of Object.entries(raw.chunks)) {
       chunks[key] = validateChunkEntry(value, key);
+    }
+  }
+
+  // `wasm` (#43, optional): served filename -> WasmEntry. Absent means "this build
+  // declares no patchable binaries", and every .wasm request is proxied verbatim.
+  let wasm: Record<string, WasmEntry> | undefined;
+  if (raw.wasm !== undefined) {
+    assert(isObject(raw.wasm), 'wasm must be an object');
+    wasm = {};
+    for (const [key, value] of Object.entries(raw.wasm)) {
+      wasm[key] = validateWasmEntry(value, key);
     }
   }
 
@@ -272,6 +318,7 @@ export function validateMap(raw: unknown): GameMap {
     unresolved,
     ...(targets ? { targets } : {}),
     ...(chunks ? { chunks } : {}),
+    ...(wasm ? { wasm } : {}),
   };
 }
 

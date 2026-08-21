@@ -5,7 +5,8 @@ import { EARLY_CAPTURE_SCRIPT_TAG } from '@tspml/shared';
 
 import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
 import { applyDemoTransform, surfaceForPath } from '@/lib/demo-transform';
-import type { TransformSurface } from '@/lib/transform-surface';
+import { serveWasm, wasmSurfaceForPath } from '@/lib/wasm-serve';
+import type { TransformSurface, WasmSurface } from '@/lib/transform-surface';
 import { getBaseTransformedBundle } from '@/lib/bundle-cache';
 import { setDetailHeader } from '@/lib/detail-header';
 import { parseUserPatchPlan, reportPrelude, USER_PATCH_LIMITS } from '@/lib/user-patches';
@@ -130,12 +131,35 @@ function transformSurface(host: string, segments: string[]): TransformSurface | 
   return surfaceForPath(host === DEFAULT_GAME_HOST, segments);
 }
 
+/**
+ * The WASM surface for this request, or null to proxy verbatim (#43).
+ *
+ * Separate from {@link transformSurface} because the two share no code path: this one
+ * ends in raw bytes and a fail-closed structural patch, that one in babel. Same env
+ * gate, so with TSPML_TRANSFORM unset the physics binary streams through exactly as
+ * before.
+ */
+function wasmSurface(host: string, segments: string[]): WasmSurface | null {
+  if (!process.env.TSPML_TRANSFORM) return null;
+  return wasmSurfaceForPath(host === DEFAULT_GAME_HOST, segments);
+}
+
 /** The POST path's parsed plan (#62): `sets` to compose into the transform
  *  (empty when the plan was refused up front), plus the refusal status to
  *  report inside the bundle prelude when it was. */
 interface UserPlanInput {
   readonly sets: readonly UserPatchSet[];
   readonly degradedStatus: 'plan-invalid' | 'plan-too-large' | null;
+  /**
+   * The physics patch plan for a wasm request (#43), still UNTRUSTED and unvalidated —
+   * `@tspml/wasm`'s `checkPlan` is the one place its shape is decided, so nothing here
+   * or in the route inspects its fields. Null on every JS-surface request.
+   */
+  readonly wasmPlan?: unknown;
+  /** Why the wasm body never became a plan (oversized, unparseable), or null. Kept
+   *  apart from `degradedStatus`, which reports inside a JS bundle's prelude — a wasm
+   *  response has no prelude to carry anything, only headers. */
+  readonly wasmPlanError?: string | null;
 }
 
 /**
@@ -171,6 +195,7 @@ async function proxyGet(
   reqHeaders.set('referer', DESKTOP_ORIGIN + '/');
 
   const surface = transformSurface(host, segments);
+  const wasmSurf = wasmSurface(host, segments);
 
   // ── Demo transform mode, plain-GET path: memoized ──────────────────────────
   // The base transform is deterministic per upstream bundle (no user data), so
@@ -257,6 +282,42 @@ async function proxyGet(
     return new NextResponse(body, { status: upstreamRes.status, headers: h });
   }
 
+  // ── Physics WASM (#43) ─────────────────────────────────────────────────────
+  // Buffer the binary, hash-gate it against its OWN pin, and apply the request's
+  // physics plan (if any) via @tspml/wasm's structural locator. Deliberately not part
+  // of the transform branches above: those read `.text()` and run babel, which would
+  // turn a 396 KB binary into a plausible-looking corrupt string.
+  //
+  // Only 200s take this path. A 206 (range) or 304 carries partial or no bytes, so
+  // hashing them would compare a fragment against a whole-file pin and always refuse —
+  // passing them through keeps range requests working instead.
+  if (wasmSurf !== null && upstreamRes.ok && upstreamRes.status === 200) {
+    const upstreamBytes = new Uint8Array(await upstreamRes.arrayBuffer());
+    const r = serveWasm(
+      upstreamBytes,
+      wasmSurf,
+      user?.wasmPlan ?? null,
+      user?.wasmPlanError ?? null,
+    );
+    const h = new Headers();
+    h.set('content-type', 'application/wasm');
+    h.set('x-tspml-surface', `wasm:${wasmSurf.file}`);
+    h.set('x-tspml-wasm-status', r.status);
+    h.set('x-tspml-vanilla-hash', r.vanillaHash);
+    if (r.applied > 0) {
+      h.set('x-tspml-wasm-applied', String(r.applied));
+      // Warn-only, always: physics tuning is ranked-play-relevant by definition. The
+      // player is told; nothing is blocked (docs/design/safety-and-fairness.md).
+      if (r.leaderboardRisk) h.set('x-tspml-leaderboard-risk', r.leaderboardRisk);
+    }
+    // Patched bytes are per-request; vanilla bytes are the same for everyone but must
+    // not be cached under a URL a later patched response shares. no-store for both.
+    h.set('cache-control', 'no-store');
+    setDetailHeader(h, r.detail);
+    corsHeaders(request, h);
+    return new NextResponse(r.bytes as unknown as BodyInit, { status: 200, headers: h });
+  }
+
   // Rewrite the proxied game's HTML. Every injection runs BEFORE the game's deferred
   // bundles (an inline script in <head> executes during parse, ahead of `defer` scripts
   // like main.bundle.js):
@@ -332,6 +393,13 @@ export async function GET(
  * (with an honest prelude report), never 4xx and break the boot. Only a
  * transform-surface path accepts POST at all; anything else is 405 (the SW never
  * POSTs elsewhere).
+ *
+ * #43 adds the wasm surface to that set, carried the same way for the same reason: a
+ * patch plan must never ride in a query param (`buildUpstream` forwards unknown params
+ * to Kodub, and a URL-carried payload is a reflected-XSS vector). A wasm POST is parsed
+ * as raw JSON rather than through `parseUserPatchPlan` — the two plan shapes are
+ * unrelated, and `@tspml/wasm`'s `checkPlan` is the only validator for the physics one.
+ * It degrades the same way: a bad plan serves vanilla physics, never a 4xx.
  */
 export async function POST(
   request: NextRequest,
@@ -340,7 +408,8 @@ export async function POST(
   const { path } = await ctx.params;
   const segments = (path ?? []).filter(Boolean);
   const host = request.nextUrl.searchParams.get('host') ?? DEFAULT_GAME_HOST;
-  if (transformSurface(host, segments) === null) {
+  const isWasm = wasmSurface(host, segments) !== null;
+  if (transformSurface(host, segments) === null && !isWasm) {
     const headers = new Headers();
     headers.set('allow', 'GET, OPTIONS');
     corsHeaders(request, headers);
@@ -355,6 +424,28 @@ export async function POST(
     user = { sets: [], degradedStatus: 'plan-invalid' };
     return proxyGet(request, segments, user);
   }
+
+  // The wasm path shares the size limit but not the parser: a physics plan is
+  // `{wasmHash, patches:[{signature, oldValue, newValue}]}`, which parseUserPatchPlan
+  // would reject outright. Oversized or unparseable serve vanilla bytes like any other
+  // refusal, but they travel as an ERROR rather than as a null plan: "we could not read
+  // your plan" and "you did not send one" produce the same bytes and must not produce
+  // the same report.
+  if (isWasm) {
+    const base = { sets: [] as const, degradedStatus: null };
+    if (new TextEncoder().encode(bodyText).length > USER_PATCH_LIMITS.maxBodyBytes) {
+      return proxyGet(request, segments, {
+        ...base,
+        wasmPlanError: `plan body exceeds ${USER_PATCH_LIMITS.maxBodyBytes} bytes`,
+      });
+    }
+    try {
+      return proxyGet(request, segments, { ...base, wasmPlan: JSON.parse(bodyText) });
+    } catch {
+      return proxyGet(request, segments, { ...base, wasmPlanError: 'plan body is not JSON' });
+    }
+  }
+
   if (new TextEncoder().encode(bodyText).length > USER_PATCH_LIMITS.maxBodyBytes) {
     user = { sets: [], degradedStatus: 'plan-too-large' };
   } else {

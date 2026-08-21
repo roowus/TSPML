@@ -4,8 +4,10 @@ import {
   createResolver,
   loadDefaultMap,
   resolve,
+  patchableWasmFiles,
   resolveChunk,
   resolveTarget,
+  resolveWasm,
   transformableChunkIds,
 } from '../src/index.js';
 import type { GameMap } from '../src/index.js';
@@ -440,6 +442,19 @@ describe('resolveChunk (#98) — scoped, fail-closed chunk allowlist', () => {
     expect(transformableChunkIds(toyMap())).toEqual([]);
   });
 
+  it('does not reach the chunks section through prototype keys', () => {
+    // `chunkId` comes off a request path. A plain `record[key]` walks the prototype
+    // chain, so 'constructor' would come back truthy and be treated as a declared
+    // entry. Today's callers pre-filter to digits, which makes this unreachable
+    // through the proxy — that is exactly why it is worth pinning: the resolver must
+    // hold on its own, not on a caller's regex staying strict.
+    for (const key of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      const res = resolveChunk(mapWithChunks(), key);
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.reason).toBe('not-declared');
+    }
+  });
+
   it('a stale chunk does not disturb the main bundle gate', () => {
     // The load-bearing scoping rule: one re-minified chunk must not take the
     // whole session vanilla over code the player may never load.
@@ -460,5 +475,102 @@ describe('resolveChunk (#98) — scoped, fail-closed chunk allowlist', () => {
       },
     };
     expect(transformableChunkIds(map)).toEqual(['112', '604', '1000']);
+  });
+});
+
+describe('resolveWasm (#43) — scoped, fail-closed binary allowlist', () => {
+  const WASM_HASH = 'sha256:d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e';
+  const FILE = 'polytrack_physics.wasm';
+
+  function mapWithWasm(): GameMap {
+    return {
+      ...toyMap(),
+      wasm: {
+        [FILE]: { file: FILE, hash: WASM_HASH, bytes: 396005, role: 'physics simulation' },
+      },
+    };
+  }
+
+  it('allows a declared binary whose live hash matches its own pin', () => {
+    const res = resolveWasm(mapWithWasm(), FILE, WASM_HASH);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.wasm.role).toBe('physics simulation');
+  });
+
+  it('accepts a bare-hex live hash for the same bytes', () => {
+    const res = resolveWasm(mapWithWasm(), FILE, WASM_HASH.slice('sha256:'.length).toUpperCase());
+    expect(res.ok).toBe(true);
+  });
+
+  it('answers the allowlist question alone when no live hash is given', () => {
+    // Same reason as resolveChunk: a proxy decides whether to BUFFER the response
+    // before it can hash it. Asking without bytes must not read as "hash matched".
+    expect(resolveWasm(mapWithWasm(), FILE).ok).toBe(true);
+  });
+
+  it("refuses an undeclared binary as 'not-declared', not as an error", () => {
+    const res = resolveWasm(mapWithWasm(), 'polytrack_audio.wasm', WASM_HASH);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('not-declared');
+    expect('wasm' in res).toBe(false);
+  });
+
+  it("refuses a declared binary whose bytes drifted as 'stale-wasm'", () => {
+    // The consequential refusal. A stale JS anchor means a patch that misses; a
+    // stale wasm fingerprint means writing a float into whatever now lives at that
+    // address, which corrupts a running physics sim rather than merely doing nothing.
+    const res = resolveWasm(mapWithWasm(), FILE, 'sha256:' + 'b'.repeat(64));
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe('stale-wasm');
+      expect(res.message).toMatch(/unverified/);
+    }
+    expect('wasm' in res).toBe(false);
+  });
+
+  it('does not accept the MAIN bundle hash for the binary', () => {
+    const map = mapWithWasm();
+    const res = resolveWasm(map, FILE, map.bundleHash);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('stale-wasm');
+  });
+
+  it('treats a map with no wasm section as declaring none', () => {
+    const res = resolveWasm(toyMap(), FILE, WASM_HASH);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('not-declared');
+    expect(patchableWasmFiles(toyMap())).toEqual([]);
+  });
+
+  it('does not reach the wasm section through prototype keys', () => {
+    // `map.wasm?.[file]` is a plain property read on an object built by validateMap,
+    // and `file` comes off a request path. A lookup that resolved 'constructor' or
+    // '__proto__' to something truthy would hand a non-entry to the caller.
+    for (const key of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      const res = resolveWasm(mapWithWasm(), key);
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.reason).toBe('not-declared');
+    }
+  });
+
+  it('a stale binary does not disturb the JS gates', () => {
+    // Same scoping rule as chunks: vanilla physics must not take the whole session
+    // vanilla. The JS mods a player loaded still apply.
+    const map = mapWithWasm();
+    expect(resolveWasm(map, FILE, 'sha256:' + 'c'.repeat(64)).ok).toBe(false);
+    expect(resolve(map, 'controlCar', MATCHING).ok).toBe(true);
+  });
+
+  it('lists declared files sorted, and the real map declares exactly the physics binary', async () => {
+    expect(patchableWasmFiles(mapWithWasm())).toEqual([FILE]);
+    const map: GameMap = {
+      ...toyMap(),
+      wasm: {
+        'z.wasm': { file: 'z.wasm', hash: WASM_HASH, bytes: 1, role: 'a' },
+        'a.wasm': { file: 'a.wasm', hash: WASM_HASH, bytes: 1, role: 'b' },
+      },
+    };
+    expect(patchableWasmFiles(map)).toEqual(['a.wasm', 'z.wasm']);
+    expect(patchableWasmFiles(await loadDefaultMap())).toEqual([FILE]);
   });
 });
