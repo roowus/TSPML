@@ -166,6 +166,7 @@ pnpm --filter @tspml/portal smoke:tracks            # terminal 2: the api.tracks
 pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio registry
 pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user mods + pasted mixins
 pnpm --filter @tspml/portal smoke:ui                # terminal 2: boot overlay + fullscreen/theater + responsive layout
+pnpm --filter @tspml/portal smoke:chunks            # terminal 2: chunk surfaces at the HTTP boundary
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -210,7 +211,27 @@ section exists collapsed and opens onto the timestamped session events, and at p
 width the sidebar stacks below the game. It is the only smoke that does not need
 `TSPML_TRANSFORM`.
 
-All five portal smokes run in CI (`.github/workflows/smoke.yml`, closing
+`smoke-chunks.mjs` is the only smoke with no browser in it, and the only one that
+asserts at the HTTP boundary. The game lazy-loads chunks, so reaching one from a real
+page means racing whatever UI triggers the fetch — the track editor for `112`, and
+nothing at all for chunks a smoke session may never open. It requests every chunk the
+map declares instead, asserting per chunk: HTTP 200 with a non-empty body, an
+`x-tspml-surface: chunk:<id>` header (recognised as a surface, not silently passed
+through — both give a 200), served bytes hashing to that chunk's own pin, and an
+`x-tspml-detail` that is present and pure printable ASCII. Chunk ids come from the map,
+never a literal: `112` is build-specific and hardcoding it would make this a false alarm
+on the next PolyTrack release.
+
+It exists because [#98](https://github.com/roowus/TSPML/issues/98) shipped a bodyless 500
+on `/api/proxy/112.bundle.js` to production with 690 unit tests and five smokes green
+([#107](https://github.com/roowus/TSPML/issues/107)). Note the env guard: it checks the
+**main** surface transformed before trusting any chunk result, because with
+`TSPML_TRANSFORM` unset every chunk still returns 200 as a pure proxy and no
+`x-tspml-*` header is set at all — a header that is never set cannot throw, so the
+assertions would be vacuous rather than failing. That is exactly how a green Vercel
+preview deploy failed to catch the original bug.
+
+All six portal smokes run in CI (`.github/workflows/smoke.yml`, closing
 [#25](https://github.com/roowus/TSPML/issues/25)) — advisory on PRs plus a daily
 schedule, never merge-gating, because they fetch the live upstream game and can go
 red on a Kodub release rather than a commit. A `pinned-bundle` canary job runs first
