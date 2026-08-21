@@ -24,7 +24,7 @@ import type { GameMap } from "@tspml/mappings";
 import type { Patch } from "@tspml/transform";
 // The loader-owned patches + pre-bridge stub, shared with the portal (#34) so the two
 // surfaces cannot drift — which they already had before the extraction.
-import { BRIDGE_PATCHES, EARLY_CAPTURE_SCRIPT_TAG } from "@tspml/shared";
+import { BRIDGE_PATCHES, EARLY_CAPTURE_SCRIPT_TAG, headerDetail } from "@tspml/shared";
 
 // require() for JSON (Node's ESM loader wants `with {type:"json"}` for static JSON
 // imports, which the Vite config loader doesn't reliably pass through). createRequire
@@ -189,7 +189,13 @@ export function gameProxyMiddleware(_server: ViteDevServer): Connect.NextHandleF
       res.setHeader("content-type", "text/javascript; charset=utf-8");
       res.setHeader("cache-control", "no-cache");
       res.setHeader("x-tspml-transformed", transformed ? "1" : "0");
-      if (detail) res.setHeader("x-tspml-detail", detail.slice(0, 200));
+      // Through headerDetail, not raw: a header value is a ByteString and
+      // `res.setHeader` throws on the em-dash and `≠` in the hash-mismatch detail —
+      // which is the detail a new PolyTrack release produces, so the harness would
+      // have died exactly when someone needed it to explain itself. Same defect the
+      // portal shipped in #98; same shared fix.
+      const headerSafeDetail = headerDetail(detail);
+      if (headerSafeDetail) res.setHeader("x-tspml-detail", headerSafeDetail);
       res.end(code);
       return;
     }
