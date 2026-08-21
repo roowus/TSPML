@@ -4,11 +4,18 @@
 > ([#87](https://github.com/roowus/TSPML/issues/87)) have to hook, and does the
 > current transform architecture reach it?
 >
-> **Measured answer: the part store is reachable today (it lives in
-> `main.bundle.js`, in a module we already anchor); the editor's undo stack and
-> "editor is open" state are NOT — they live in a lazily-loaded chunk the
-> transform does not cover.** A useful MVP exists without touching the chunk;
-> undo-integrated placement requires chunk-transform plumbing first.
+> **Measured answer (at the time of the spike): the part store is reachable
+> today (it lives in `main.bundle.js`, in a module we already anchor); the
+> editor's undo stack and "editor is open" state are NOT — they live in a
+> lazily-loaded chunk the transform does not cover.** A useful MVP exists
+> without touching the chunk; undo-integrated placement requires chunk-transform
+> plumbing first.
+>
+> **Update 2026-08-20: the second half of that no longer holds.** Chunk bundles
+> are transform surfaces as of #98, so the undo stack and the editor lifecycle
+> are reachable. Phase B is done; Phase C is unblocked and no longer has to wait
+> for Phase A. Details in the note under Finding 1, and a correction to the
+> anchor candidates under Phase B.
 >
 > All findings are against the pinned 0.6.2 bundle (locally cached, gitignored
 > `.cache/pt-0.6.2-raw-main.js` and `.cache/pt-0.6.2-raw-chunk-112.js`, fetched
@@ -32,17 +39,34 @@ const c = $ = new a(w, p, e, y, b, S, l, d, r, o, k, E, x, R, V,
 ```
 
 Chunk 112 is fetched as `<version>/112.bundle.js` (108,037 bytes at 0.6.2;
-`fetch.mjs --chunks` discovers and caches it). The portal's proxy transform
-covers exactly one path — `shouldTransform` in
-`source/portal/app/api/proxy/[[...path]]/route.ts` matches
-`segments.join('/') === 'main.bundle.js'` — so **chunk 112 is served vanilla
-today**. Nothing inside the chunk (module 7112 or its ~200 sibling modules) can
-be anchored, injected, or captured until that changes.
+`fetch.mjs --chunks` discovers and caches it).
 
-This is the architectural finding of the spike: **any editor feature that needs
-code inside the chunk is gated on extending the transform surface to chunk
+> **Superseded (2026-08-20, [#98](https://github.com/roowus/TSPML/issues/98)).**
+> When this spike was written the proxy transform covered exactly one path: a
+> `shouldTransform` helper matching `segments.join('/') === 'main.bundle.js'`,
+> so chunk 112 was served vanilla and nothing inside it could be anchored.
+> **That is no longer true.** `shouldTransform` is gone, replaced by
+> `transformSurfaceFor` in `source/portal/lib/transform-surface.ts`: a SURFACE
+> is any served bundle file with its own pin and its own base patch set, and the
+> map's `chunks` section declares four of them at 0.6.2 (112 track editor, 535
+> track verifier UI, 604, 657). Chunk 112 is transformable today. Phase B below
+> is DONE; the sections describing it as a prerequisite are kept for the record
+> but should be read as history.
+>
+> Two things the reader should carry forward. First, chunks have **no base
+> patches** yet — an empty base is a real code path, not a no-op, and the detail
+> string it produces shipped a bodyless 500 to production
+> ([#106](https://github.com/roowus/TSPML/pull/106)) because a header value is a
+> ByteString and the prose contained an em-dash. Second, that bug is the reason
+> chunk surfaces now have their own smoke
+> ([#107](https://github.com/roowus/TSPML/issues/107)), so a Phase C inject that
+> breaks a chunk response will be caught before merge rather than in production.
+
+The architectural finding of the spike, as it stood: **any editor feature that
+needs code inside the chunk is gated on extending the transform surface to chunk
 bundles** (proxy path match, service-worker replay coverage, and a per-chunk
 hash pin alongside the main bundle's — a chunk can re-minify independently).
+That plumbing now exists.
 
 ## Finding 2 — the part store is in `main.bundle.js`, in an already-verified module
 
@@ -144,11 +168,28 @@ resolved `{ ok: false, reason: 'not-in-editor' }` otherwise. Documented
 limitation: inserted parts bypass the editor's undo stack. This already unlocks
 poly-to-track's "paste into the track I'm editing" loop.
 
-**Phase B — needs chunk-transform plumbing (the prerequisite slice):**
-extend `shouldTransform` + the SW replay to `<id>.bundle.js`, add per-chunk
-hash pins to the map, and anchor discipline inside chunk 112 (it has plenty of
-distinctive literals: `"Part index out of bounds"`, `"How to use the editor"`,
-`"editor-ui"`, the Editor* keybind names).
+**Phase B — SHIPPED in [#98](https://github.com/roowus/TSPML/issues/98).** The
+proxy, the SW replay, and the map's per-chunk pins all cover `<id>.bundle.js`
+now; see the note under Finding 1.
+
+One correction to this section as originally written, because Phase C depends on
+it. The four anchor candidates listed here were a **reading suggestion, not a
+measurement**, and checking them against the cached chunk did not confirm them
+as written:
+
+| candidate | as measured |
+|---|---|
+| `"Part index out of bounds"` | present, module **7112** |
+| `"How to use the editor"` | present, module **7112** |
+| `"editor-ui"` | **ambiguous** — not a usable anchor on its own |
+| `Editor*` keybind names | **absent** from the chunk |
+
+Two of four are usable and both land in the same module, so an anchor for 7112
+is available; the other two are not. Anyone picking this up should re-run the
+check rather than trust the table: it was measured against a locally cached
+0.6.2 chunk that is **not currently present on this machine**, and the anchors
+are hash-gate-protected 0.6.2 specifics either way. Re-fetch with
+`pnpm run fetch 0.6.2 --chunks`.
 
 **Phase C — full #87 on top of B:** capture the `fi` instance, push a proper
 `{added, removed}` batch per `insertParts` call so Ctrl+Z works, emit
@@ -156,7 +197,8 @@ distinctive literals: `"Part index out of bounds"`, `"How to use the editor"`,
 
 The issue is filed "no urgency"; Phase B is the load-bearing prerequisite and
 is a transform/mappings feature, not an editor feature — it should be its own
-issue and land first.
+issue and land first. *(It did: #98, merged. A and C are both unblocked, and C
+no longer needs to wait for A.)*
 
 ## Provenance
 
