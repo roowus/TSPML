@@ -225,6 +225,18 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.1)
 
+  source/wasm:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)
+
   tooling/cli: {}
 
   tooling/create-tspml-mod:
@@ -234,6 +246,10 @@ importers:
         version: 2.1.9(@types/node@22.20.1)
 
   tooling/mappings-pipeline:
+    dependencies:
+      '@tspml/wasm':
+        specifier: workspace:*
+        version: link:../../source/wasm
     devDependencies:
       vitest:
         specifier: ^2.1.0
