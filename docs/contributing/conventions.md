@@ -12,6 +12,15 @@
 - **TypeScript** everywhere (`strict`). ESM (`"type": "module"`). Target modern browsers/Vercel Edge.
 - Mods may be plain JS — the published `@tspml/api` types are opt-in.
 - Match the surrounding code; prefer small, focused modules.
+- **Prose is for humans, not for protocols.** Diagnostic strings are written in the
+  house style, which uses em-dashes, `≠`, and `…`. An HTTP header value is a
+  ByteString: `Headers.set` and Node's `res.setHeader` both throw above U+00FF, and
+  inside a request handler that throw is an empty-bodied 500 on a request that had
+  otherwise succeeded. Never put a message straight into a header, a filename, or any
+  other byte-oriented slot. Route it through `headerDetail` from `@tspml/shared`, or
+  the equivalent boundary for that slot. Sanitize at the boundary rather than
+  ASCII-fying the message, so it stays readable everywhere else and so the next
+  message written cannot reintroduce the failure by containing an apostrophe.
 
 ## Repo layout
 
@@ -118,6 +127,16 @@ so the issue text was corrected before the owner chose.)
   - **When the failure mode is silence, running the thing never finds it.** Only
     a checker that reads the code, or a test that asserts the output *exists*,
     will. Absence throws no error.
+- **A branch nothing has ever taken is untested no matter how green the suite is.**
+  #98 made lazily-loaded chunks transform surfaces, and in doing so made one existing
+  line reachable for the first time: the "no patches target this file" detail, which
+  only a surface with no base patches produces. Until chunks existed, every proxied
+  surface was `main.bundle.js`, which always has patches. That line crashed on its
+  first ever execution, in production, on merged `main`. 690 tests were green and the
+  PR had five passing smokes. When a change widens what can reach existing code, the
+  new work is not the only thing to test — enumerate the branches the change *newly
+  makes reachable* and drive each one. The tell is a code path whose preconditions
+  you can only satisfy because of the change you just made.
 - **Prove a new assertion fails.** Reintroduce the defect it describes and watch
   it go red before you trust it. This is cheap and it keeps catching things: two
   of #19's five guards were themselves broken (regexes matching the wrong

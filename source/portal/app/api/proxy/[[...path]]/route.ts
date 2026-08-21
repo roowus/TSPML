@@ -7,6 +7,7 @@ import { DEFAULT_GAME_HOST, isGameHost } from '@/lib/rewrite';
 import { applyDemoTransform, surfaceForPath } from '@/lib/demo-transform';
 import type { TransformSurface } from '@/lib/transform-surface';
 import { getBaseTransformedBundle } from '@/lib/bundle-cache';
+import { setDetailHeader } from '@/lib/detail-header';
 import { parseUserPatchPlan, reportPrelude, USER_PATCH_LIMITS } from '@/lib/user-patches';
 import type { UserMixinReport, UserPatchSet } from '@/lib/user-patches';
 
@@ -202,7 +203,7 @@ async function proxyGet(
     // is indistinguishable from one that was never a surface at all — and both look
     // like an ordinary proxied file from outside.
     h.set('x-tspml-surface', surface.kind === 'main' ? 'main' : `chunk:${surface.chunkId}`);
-    if (bundle.detail) h.set('x-tspml-detail', bundle.detail.slice(0, 200));
+    if (bundle.detail) setDetailHeader(h, bundle.detail);
     return new NextResponse(bundle.body, { status: bundle.status, headers: h });
   }
 
@@ -252,7 +253,7 @@ async function proxyGet(
     corsHeaders(request, h);
     h.set('x-tspml-transformed', transformed ? '1' : '0');
     h.set('x-tspml-vanilla-hash', vanillaHash);
-    if (detail) h.set('x-tspml-detail', detail.slice(0, 200));
+    if (detail) setDetailHeader(h, detail);
     return new NextResponse(body, { status: upstreamRes.status, headers: h });
   }
 
