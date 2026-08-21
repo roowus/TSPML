@@ -5,7 +5,9 @@
  *
  * 1. {@link BRIDGE_PATCHES} — the Tier-1 bridge patches (badge + 6 events) plus the
  *    registry capture patches (custom tracks + audio). A surface feeds these to
- *    `@tspml/transform`.
+ *    `@tspml/transform`. {@link EDITOR_PATCHES} is its counterpart for chunk 112:
+ *    a DIFFERENT surface, so a surface must not feed the two sets to the same file
+ *    (see portal `lib/transform-surface.ts`).
  * 2. {@link EARLY_CAPTURE_STUB} — the pre-bridge shim a surface injects into the
  *    game's HTML, without which the codec capture is silently dropped.
  * 3. {@link TSPML_LOADER_VERSION} / {@link TSPML_API_VERSION} — what TSPML reports
@@ -25,6 +27,7 @@ export {
   REGISTRY_CAPTURE_PATCHES,
   TIER1_BRIDGE_PATCHES,
 } from "./bridge-patches.js";
+export { EDITOR_BINDINGS, EDITOR_PATCHES } from "./editor-patches.js";
 export {
   EARLY_CAPTURE_KEY,
   EARLY_CAPTURE_SCRIPT_TAG,

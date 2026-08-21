@@ -27,10 +27,19 @@
  */
 import { resolveChunk } from '@tspml/mappings';
 import type { GameMap } from '@tspml/mappings';
-import { BRIDGE_PATCHES } from '@tspml/shared';
+import { BRIDGE_PATCHES, EDITOR_PATCHES } from '@tspml/shared';
 
 /** `<id>.bundle.js` / `main.bundle.js` — the only shapes a surface can name. */
 const BUNDLE_FILE_RE = /^(main|\d{1,6})\.bundle\.js$/;
+
+/**
+ * The chunk carrying the track editor at 0.6.2 (#87).
+ *
+ * A build-specific id, so it lives next to the code that uses it rather than being
+ * spread through the codebase: a PolyTrack release can renumber chunks, and when it
+ * does this constant and the map's `chunks` section are what move together.
+ */
+const EDITOR_CHUNK_ID = '112';
 
 export interface TransformSurface {
   /** `'main'` = the main bundle; `'chunk'` = an allowlisted `<id>.bundle.js`. */
@@ -45,24 +54,36 @@ export interface TransformSurface {
    * vanilla — that chunk only. The main bundle's gate is untouched by a chunk verdict.
    */
   readonly expectedHash: string;
-  /** Loader-owned patches for this file. Empty for chunks until #87 Phase C. */
+  /**
+   * Loader-owned patches for THIS file. Per-surface, never shared: the main bundle gets
+   * the bridge patches, chunk 112 gets the editor patches (#87 Phase C), and every other
+   * declared chunk gets an empty base and composes only user mixins.
+   */
   readonly basePatches: readonly Record<string, unknown>[];
 }
 
 /**
  * Loader-owned base patches per surface.
  *
- * Chunks have none yet. #98 (which IS #87's Phase B) builds the surface; #87 Phase C is
- * what puts undo-integrated editor patches on chunk 112, making it the first chunk with a
- * non-empty base. An empty base is not a no-op path — user mixins still
- * compose against the chunk — but with neither base nor applicable user patches the
- * caller serves the upstream bytes untouched rather than running them through a babel
- * round-trip that can only change them.
+ * Keyed by the CHUNK ID, not by `kind`. The bridge patches anchor in the main bundle and
+ * the editor patches anchor in chunk 112's module 7112; feeding either set to the other
+ * file makes every patch in it miss, and base patches are all-or-nothing, so that file
+ * would fail closed to vanilla *for a reason that is not drift*.
+ *
+ * Chunk 112 is the first chunk with a non-empty base (#87 Phase C). The other declared
+ * chunks (535, 604, 657) still have none, and that empty-base path stays live and stays
+ * tested: it is not a no-op branch (user mixins still compose against those chunks) and
+ * it is the branch that shipped a bodyless 500 in #106.
  */
-function basePatchesFor(kind: 'main' | 'chunk'): readonly Record<string, unknown>[] {
-  return kind === 'main'
-    ? (BRIDGE_PATCHES as unknown as readonly Record<string, unknown>[])
-    : [];
+function basePatchesFor(
+  kind: 'main' | 'chunk',
+  chunkId: string | null,
+): readonly Record<string, unknown>[] {
+  if (kind === 'main') return BRIDGE_PATCHES as unknown as readonly Record<string, unknown>[];
+  if (chunkId === EDITOR_CHUNK_ID) {
+    return EDITOR_PATCHES as unknown as readonly Record<string, unknown>[];
+  }
+  return [];
 }
 
 /**
@@ -96,7 +117,7 @@ export function transformSurfaceFor(
       file,
       chunkId: null,
       expectedHash: map.bundleHash,
-      basePatches: basePatchesFor('main'),
+      basePatches: basePatchesFor('main', null),
     };
   }
   // Allowlist question only — `resolveChunk` without a live hash answers "is this id
@@ -108,6 +129,6 @@ export function transformSurfaceFor(
     file,
     chunkId: id,
     expectedHash: res.chunk.hash,
-    basePatches: basePatchesFor('chunk'),
+    basePatches: basePatchesFor('chunk', id),
   };
 }

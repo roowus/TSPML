@@ -95,6 +95,10 @@ api.events.on('race.finished',      ({ frames, carId, isReplay }) => {});
 api.events.on('input.keyDown', (e) => {});
 api.events.on('input.keyUp',   (e) => {});
 
+// track editor (#87) — both fire more than once per session
+api.events.on('editor.opened', () => {});
+api.events.on('editor.closed', () => {});
+
 // ui
 api.events.on('ui.render', () => {});
 
@@ -165,6 +169,11 @@ api.tracks.register({ code, name?, author?, overwrite?, persist? }); // ✅ impl
 api.tracks.unregister(name);
 api.tracks.list();
 
+api.editor.available;             // ✅ implemented — see below
+api.editor.isOpen();
+api.editor.getParts();
+api.editor.insertParts(parts);
+
 api.ui.addWidget(id, { render, mount, unmount });
 
 api.keybinds.register(name, id, defaultBind, cb);
@@ -185,6 +194,11 @@ api.settings.getSetting(id);                   // returns a TYPED value, not a s
 >   Note this ships *differently* than originally scoped: calling the game's own `load()`
 >   turned out to be a latent crash, so the registry owns the read path instead — see
 >   [hook-system.md](../design/hook-system.md).
+> - **`editor`** — read and write the open track through the game's own part calls, with
+>   the edit committed to the editor's own undo stack. ✅ **implemented**
+>   ([#87](https://github.com/roowus/TSPML/issues/87); see below). The editor is not a
+>   frozen catalog — it exists to be written to — so unlike `cars` and `settings` there
+>   was nothing to work around, only a chunk to reach.
 >
 > The **mixin system (M5, Tier 2)** is the escape hatch for content/behavior the
 > registries can't reach. See [mixin-reference.md](./mixin-reference.md).
@@ -278,6 +292,72 @@ capture, so a mod can call `register` at `init` without knowing game lifecycle.
 > [`@tspml/dev-harness`](../../environments/dev-harness) synthesizes a clip of a chosen
 > length, registers it over `click`, and asserts the **game's own** buffer lookup returns
 > it — then that `unregister` brings the original duration back.
+
+### `api.editor` — the track editor (implemented)
+
+Read the parts the player has placed, and place your own. Every insert goes in through
+the **game's own** `setPart`, triggers the **game's own** mesh refresh, and lands on the
+editor's undo stack as **one batch** — so a single Ctrl+Z removes the whole thing.
+
+```ts
+if (api.editor.isOpen() === true) {
+  const existing = api.editor.getParts();       // EditorPart[] — what is on the track now
+  const res = await api.editor.insertParts([
+    { x: 0, y: 0, z: 0, partId: 12, rotation: 0, rotationAxis: 1,
+      color: 0, checkpointOrder: null, startOrder: null },
+  ]);
+  if (!res.ok) console.warn(res.reason);        // 'not-available' | 'not-in-editor'
+                                                // | 'invalid-part' | 'rejected' | 'internal'
+  else console.log(res.inserted, res.undoable);
+}
+```
+
+Five behaviors worth knowing:
+
+- **`isOpen()` returns `boolean | null`, and `null` is not `false`.** `null` means TSPML
+  could not read the game's flag. Compare against `=== true` when you need certainty and
+  `=== false` when you need to know it is genuinely closed; a mod treating `null` as
+  falsy decides the editor is closed on any build whose flag moved.
+- **`available` is `false` for most of a session, and that is normal.** The editor lives
+  in a chunk the game fetches on demand, so nothing is captured until the player opens
+  the editor at least once. Calls before that return `not-available` rather than throwing
+  — and unlike `api.tracks`, they are **not queued**: "place these parts" is meaningless
+  once the session it referred to is gone.
+- **An insert is all-or-nothing.** Every part is validated before the first one is placed,
+  and if the game refuses one mid-run, the parts already placed are removed again through
+  the game's own delete path. A failed insert leaves the track exactly as it found it,
+  and pushes nothing onto the undo stack.
+- **One Ctrl+Z undoes the whole insert.** `undoable: false` in a successful result means
+  the parts are placed but the undo entry did not land — the insert worked; the player's
+  Ctrl+Z will reach past it to their own previous edit.
+- **Both order fields are `null` for an ordinary part, and `null` is the common case.**
+  The game checks `checkpointOrder` and `startOrder` against the part's own catalog
+  entry and refuses a part carrying one it does not take, so `startOrder: 0` on a plain
+  road piece comes back as `reason: 'rejected'` with the game's own message in `detail`.
+  Set a number only on a checkpoint or a start pad; leave both `null` otherwise.
+- **`getParts()` returns nothing rather than a partial read** if iteration fails partway.
+  A truncated read is worse than none: a mod diffing against it sees the missing tail as
+  free space and builds into occupied ground.
+
+Pair it with the lifecycle events rather than polling:
+
+```ts
+api.events.on('editor.opened', () => { /* api.editor is live now */ });
+api.events.on('editor.closed', () => { /* drop anything holding editor state */ });
+```
+
+Both fire from the editor's **own** enable/disable, so they track the same flag
+`isOpen()` reads and the two cannot disagree. Both can fire repeatedly in one session:
+taking a track for a test drive closes the editor and returning re-opens it, and each
+reopen is a **new** editor object that the bridge re-captures.
+
+> **How the editor is reached.** It ships in a numbered webpack chunk, not the main
+> bundle, so it needed [#98](https://github.com/roowus/TSPML/issues/98)'s per-file
+> transform surfaces before it could be patched at all — the chunk is pinned, gated, and
+> patched independently of `main.bundle.js`. Parts themselves are **not** the editor's:
+> it mutates the same `Track` object the race scene uses, which is why placement is a
+> main-bundle call and only the undo stack and the open flag come from the chunk. See
+> [hook-system.md](../design/hook-system.md).
 
 ## Capability scoping
 

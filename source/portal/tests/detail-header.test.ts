@@ -41,7 +41,12 @@ describe('setDetailHeader', () => {
 
 describe('every real transform detail survives the header boundary (#98 regression)', () => {
   const src = 'const notTheGame = 1;\n';
-  const chunk = surfaceForPath(true, ['112.bundle.js']);
+  // 535, not 112. The zero-patch branch is reachable only on a chunk with an empty
+  // base, and 112 stopped being one when it gained the editor patches (#87 Phase C).
+  // Pointing this at 112 would still pass — off the hash-mismatch detail instead —
+  // while silently no longer covering the string that actually 500ed.
+  const chunk = surfaceForPath(true, ['535.bundle.js']);
+  const editorChunk = surfaceForPath(true, ['112.bundle.js']);
 
   it('the zero-patch chunk detail — the exact string that 500ed production', async () => {
     const r = await applyDemoTransform(src, [], chunk!);
@@ -49,7 +54,7 @@ describe('every real transform detail survives the header boundary (#98 regressi
     expect(r.detail).toContain('—');
     const h = new Headers();
     expect(() => setDetailHeader(h, r.detail)).not.toThrow();
-    expect(h.get('x-tspml-detail')).toBe('no patches target 112.bundle.js - served unmodified');
+    expect(h.get('x-tspml-detail')).toBe('no patches target 535.bundle.js - served unmodified');
   });
 
   it('the main-bundle hash-mismatch detail (carries both an em-dash and a ≠)', async () => {
@@ -77,5 +82,18 @@ describe('every real transform detail survives the header boundary (#98 regressi
     );
     const h = new Headers();
     expect(() => setDetailHeader(h, r.detail)).not.toThrow();
+  });
+
+  it('the editor chunk’s detail, reached with no user set at all (#87 Phase C)', async () => {
+    // 112 carries a loader-owned base now, so it runs the pass on an empty user set
+    // and produces a detail the zero-patch branch never would. That is a detail
+    // nobody wrote by hand — exactly the case this file exists to catch.
+    const r = await applyDemoTransform(src, [], editorChunk!);
+    expect(r.detail).toContain('hash-mismatch');
+    const h = new Headers();
+    expect(() => setDetailHeader(h, r.detail)).not.toThrow();
+    const out = h.get('x-tspml-detail') ?? '';
+    expect(out).toContain('112.bundle.js');
+    expect(out).not.toContain('≠');
   });
 });

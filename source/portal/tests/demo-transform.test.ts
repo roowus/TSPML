@@ -104,7 +104,19 @@ function surface(file: string): TransformSurface {
   return s;
 }
 const MAIN = surface('main.bundle.js');
-const CHUNK = surface('112.bundle.js');
+/**
+ * The chunk the surface tests below compose against.
+ *
+ * Its base is emptied on purpose. `transformSurfaceFor` hands chunk 112 the real
+ * EDITOR_PATCHES (#87 Phase C), which anchor in the real chunk and cannot possibly
+ * anchor in this synthetic bundle — so composing with them would fail the base,
+ * and base is all-or-nothing, collapsing every assertion below to 'base-failed'
+ * regardless of what the test was actually checking. These tests are about surface
+ * SCOPING (which symbols resolve where, which mixins run), not about which base a
+ * surface carries; that choice is pinned in transform-surface.test.ts and, for the
+ * wrapper, in the applyDemoTransform block at the bottom of this file.
+ */
+const CHUNK: TransformSurface = { ...surface('112.bundle.js'), basePatches: [] };
 const OWN_CHUNK = surface('535.bundle.js');
 
 /** One base patch, inline-anchored at Car.controlCar (like the bridge patches). */
@@ -463,24 +475,43 @@ describe('composeTransform — chunk surfaces (#98)', () => {
 describe('applyDemoTransform — base selection per surface (#98)', () => {
   const src = 'const notTheGame = 1;\n';
 
-  it('serves a declared chunk UNTOUCHED when nothing targets it', async () => {
-    const chunk = surfaceForPath(true, ['112.bundle.js']);
+  it('serves an EMPTY-BASE chunk untouched when nothing targets it', async () => {
+    // 535, not 112: since #87 Phase C chunk 112 carries the editor patches, so it is
+    // no longer a surface with nothing to do. The empty-base branch is still live —
+    // three of the four declared chunks take it — and it is the branch that shipped
+    // a bodyless 500 in #106, so it keeps its own test rather than being assumed gone.
+    const chunk = surfaceForPath(true, ['535.bundle.js']);
     expect(chunk?.kind).toBe('chunk');
+    expect(chunk?.basePatches).toEqual([]);
     const r = await applyDemoTransform(src, [], chunk!);
-    // Untouched, and honestly labelled: parsing and regenerating ~100 KB of minified
-    // code to emit identical semantics can only ever be a no-op or a break.
+    // Untouched, and honestly labelled: parsing and regenerating minified code to
+    // emit identical semantics can only ever be a no-op or a break.
     expect(r.code).toBe(src);
     expect(r.transformed).toBe(false);
-    expect(r.detail).toBe('no patches target 112.bundle.js — served unmodified');
+    expect(r.detail).toBe('no patches target 535.bundle.js — served unmodified');
   });
 
-  it('does NOT hand a chunk the main bundle base patches', async () => {
-    const chunk = surfaceForPath(true, ['112.bundle.js']);
+  it('does NOT hand an empty-base chunk the main bundle base patches', async () => {
+    const chunk = surfaceForPath(true, ['535.bundle.js']);
     const r = await applyDemoTransform(src, [], chunk!);
     // The tell: with main's patches the wrapper would run the pass and report the
     // hash gate instead of the no-op. Either way the served bytes are vanilla, which
     // is precisely why this needs asserting rather than eyeballing.
     expect(r.detail).not.toContain('hash-mismatch');
+  });
+
+  it('runs the pass for chunk 112 on an EMPTY user set — it owns a base now (#87)', async () => {
+    // The Phase C flip, and the reason the two tests above had to move off 112. The
+    // editor patches are loader-owned, so the editor API must come up on a session
+    // where the player installed no mods at all. If this surface ever fell back to
+    // the no-op branch, `api.editor` would report `not-available` forever and nothing
+    // would look broken.
+    const chunk = surfaceForPath(true, ['112.bundle.js']);
+    expect(chunk?.basePatches.length).toBeGreaterThan(0);
+    const r = await applyDemoTransform(src, [], chunk!);
+    expect(r.detail).not.toContain('no patches target');
+    expect(r.detail).toContain('hash-mismatch');
+    expect(r.detail).toContain('112.bundle.js');
   });
 
   it('DOES run the pass for the main bundle, and fails closed off the real pin', async () => {
@@ -491,8 +522,8 @@ describe('applyDemoTransform — base selection per surface (#98)', () => {
     expect(r.detail).toContain('main.bundle.js');
   });
 
-  it('still runs the pass for a chunk once a user set targets it', async () => {
-    const chunk = surfaceForPath(true, ['112.bundle.js']);
+  it('still runs the pass for an empty-base chunk once a user set targets it', async () => {
+    const chunk = surfaceForPath(true, ['535.bundle.js']);
     const r = await applyDemoTransform(
       src,
       [{ modId: 'editor-mod', patches: [{ op: 'after', target: HUD_TARGET, inject: 'globalThis.__x = 1;' }] }],
@@ -501,7 +532,7 @@ describe('applyDemoTransform — base selection per surface (#98)', () => {
     // An empty base is not a dead surface — user mixins are the reason chunks became
     // surfaces at all. This one fails the real pin, but it REACHED the gate.
     expect(r.detail).toContain('hash-mismatch');
-    expect(r.detail).toContain('112.bundle.js');
+    expect(r.detail).toContain('535.bundle.js');
     expect(r.userReport?.planStatus).toBe('base-failed');
   });
 

@@ -2,8 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react';
-import { Audio, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
-import type { GameAudioManager, GameTrackCodec, GameTrackManager } from '@tspml/api-bridge';
+import { Audio, Editor, EditorLifecycle, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
+import type {
+  EditorAccessor,
+  GameAudioManager,
+  GameTrackCodec,
+  GameTrackManager,
+} from '@tspml/api-bridge';
 import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures, TSPML_LOADER_VERSION } from '@tspml/shared';
 import { loadMods } from '@/lib/mod-loader';
@@ -140,6 +145,10 @@ interface PortalApi extends TspmlApi {
   captureTrackManager(m: GameTrackManager): void;
   captureTrackCodec(c: GameTrackCodec): void;
   captureAudioManager(m: GameAudioManager): void;
+  /** Chunk 112's module-scope accessors, from the factory capture (#87). */
+  captureTrackEditor(a: EditorAccessor): void;
+  /** The live editor plus its new open state, from `enable()`/`disable()` (#87). */
+  captureTrackEditorInstance(instance: unknown, open: boolean): void;
 }
 
 /** Minimal shape check on the bundle-prelude report (#62) — it crossed a frame
@@ -208,6 +217,10 @@ export default function PlayPage(): ReactElement {
   const [safetyStatus, setSafetyStatus] = useState('');
   const [tracksStatus, setTracksStatus] = useState('waiting for the game…');
   const [audioStatus, setAudioStatus] = useState('waiting for the game…');
+  // The editor chunk loads on demand, so "not captured" is the normal state for a
+  // session where the player never opens the editor — say that rather than
+  // implying something is pending.
+  const [editorStatus, setEditorStatus] = useState('not loaded (open the editor)');
   const [loadedMods, setLoadedMods] = useState<LoadedModRow[]>([]);
   // User-added mods (runtime mod loading, the feature that makes the portal
   // usable without forking the repo). State drives the UI; the ref mirrors it so
@@ -312,6 +325,12 @@ export default function PlayPage(): ReactElement {
   // Same deal for audio (#11): unattached at first, `register` queues until the
   // game's audio manager is captured.
   const [audio] = useState<Audio>(() => new Audio());
+  // The editor registry (#87). Unlike tracks and audio it does NOT queue: it stays
+  // unattached for most sessions (the editor chunk only loads if the player opens
+  // the editor) and every call reports `not-available` instead. Queueing "place
+  // these parts" would be wrong — by the time a session existed to place them in,
+  // the request would refer to nothing.
+  const [editor] = useState<Editor>(() => new Editor());
   const frameRef = useRef<HTMLIFrameElement>(null);
   const keybindsRef = useRef<Keybinds | null>(null);
   const demoKeybindRegistered = useRef(false);
@@ -333,6 +352,14 @@ export default function PlayPage(): ReactElement {
   // The two captures arrive independently and out of order (see attachTracksIfReady).
   const trackManagerRef = useRef<GameTrackManager | null>(null);
   const trackCodecRef = useRef<GameTrackCodec | null>(null);
+  // The editor's two halves, also out of order (#87): the accessor comes from the
+  // chunk's module factory, the instance from the editor's own `enable()`. Both are
+  // needed before the registry can attach — see attachEditorIfReady.
+  const editorAccessorRef = useRef<EditorAccessor | null>(null);
+  const editorInstanceRef = useRef<unknown>(null);
+  const [editorLifecycle] = useState<EditorLifecycle>(
+    () => new EditorLifecycle(bus, editor),
+  );
 
   // Surface a throttled count of car.control events. controlCar fires on INPUT
   // CHANGES (keydown/keyup), not every frame — so the count jumps in bursts
@@ -722,6 +749,28 @@ export default function PlayPage(): ReactElement {
     setTracksStatus('✓ attached');
   };
 
+  /**
+   * Bind the editor registry once both halves have arrived, and report the edge
+   * (#87).
+   *
+   * Re-attaches on every instance, unlike the tracks registry's one-shot guard.
+   * The player can close the editor and open it again, and the game constructs a
+   * NEW editor each time; keeping the first would leave `api.editor` pointed at a
+   * disposed object that still answers calls. `reset()` clears the lifecycle's
+   * de-dup memory so the fresh instance's `opened` is not swallowed as "no change".
+   */
+  const attachEditorIfReady = (instanceIsNew: boolean): void => {
+    const accessor = editorAccessorRef.current;
+    const instance = editorInstanceRef.current;
+    if (!accessor || instance === null) return;
+    if (instanceIsNew) {
+      editor.attach({ accessor, instance });
+      editorLifecycle.reset();
+    }
+    editorLifecycle.poll();
+    setEditorStatus(editor.isOpen() === true ? '✓ open' : '✓ captured (closed)');
+  };
+
   // Expose the Tier-1 `api` object (events + keybinds + tracks) to the same-origin
   // game iframe as `window.__tspml`: transformed hooks emit to `api.events`, mods
   // call `api.keybinds.register(...)` / `api.tracks.register(...)`, and the capture
@@ -803,6 +852,7 @@ export default function PlayPage(): ReactElement {
       keybinds: keybindsRef.current,
       tracks,
       audio,
+      editor,
       logger: console,
       version: TSPML_VERSION,
       captureTrackManager: (m: GameTrackManager) => {
@@ -819,6 +869,21 @@ export default function PlayPage(): ReactElement {
         if (audio.ready) return;
         audio.attach({ manager: m });
         setAudioStatus('✓ attached');
+      },
+      captureTrackEditor: (a: EditorAccessor) => {
+        editorAccessorRef.current = a;
+        // The accessor alone is not an editor — no instance means nothing to
+        // attach yet, and the next `enable()` is what completes the pair.
+        attachEditorIfReady(false);
+      },
+      captureTrackEditorInstance: (instance: unknown, open: boolean) => {
+        const isNew = editorInstanceRef.current !== instance;
+        editorInstanceRef.current = instance;
+        // `open` is what the game just did, and it is also already reflected in
+        // the flag the accessor reads — so the lifecycle re-reads rather than
+        // trusting the argument, and the two can never drift apart.
+        void open;
+        attachEditorIfReady(isNew);
       },
     };
     w.__tspml = api;
@@ -1017,7 +1082,7 @@ export default function PlayPage(): ReactElement {
       void teardown({
         bus,
         unloadMods: unloadModsRef.current,
-        registries: [keybindsRef.current, tracks, audio],
+        registries: [keybindsRef.current, tracks, audio, editor],
       });
     };
     window.addEventListener('pagehide', run);
@@ -1027,7 +1092,7 @@ export default function PlayPage(): ReactElement {
       chunkReportOffRef.current = null;
       run();
     };
-  }, [bus, tracks, audio]);
+  }, [bus, tracks, audio, editor]);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) {
@@ -1858,6 +1923,14 @@ export default function PlayPage(): ReactElement {
                 aria-hidden="true"
               />
               audio: {audioStatus}
+            </div>
+            <div className="status-row">
+              <span
+                className="dot"
+                style={{ background: editorStatus.startsWith('✓') ? 'var(--green)' : 'var(--muted)' }}
+                aria-hidden="true"
+              />
+              editor: {editorStatus}
             </div>
           </section>
 

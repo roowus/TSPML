@@ -96,12 +96,20 @@ read off the minified source:
 
 | Method | Signature (semantic) | Notes |
 |---|---|---|
-| `setPart` | `(x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder)` | throws `"Track part color does not exist"` on a bad color; coordinates are in tiles (`* partSize` internally) |
+| `setPart` | `(x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder)` | throws `"Track part color does not exist"` on a bad color; coordinates are in tiles (`* partSize` internally). **Both order arguments are nullable and `null` is the normal value** — the constructor validates each against the part's catalog entry and throws `"Non-start part has start order"` / `"Non-checkpoint has checkpoint order"` when one is supplied to a part that takes none, and the matching `"…has no…"` when one is missing from a part that requires it |
 | `deleteSpecificPart` | `(partId, x, y, z, rotation, rotationAxis)` | what undo uses to remove |
 | `getPart` | `(partId)` | part-catalog lookup (colors set, checkpoint flag) |
-| `forEachPart` | `(cb(x, y, z, id, rotation, rotationAxis, color, checkpointOrder, startOrder))` | the read counterpart |
 | `getNextStartOrder` | `()` | how the editor assigns start-pad order |
 | `clear` / `refreshMeshes` / `getTrackData` | | `getTrackData()` feeds both save (`saveCustomTrack(meta, data)`) and export (`.toExportString(meta)`) |
+
+**The read counterpart is one call further out.** `forEachPart(cb(x, y, z, id,
+rotation, rotationAxis, color, checkpointOrder, startOrder))` is a method of the
+**track-data** class, not of Track — an earlier revision of this table listed it as
+Track's and the registry was built against that, so `getParts` called
+`track.forEachPart` and got `"not a function"` from the live game. Reading a live
+Track means `track.getTrackData().forEachPart(...)`; the callback argument order
+above is correct, and `getTrackData()` rebuilds the object from the Track's current
+parts on every call, so a snapshot never goes stale but is also not free.
 
 So the mechanism `insertParts` needs — validated placement into the live
 session, mesh refresh, read-back — is **capturable with the existing
@@ -126,12 +134,60 @@ Kn = function () {                       // undo (Ctrl+Z → checkKeyBinding pat
 ```
 
 and the placement path pushes `{added: [...], removed: [...]}` batches built
-alongside its own `setPart` calls. Both stacks are ES private fields on a class
-inside the untransformed chunk: **no inject we can write today reaches them**.
-Parts inserted by calling the captured Track directly would be invisible to
-Ctrl+Z — worse, an undo of a *later* manual edit would happily
-`deleteSpecificPart` around them, so the interleaving is coherent but the
-inserted batch itself is permanent until manually deleted.
+alongside its own `setPart` calls.
+
+> **Correction (2026-08-20, Phase C implementation).** The paragraph that stood
+> here said both stacks are ES private fields and "no inject we can write today
+> reaches them". **That is wrong about the shipped bundle**, and it was the single
+> most load-bearing claim in this document, because it is what made Phase C look
+> like it needed something the architecture could not do.
+>
+> The source uses `#private` fields, but the SHIPPED chunk is downleveled: every
+> one of them is a **module-scope WeakMap**, and `(0,i.gn)(this, wn, "f")` is the
+> TypeScript accessor helper reading it. The declaration block is flat and plain:
+>
+> ```js
+> wn = new WeakMap();   // undo stack
+> bn = new WeakMap();   // redo stack
+> ge = new WeakMap();   // undo button
+> fe = new WeakMap();   // redo button
+> jt = new WeakMap();   // the Track
+> ```
+>
+> This is exactly the situation [#10](https://github.com/roowus/TSPML/issues/10)
+> already solved in the car-controller module, and the reasoning is recorded in
+> `CAR_CONTROLLER_BINDINGS`: a `before` inject is spliced lexically INSIDE the
+> method body, so it sits in that scope chain and can name a module-scope binding
+> directly. Reading the undo stack from an inject is a solved problem, not a new
+> capability.
+>
+> The lesson is the one #10's comment already states and this document then
+> repeated the mistake of: **"private" in the source is not private in the
+> bundle.** Check the downlevel before concluding something is unreachable.
+
+### The commit idiom, measured
+
+Writing a batch is not just "push onto `wn`". Every real edit site ends with the
+same **four** steps, and all four matter:
+
+```js
+(0,i.gn)(this, wn, "f").push({removed: r, added: a});          // 1. record
+(0,i.gn)(this, bn, "f").length = 0;                            // 2. clear redo
+(0,i.gn)(this, ge, "f").disabled = (0,i.gn)(this, wn, "f").length == 0;  // 3. undo button
+(0,i.gn)(this, fe, "f").disabled = (0,i.gn)(this, bn, "f").length == 0;  // 4. redo button
+```
+
+There are four pushes to `wn`. Three are edit sites carrying the full idiom
+(box-delete, stamp/paste, drag-place); the fourth is the redo handler pushing a
+popped batch back, which correctly does NOT clear `bn`.
+
+Steps 3 and 4 are the ones an implementation skips by accident. Button state is
+DERIVED, not tracked: ten sites recompute `disabled` from stack length. A batch
+pushed without them leaves a working undo behind a greyed-out button, which is a
+worse outcome than no undo at all because it reads to the player as "nothing
+happened". Step 4 matters for the mirror-image reason: inserting parts must
+invalidate any pending redo, or the redo button offers to re-apply a branch of
+history the insert just diverged from.
 
 `fi` also holds the "which tool / camera / part is selected" UI state and the
 save path (`$t.saveCustomTrack(meta, jt.getTrackData())` — `$t` is a TrackManager,
@@ -140,6 +196,21 @@ registry capture grabs, and almost certainly the same bootstrap singleton,
 though instance identity was not verified).
 
 ## Finding 4 — "is the editor open" has no reachable signal either
+
+> **Correction (2026-08-20, Phase C implementation).** Also overtaken, and by
+> something simpler than option 3 below. `fi` exposes a **public lifecycle**:
+>
+> ```
+> enable()   disable()   isEnabled()   dispose()   update(t)
+> setTestCallback(t)     getTrackMetadata()        resetView(x, y, z)
+> ```
+>
+> `isEnabled()` returns the same `ae` flag `enable()`/`disable()` write, so the
+> gate is a direct read of the game's own state rather than anything inferred.
+> Neither the behavioural heuristic (option 1) nor the DOM sniff (option 2) is
+> needed, and option 3 turns out to overstate the work: capturing the instance
+> is still right, but the "is it open" question is answered by a method the class
+> already publishes.
 
 The construction site above lives in the bootstrap (same side of the module
 wall as the TrackManager construction — instance capture exists because of

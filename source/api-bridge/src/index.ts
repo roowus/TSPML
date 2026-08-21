@@ -15,6 +15,14 @@ export type { KeybindsOptions } from './keybinds.js';
 export { Audio } from './audio.js';
 export type { AudioHost, AudioOptions, GameAudioManager } from './audio.js';
 
+export { Editor, EditorLifecycle } from './editor.js';
+export type {
+  EditorAccessor,
+  EditorHost,
+  EditorOptions,
+  GameTrack,
+} from './editor.js';
+
 export { Tracks } from './tracks.js';
 export type {
   GameTrackCodec,
