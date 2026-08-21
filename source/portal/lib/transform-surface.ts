@@ -23,9 +23,14 @@
  * is per-build and regenerated with the rest of the map (see `@tspml/mappings`'s
  * `chunks` section). A chunk absent from the map is proxied verbatim.
  *
+ * #43 adds a second, deliberately UNRELATED surface type for the physics WASM
+ * ({@link WasmSurface} / {@link wasmSurfaceFor}). It shares the allowlist-and-pin shape
+ * but no type, because a JS surface's contract is "text you may run babel over" and a
+ * binary satisfies none of it. See the note on `WasmSurface`.
+ *
  * Pure and map-injected so the unit tests can drive it without the real pinned map.
  */
-import { resolveChunk } from '@tspml/mappings';
+import { resolveChunk, resolveWasm } from '@tspml/mappings';
 import type { GameMap } from '@tspml/mappings';
 import { BRIDGE_PATCHES, EDITOR_PATCHES } from '@tspml/shared';
 
@@ -131,4 +136,64 @@ export function transformSurfaceFor(
     expectedHash: res.chunk.hash,
     basePatches: basePatchesFor('chunk', id),
   };
+}
+
+/**
+ * A patchable WASM binary served by the proxy (#43).
+ *
+ * Deliberately a SEPARATE TYPE from {@link TransformSurface} rather than a third
+ * `kind` on it, and that is a correctness decision rather than a stylistic one. Every
+ * consumer of a `TransformSurface` does the same three things: read the response with
+ * `.text()`, run babel over it, and serve it as `text/javascript`. Doing any of those
+ * to a 396 KB binary corrupts it — `.text()` alone would replace every byte that is not
+ * valid UTF-8 with U+FFFD, and the result would still be a plausible-looking string
+ * that flows onward without error.
+ *
+ * Keeping the types disjoint means that mistake cannot be written down: nothing that
+ * accepts a `TransformSurface` will accept this, so the compiler rejects the corrupting
+ * path instead of a reviewer having to notice it. The two share no fields on purpose.
+ */
+export interface WasmSurface {
+  readonly kind: 'wasm';
+  /** Requested filename, e.g. `polytrack_physics.wasm`. */
+  readonly file: string;
+  /**
+   * The pin THESE bytes must match before any patch is attempted. On a mismatch the
+   * binary is served vanilla: every fingerprint a plan carries was derived against the
+   * pinned build, so against different bytes they are unverified — and a mis-located
+   * write here corrupts a running physics sim rather than merely missing.
+   */
+  readonly expectedHash: string;
+  /** What the binary does, for the response header and reporting. */
+  readonly role: string;
+}
+
+/** `<name>.wasm` — the only shape a wasm surface can name. Mirrors the map's own
+ *  validation, so a filename that could not be stored cannot be requested either. */
+const WASM_FILE_RE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.wasm$/;
+
+/**
+ * The wasm surface for a proxied path, or null when the request must be proxied
+ * verbatim (#43).
+ *
+ * Null covers the same three "pass it through" situations as
+ * {@link transformSurfaceFor}: not a wasm file at all, a binary the map does not
+ * declare, or a non-default host no pin in this map applies to.
+ *
+ * As with the JS surfaces, this does NOT decide whether the live bytes match the pin —
+ * that needs the bytes, which the caller does not have when choosing whether to buffer
+ * the response. The hash check happens once they are in hand.
+ */
+export function wasmSurfaceFor(
+  map: GameMap,
+  isDefaultHost: boolean,
+  segments: readonly string[],
+): WasmSurface | null {
+  if (!isDefaultHost) return null;
+  if (segments.length !== 1) return null;
+  const file = segments[0] ?? '';
+  if (!WASM_FILE_RE.test(file)) return null;
+  const res = resolveWasm(map, file);
+  if (!res.ok) return null;
+  return { kind: 'wasm', file, expectedHash: res.wasm.hash, role: res.wasm.role };
 }

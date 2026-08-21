@@ -146,6 +146,9 @@ importers:
       '@tspml/transform':
         specifier: workspace:*
         version: link:../transform
+      '@tspml/wasm':
+        specifier: workspace:*
+        version: link:../wasm
       next:
         specifier: ^15.0.0
         version: 15.5.22(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

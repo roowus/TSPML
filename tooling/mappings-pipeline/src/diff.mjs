@@ -539,3 +539,41 @@ export function assertChunksCarried(prev, next, opts = {}) {
     );
   }
 }
+
+/**
+ * The same guard again for `wasm` (#43), and this is the quietest of the three.
+ *
+ * A candidate that loses its wasm section validates, resolves every symbol, and serves
+ * a perfectly playable game. What stops is physics patching: `wasmSurfaceFor` returns
+ * null for an undeclared filename, the proxy streams the binary verbatim, and a mod
+ * asking for a physics change gets a response saying the file was not patchable, with
+ * nothing anywhere pointing at the map.
+ *
+ * No `allowDrop` escape hatch, unlike chunks. A chunk can legitimately vanish because a
+ * new build may stop splitting it out; `polytrack_physics.wasm` disappearing would mean
+ * the game stopped shipping a physics engine, which is not a thing that quietly happens
+ * between point releases. If it ever does, the map is edited by hand and this guard is
+ * revisited deliberately — that is the right amount of friction for it.
+ *
+ * Note what this does NOT check: whether the carried pin still matches the new build's
+ * binary. It cannot — the bytes are not here, and they are gitignored. A stale pin is
+ * the SAFE failure (the portal serves vanilla and says so); a missing section is the
+ * unsafe one, because nothing reports it at all.
+ * @param {GameMap} prev  committed baseline
+ * @param {GameMap} next  candidate
+ */
+export function assertWasmCarried(prev, next) {
+  const before = Object.keys(prev.wasm ?? {});
+  const after = new Set(Object.keys(next.wasm ?? {}));
+  if (before.length === 0) return; // baseline declared none — nothing to lose
+  const lost = before.filter((f) => !after.has(f));
+  if (lost.length > 0) {
+    throw new Error(
+      `carry-forward lost wasm: baseline declares ${before.length} (${before.join(", ")}), ` +
+      `candidate is missing ${lost.join(", ")}. An undeclared binary is never patched — ` +
+      `promoting this would silently disable physics patching. ` +
+      `Check gen-map's wasm carry-forward step; the section rides across from the baseline ` +
+      `and must then be re-pinned by hand against the new build's binary.`,
+    );
+  }
+}
