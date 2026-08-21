@@ -105,3 +105,55 @@ export function classifySafety(manifest: VersionManifest): SafetyReport {
 
   return { vanillaSafe, capabilities, leaderboardRisk, warnings };
 }
+
+/**
+ * Combine per-mod reports into one report for the whole enabled set.
+ *
+ * A host with a single status line cannot show N reports, and picking one of
+ * them is the wrong answer in the direction that matters: with two mods
+ * installed, reading only the first hides a physics patch that happens to be
+ * second. Risk over a set is a MAXIMUM, never a sample.
+ *
+ * Rules, each chosen to fail toward disclosure:
+ *   - `leaderboardRisk` is `'warn'` if ANY mod warns. Risk does not average out.
+ *   - `vanillaSafe` is true only if EVERY mod is. One unsafe mod makes the
+ *     session unsafe; the safe mods do not dilute it.
+ *   - `capabilities` and `warnings` are the unions, in set order and deduped —
+ *     the player's question is "what is running right now", not "what did mod 3
+ *     ask for".
+ *
+ * An EMPTY set returns null rather than a clean report. "No mods" and "mods,
+ * all fine" are different facts, and rendering the second for the first leaves
+ * a stale safety line on screen after the last mod is removed.
+ */
+export function summarizeSafety(reports: readonly SafetyReport[]): SafetyReport | null {
+  if (reports.length === 0) return null;
+
+  const capabilities: string[] = [];
+  const warnings: SafetyWarning[] = [];
+  const seenCap = new Set<string>();
+  // Warnings are deduped by kind+message: two mods can legitimately raise the
+  // same KIND (two physics patches) and both deserve a line, but the identical
+  // message twice is noise.
+  const seenWarn = new Set<string>();
+  let vanillaSafe = true;
+  let leaderboardRisk: LeaderboardRisk = 'none';
+
+  for (const r of reports) {
+    if (!r.vanillaSafe) vanillaSafe = false;
+    if (r.leaderboardRisk === 'warn') leaderboardRisk = 'warn';
+    for (const cap of r.capabilities) {
+      if (seenCap.has(cap)) continue;
+      seenCap.add(cap);
+      capabilities.push(cap);
+    }
+    for (const w of r.warnings) {
+      const key = `${w.kind} ${w.message}`;
+      if (seenWarn.has(key)) continue;
+      seenWarn.add(key);
+      warnings.push(w);
+    }
+  }
+
+  return { vanillaSafe, capabilities, leaderboardRisk, warnings };
+}

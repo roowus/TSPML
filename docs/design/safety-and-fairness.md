@@ -33,6 +33,14 @@ The middle row is what makes this evidence rather than a coincidence: the same m
 
 This does not change the warn-only stance, and it is not a substitute for one. It does mean the honest thing to tell a player is not merely "this might be a problem later" but "the game already responded to this, in this session." The portal's physics panel says the session's lap times are not vanilla for exactly this reason.
 
+### Risk over a set is a maximum
+
+A player runs a set of mods, not one mod, but the portal has a single safety line. The rule is that the line reports the whole enabled set: `leaderboardRisk` is `warn` if **any** mod warns, `vanillaSafe` is true only if **every** mod is, and the capabilities and warnings shown are the unions.
+
+This is deliberately not a sample. Reading one mod's report — the first, say — hides a physics mod that happens to have been added second, which is precisely the case the label exists for. And an empty set is reported as *no set*, not as a clean one: "no mods" and "mods, all fine" are different facts, and rendering the second for the first strands a stale safety line on screen after the last mod is removed.
+
+The wording separates the mod's own admission from TSPML's conclusion. A mod that declares `vanillaSafe: false` reads "not vanilla-safe"; a mod that declares itself safe but carries a physics patch or the network capability reads "leaderboard risk". Both are warn-only.
+
 ## Determinism lint (warnings)
 
 Physics-context mods (worker environment, or subscribing to `physics.preStep/postStep`) are **statically linted** for non-deterministic APIs (`Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `fetch`). Under warn-only these are **warnings** (not blocks), surfaced to the modder at authoring time and flagged on the mod's profile. A **seeded deterministic RNG** primitive is provided for mods that need randomness without breaking replays.

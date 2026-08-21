@@ -11,6 +11,7 @@ import type {
 } from '@tspml/api-bridge';
 import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures, TSPML_LOADER_VERSION } from '@tspml/shared';
+import { summarizeSafety } from '@tspml/loader';
 import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
 import {
@@ -759,12 +760,33 @@ export default function PlayPage(): ReactElement {
           ? `✗ ${s.failed[0]!.reason.slice(0, 48)}`
           : 'none',
     );
-    // M6-B: surface the warn-only safety classification.
-    const sr = s.safety[0]?.report;
-    if (sr) {
+    // M6-B: surface the warn-only safety classification, over the WHOLE set.
+    // Reading s.safety[0] alone (as this did before #43) hides a physics mod
+    // that happens to be added second, which is the one case the label exists
+    // for. summarizeSafety takes the maximum; null means "no mods", which
+    // clears the row rather than leaving a stale line after the last removal.
+    const sr = summarizeSafety(s.safety.map((e) => e.report));
+    if (sr === null) {
+      setSafetyStatus('');
+    } else {
       const w = sr.warnings.length;
+      // The ⚠ prefix drives the row's dot colour, so it tracks leaderboardRisk,
+      // not the declaration: a physics mod that declares vanillaSafe=true is
+      // still a risk, and a green dot beside it would misreport that.
+      //
+      // The two risky wordings are kept apart because they are different facts.
+      // "not vanilla-safe" is the mod's own admission; "leaderboard risk" is
+      // what TSPML concluded about a mod that declared itself safe (a physics
+      // patch, or the network capability). Printing "vanilla-safe (lb-risk)"
+      // for the second — as the naive join did — reads as a contradiction and
+      // tells the player nothing about which of the two they are looking at.
+      const label = !sr.vanillaSafe
+        ? 'not vanilla-safe'
+        : sr.leaderboardRisk === 'warn'
+          ? 'leaderboard risk'
+          : 'vanilla-safe';
       setSafetyStatus(
-        `${sr.vanillaSafe ? '✓' : '⚠'} vanillaSafe${sr.leaderboardRisk === 'warn' ? ' (lb-risk)' : ''}${w > 0 ? ` · ${w} warn` : ''}`,
+        `${sr.leaderboardRisk === 'warn' ? '⚠' : '✓'} ${label}${w > 0 ? ` · ${w} warn` : ''}`,
       );
     }
   };

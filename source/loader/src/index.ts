@@ -66,5 +66,5 @@ export { load } from './loader.js';
 export type { LoadOptions, ModDescriptor } from './loader.js';
 
 // safety (M6, warn-only classification)
-export { classifySafety } from './safety.js';
+export { classifySafety, summarizeSafety } from './safety.js';
 export type { LeaderboardRisk, SafetyReport, SafetyWarning } from './safety.js';

@@ -1919,3 +1919,67 @@ Filed [#107](https://github.com/roowus/TSPML/issues/107): no smoke covers a
 chunk route. The smokes already run with `TSPML_TRANSFORM=1`, so a single chunk
 assertion would have caught this before merge. The gap is coverage, not
 configuration.
+
+## 2026-08-21 — the safety row was reporting one mod out of N (#43 follow-up) ✅
+
+Found while verifying #43 in production, not by a test. The physics mod was
+removed and the sidebar still read `safety: ✓ vanillaSafe (lb-risk) · 1 warn`.
+The stale line was the visible symptom; reading the code found the worse bug
+underneath it.
+
+`applyLoadSummary` did this:
+
+```ts
+const sr = s.safety[0]?.report;
+if (sr) { … }
+```
+
+Two defects in three lines. The `if` has no `else`, so the row was never
+cleared — remove the last mod and the label stays. And `s.safety[0]` classifies
+**mod #1 only**, so a physics mod added second contributed no leaderboard-risk
+label at all. `git blame` dates the line to M6-B (`f9217c4b`), when the portal
+loaded a fixed pair of bundled demo mods and "the first one" was at least a
+stable thing to read. Runtime user mods made the set arbitrary and ordered by
+paste time; #43 made what it hides consequential.
+
+The fix is `summarizeSafety(reports)` in the loader beside `classifySafety`, a
+pure function over `SafetyReport[]` so it is testable without a game or a
+browser. Risk over a set is a **maximum, never a sample**: `warn` if any mod
+warns, `vanillaSafe` only if every mod is, capabilities and warnings unioned in
+set order and deduped.
+
+An empty set returns `null` rather than a clean report. This is the part worth
+recording: "no mods" and "mods, all fine" are different facts, and returning a
+clean report for an empty list is what produced the stale line in the first
+place — the caller had nothing to distinguish "nothing to say" from "nothing is
+wrong". Encoding that difference in the return type made the caller's `else`
+branch unavoidable rather than something to remember.
+
+Fixing the aggregation exposed a wording bug the single-mod path had hidden. A
+physics mod defaults `vanillaSafe` to true, so the naive join printed
+`vanilla-safe (lb-risk)` — a sentence that argues with itself. The two cases
+are different facts and now read differently: `not vanilla-safe` is the mod's
+own admission, `leaderboard risk` is what TSPML concluded about a mod that
+declared itself safe but carries a physics patch or the network capability. The
+dot colour tracks `leaderboardRisk` rather than the declaration, so a physics
+mod claiming `vanillaSafe: true` no longer gets a green dot next to an amber
+fact.
+
+Verified in a real headless browser, because a single-mod test cannot see an
+ordering bug:
+
+| Step | Row | Dot |
+| --- | --- | --- |
+| no mods | *absent* | - |
+| add a clean mod | `✓ vanilla-safe` | green |
+| add a physics mod **second** | `⚠ leaderboard risk · 1 warn` | amber |
+| remove both | *absent* | - |
+
+Zero page errors, 109 loader + 344 portal tests, user-mods smoke 27/27.
+
+The lesson is about where the bug was found. Every unit test of `classifySafety`
+passed throughout, because the defect was never in the classifier — it was in
+the one line that chose which classification to show, and no test owned that
+line. Verifying #43 by driving the actual UI is what surfaced it. A safety
+signal that is computed correctly and displayed for the wrong mod is worth
+exactly nothing to the player.

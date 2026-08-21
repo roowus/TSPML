@@ -263,7 +263,10 @@ const sidebar = await page.mainFrame().evaluate((expected) => {
 
 // The safety row renders only when `safetyStatus` is non-empty, so its presence
 // IS the regression test for the dropped setter. Require a real classification,
-// not merely a non-empty string.
+// not merely a non-empty string: the row must be one of the three verdicts the
+// page can produce, with the mark that drives the dot colour. Anchored at both
+// ends so a truncated or concatenated row fails rather than matching loosely.
+const SAFETY_ROW_RE = /^(✓ vanilla-safe|⚠ (?:not vanilla-safe|leaderboard risk))( · \d+ warn)?$/;
 const sidebarOk =
   sidebar.present &&
   !sidebar.placeholderVisible &&
@@ -273,7 +276,7 @@ const sidebarOk =
   !!sidebar.modsRow &&
   sidebar.modsRow.startsWith("✓") &&
   !!sidebar.safetyRow &&
-  /vanillaSafe/.test(sidebar.safetyRow);
+  SAFETY_ROW_RE.test(sidebar.safetyRow);
 
 const menuShot = SHOT.replace(/\.png$/, "-menu.png");
 await page.screenshot({ path: menuShot });
