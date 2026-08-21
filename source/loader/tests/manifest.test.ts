@@ -59,12 +59,14 @@ describe('parseVersionManifest', () => {
         includes: {},
         provides: ['cars'],
         mixins: [{ config: 'mixins/cars.json', environment: 'worker' }],
+        physics: 'physics.json',
         capabilities: ['dom', 'storage'],
         vanillaSafe: true,
         custom: { foo: 'bar' },
       }),
     );
     expect(m.depends).toEqual({ 'tspml-api': '^1.0.0' });
+    expect(m.physics).toBe('physics.json');
     expect(m.provides).toEqual(['cars']);
     expect(m.authors).toEqual([{ name: 'alice', contact: 'alice@example.com' }]);
     expect(m.environment).toBe('worker');
@@ -151,6 +153,23 @@ describe('parseVersionManifest', () => {
     expect(() =>
       parseVersionManifest(baseManifest({ vanillaSafe: 'yes' })),
     ).toThrowError(/'vanillaSafe' must be a boolean/);
+  });
+
+  it('leaves physics undefined when the manifest declares none (#43)', () => {
+    expect(parseVersionManifest(baseManifest()).physics).toBeUndefined();
+  });
+
+  it.each([
+    ['a non-string', 5],
+    ['an empty string', ''],
+    ['an array of paths', ['physics.json']],
+  ])('rejects physics declared as %s (#43)', (_label, value) => {
+    // One path, not a list of environment-scoped descriptors like `mixins`:
+    // there is one physics binary and one all-or-nothing apply, so a per-host
+    // variant would have nothing to vary.
+    expect(() => parseVersionManifest(baseManifest({ physics: value }))).toThrowError(
+      /'physics' must be a non-empty string/,
+    );
   });
 });
 

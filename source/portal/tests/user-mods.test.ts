@@ -132,6 +132,29 @@ describe('user-mods storage', () => {
     expect(readUserMods(storage)).toEqual([withMixins, legacy]);
   });
 
+  it('round-trips the optional physics field and accepts rows without it (#43)', () => {
+    const withPhysics = record({ id: 'px', physics: { wasmHash: 'd'.repeat(64), patches: [] } });
+    const legacy = record({ id: 'old' }); // no physics key at all
+    const storage = memoryStorage();
+    expect(saveUserMods([withPhysics, legacy], storage)).toBe(true);
+    expect(readUserMods(storage)).toEqual([withPhysics, legacy]);
+  });
+
+  it('drops a row whose physics field is not an object (#43)', () => {
+    // The store is user-editable and a physics patch is a write into a binary,
+    // so a wrong-shaped row is dropped at the door rather than carried to the
+    // plan builder and explained there.
+    const good = record({ id: 'good' });
+    const storage = memoryStorage({
+      'tspml.userMods.v1': JSON.stringify([
+        good,
+        { ...record({ id: 'bad-array' }), physics: [] },
+        { ...record({ id: 'bad-string' }), physics: 'physics.json' },
+      ]),
+    });
+    expect(readUserMods(storage)).toEqual([good]);
+  });
+
   it('drops a row whose mixins field is wrong-typed rather than smuggling it through (#62)', () => {
     const good = record({ id: 'good' });
     const storage = memoryStorage({
@@ -403,6 +426,42 @@ describe('loadMods with user mods', () => {
     });
     expect(summary.loaded).toContain('desktop-mixin-mod');
     expect(summary.mixinsSkipped).toEqual([]);
+  });
+
+  it('reports a declared-but-unpasted physics.json as skipped (#43)', async () => {
+    // The worst version of this failure is the silent one: the mod loads, the
+    // list shows a green pill, and the handling is simply vanilla.
+    const withPhysics = record({ id: 'physics-mod' });
+    (withPhysics.manifest as Record<string, unknown>).physics = 'physics.json';
+    const summary = await loadMods(fakeApi(), {
+      userMods: [withPhysics],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.loaded).toContain('physics-mod');
+    expect(summary.physicsSkipped).toEqual(['physics-mod']);
+    // Not folded into the mixin gap — different remedy, different stake.
+    expect(summary.mixinsSkipped).toEqual([]);
+  });
+
+  it('does NOT report a mod whose physics.json WAS pasted (#43)', async () => {
+    const pasted = record({
+      id: 'physics-pasted',
+      physics: { wasmHash: 'd'.repeat(64), patches: [] },
+    });
+    (pasted.manifest as Record<string, unknown>).physics = 'physics.json';
+    const summary = await loadMods(fakeApi(), {
+      userMods: [pasted],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.physicsSkipped).toEqual([]);
+  });
+
+  it('does NOT report a mod that declares no physics at all (#43)', async () => {
+    const summary = await loadMods(fakeApi(), {
+      userMods: [record({ id: 'plain-mod' })],
+      importUserMod: async () => ({ default: () => {} }),
+    });
+    expect(summary.physicsSkipped).toEqual([]);
   });
 
   it('does NOT report a mod whose mixins.json WAS pasted — those ride the patch plan (#62)', async () => {

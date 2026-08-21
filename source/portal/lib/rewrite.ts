@@ -59,6 +59,29 @@ export function isBundleProxyPath(pathname: string): boolean {
 }
 
 /**
+ * Proxy paths whose GET the SW replays as a POST carrying the PHYSICS plan (#43).
+ *
+ * Shape only, for the same reason as {@link BUNDLE_PATH_RE}, and matching the map's
+ * own filename rule so a name that could not be stored cannot be replayed either.
+ * Which binaries are actually patchable is per-build map data owned by the route.
+ *
+ * Kept as a second regex rather than folded into the bundle one, because the two
+ * paths do not share a request: a bundle POST carries `{v:1,sets:[...]}` and is parsed
+ * by `parseUserPatchPlan`; a wasm POST carries `{wasmHash,patches:[...]}` and is parsed
+ * by `@tspml/wasm`'s `checkPlan`. Sending either body to the other parser yields a
+ * refusal, so the SW has to know which one it is looking at before it picks a body.
+ *
+ * The service worker carries an inline copy — `sw-sync.test.ts` compares the literals.
+ */
+export const WASM_PATH_RE = /^\/api\/proxy\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.wasm$/;
+
+/** True when `pathname` is a proxied wasm binary the SW must replay with the
+ *  physics plan. */
+export function isWasmProxyPath(pathname: string): boolean {
+  return WASM_PATH_RE.test(pathname);
+}
+
+/**
  * Rewrite a Kodub game URL to a `/api/proxy/...` URL, or `null` if `inputUrl`
  * is not an http(s) Kodub URL we should intercept.
  *
