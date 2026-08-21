@@ -1422,6 +1422,19 @@
       "selector": {
         "kind": "factory"
       }
+    },
+    "TrackEditor": {
+      "anchor": {
+        "literals": [
+          "Part index out of bounds",
+          "How to use the editor"
+        ],
+        "minHits": 2
+      },
+      "selector": {
+        "kind": "factory"
+      },
+      "surface": "112.bundle.js"
     }
   },
   "chunks": {

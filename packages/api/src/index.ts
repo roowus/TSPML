@@ -36,4 +36,13 @@ export type {
   TracksRegistry,
 } from './tracks.js';
 
+export type {
+  EditorFailure,
+  EditorFailureReason,
+  EditorInsertResult,
+  EditorInsertSuccess,
+  EditorPart,
+  EditorRegistry,
+} from './editor.js';
+
 export type { TspmlApi, TspmlLogger } from './api.js';

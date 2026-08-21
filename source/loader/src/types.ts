@@ -273,6 +273,18 @@ export const stubApi: ModApi = {
     unregister: () => false,
     list: () => [],
   },
+  // The editor's "nobody attached a bridge" answer is `not-available`, not
+  // `not-ready`: its result union has no `not-ready`, because unattached is the
+  // NORMAL state for it rather than a too-early call. `isOpen` answers `null`
+  // (cannot tell) for the same reason a real unattached registry does — a stub
+  // that said `false` would be claiming the editor is closed, which it does not
+  // know.
+  editor: {
+    available: false,
+    isOpen: () => null,
+    getParts: () => [],
+    insertParts: () => Promise.resolve({ ok: false, reason: 'not-available' }),
+  },
   logger: console,
   version: '0.0.0-stub',
 };
