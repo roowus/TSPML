@@ -26,6 +26,9 @@ export default defineConfig({
       '@tspml/mappings': path.resolve(here, '../mappings/src/index.ts'),
       '@tspml/transform': path.resolve(here, '../transform/src/index.ts'),
       '@tspml/shared': path.resolve(here, '../shared/src/index.ts'),
+      // lib/wasm-serve.ts (#43) imports @tspml/wasm at RUNTIME — same
+      // test-before-build reason as the rest of this list.
+      '@tspml/wasm': path.resolve(here, '../wasm/src/index.ts'),
       '@': here,
     },
   },

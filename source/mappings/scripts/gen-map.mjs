@@ -458,6 +458,17 @@ try {
     console.error(`targets carried forward: ${Object.keys(prev.targets).length} entries from ${PREV_MAP} (verify against the new build)`);
   }
   if (prev.chunks && typeof prev.chunks === "object") carriedChunks = prev.chunks;
+  // `wasm` (#43) carries with the same hazard as chunks and one difference in degree.
+  // The binary is fetched separately from every bundle, so a --chunks regen does not
+  // re-pin it and there is no GEN_WASM equivalent: it always rides across unverified.
+  // Dropping the section would disable physics patching with no error anywhere, which
+  // is what `assertWasmCarried` (diff.mjs) refuses. A STALE pin is self-limiting by
+  // design — the portal serves vanilla — which is why the carry is acceptable and the
+  // drop is not.
+  if (prev.wasm && typeof prev.wasm === "object") {
+    map.wasm = prev.wasm;
+    console.error(`wasm carried forward: ${Object.keys(prev.wasm).length} entries from ${PREV_MAP} (re-pin against the new build's binary before promoting)`);
+  }
 } catch {
   // No baseline map / baseline has no targets — none to carry (human adds them later).
 }

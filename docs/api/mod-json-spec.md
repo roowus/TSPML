@@ -58,8 +58,10 @@ my-mod/
 
   "mixins":    [ { "config": "mixins/cars.json", "environment": "worker" } ],  // per-config environment is honored: a config for another host contributes nothing (#21)
 
+  "physics":   "physics.json",             // f32 constant rewrites for the game's physics binary (#43); one path, not a per-environment list
+
   "capabilities": ["dom", "storage"],      // declared + surfaced as warn-only labels (M6-B); consent prompts / API scoping are reserved (#21)
-  "vanillaSafe": true,                     // false if touches physics/multiplayer — warn-only label, shipped (M6-B)
+  "vanillaSafe": true,                     // false if touches physics/multiplayer — warn-only label, shipped (M6-B); declaring `physics` sets the leaderboard-risk warning regardless of what this says
 
   "custom": {}                             // arbitrary tooling / inter-mod data
 }
@@ -74,6 +76,32 @@ An ES module whose **default export** is a class extending `TspmlMod` (lifecycle
 The relationship fields: `depends` (must be present & satisfied or the mod won't load), `recommends` (soft warn), `suggests` (informational), `conflicts` (both load but warn), `breaks` (if the named mod is installed at a matching version, the **declaring** mod is soft-disabled — excluded from the load order with a `breaks-disabled` warning — while the named mod and everything else load normally; a mod that `depends` on a disabled mod cascades to disabled, #6), `includes` (nested/contained mod — **not implemented, see below**), `provides` (drop-in for another id). Special ids resolve against the host's `ResolveContext`: `polytrack` (the running game version — also what `targets` is checked against), `tspml` (loader version), `tspml-api` (api version). **All three resolve in the portal and the dev harness** (#73); both report `tspml` and `tspml-api` at **0.5.0**, so `depends: { "tspml-api": "^0.5.0" }` is satisfied and a range naming a version TSPML does not have is refused with a reason rather than silently loaded. Both are pre-1.0 on purpose: the mod-facing surface is not frozen, and under 0.x semver a **minor** bump is the breaking one. Predicates use npm `semver` ranges. Load order is an **automatic topological sort** with cycle detection + explicit conflict reporting; user `priority` hints layer on top.
 
 **Environment & targets enforcement (#21).** When the host states `hostEnvironment`, a mod declaring a *different concrete* `environment` is soft-disabled (excluded from the order, reported with an `environment-mismatch` warning) — `"*"` on either side means no constraint. When the host states its game version, a mod whose non-empty `targets` ranges (OR'd together) don't match is soft-disabled with an `incompatible-target` warning. Both cascade exactly like `breaks`: a mod depending on a disabled mod is disabled too, and everything unrelated still loads. A host that states neither fact filters nothing. Mixin-descriptor `environment` is enforced by the host applying the mixins: the web portal skips configs declared `desktop`/`worker` (and says so in the UI) rather than applying them anyway.
+
+## `physics` (#43)
+
+A path, relative to `mod.json`, to a `physics.json` that rewrites f32 constants inside the game's compiled physics binary:
+
+```jsonc
+{
+  "wasmHash": "d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e",
+  "patches": [
+    {
+      "name": "grip",                      // human label, shown in refusals and reports
+      "signature": "…64 hex chars…",       // fingerprint of the function holding the constant
+      "oldValue": 1.05,                    // the f32 currently there; must occur exactly once in that function
+      "newValue": 1.4
+    }
+  ]
+}
+```
+
+One path, not a list of environment-scoped descriptors like `mixins`: there is one physics binary and one all-or-nothing apply, so a per-host variant would have nothing to vary. A host that cannot patch the binary skips the file entirely rather than applying part of it.
+
+Two independent gates stand between a patch and a write, and both fail closed. `wasmHash` pins the exact bytes the patches were derived against; if the served binary is not those bytes, nothing is applied and the host says so. Separately, each `signature` is re-derived structurally from the binary in hand — by the set of float constants and the histogram of opcodes in a function, never by an offset or index — and a signature matching zero functions or more than one is refused. A stale offset would otherwise mean writing a float into whatever now lives at that address.
+
+Declaring `physics` marks the mod as a leaderboard risk whatever `vanillaSafe` claims: rewriting a constant changes how every lap time is produced. The label is warn-only, as everywhere else in TSPML — the player decides.
+
+Limits: 16 patches per mod, 32 across all enabled mods. Two mods patching the same constant is a conflict, and the later one is dropped with a reason rather than both being refused.
 
 > ⚠️ **`includes` is parsed but not implemented (#16).** It would let a mod package ship another mod nested inside it, and TSPML has no delivery mechanism for that — we cannot yet install a mod from a directory at all, let alone one nested inside another package. Declaring it validates cleanly and now emits an `unsupported-includes` warning; **the nested mod will not be loaded.** Ship it separately and use `depends` instead. The field stays in the schema (rejecting it would break manifests that are valid per this spec) and may be honoured later.
 

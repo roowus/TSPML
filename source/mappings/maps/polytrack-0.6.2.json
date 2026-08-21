@@ -1462,5 +1462,13 @@
       "bytes": 6391,
       "role": "settings / options UI"
     }
+  },
+  "wasm": {
+    "polytrack_physics.wasm": {
+      "file": "polytrack_physics.wasm",
+      "hash": "sha256:d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e",
+      "bytes": 396005,
+      "role": "physics simulation (Bullet, compiled)"
+    }
   }
 }

@@ -27,6 +27,7 @@ export type {
   TargetSelector,
   TargetSpec,
   UnresolvedEntry,
+  WasmEntry,
 } from './types.js';
 export { MAIN_SURFACE_FILE, MAP_FORMAT_VERSION, targetSurface } from './types.js';
 
@@ -42,9 +43,16 @@ export {
 // Resolver
 export {
   createResolver,
+  patchableWasmFiles,
   resolve,
   resolveChunk,
   resolveTarget,
+  resolveWasm,
   transformableChunkIds,
 } from './resolver.js';
-export type { ChunkResolveResult, Resolver, TargetResolveResult } from './resolver.js';
+export type {
+  ChunkResolveResult,
+  Resolver,
+  TargetResolveResult,
+  WasmResolveResult,
+} from './resolver.js';

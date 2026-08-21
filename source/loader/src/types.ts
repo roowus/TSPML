@@ -71,6 +71,21 @@ export interface VersionManifest {
   includes?: DependencyMap;
   provides?: string[];
   mixins?: MixinDescriptor[];
+  /**
+   * Path to the mod's `physics.json` — f32 constant rewrites applied to the
+   * game's compiled physics binary, pinned to a `wasmHash` (#43).
+   *
+   * A single path, not an array of environment-scoped descriptors like
+   * {@link MixinDescriptor}: there is one physics binary and one all-or-nothing
+   * apply, so per-environment variants would have nothing to vary. A host that
+   * cannot patch the binary skips the file entirely rather than applying part
+   * of it.
+   *
+   * Declaring this is a leaderboard-risk signal on its own — see
+   * `classifySafety`. Rewriting a physics constant changes how every lap time
+   * is produced, whatever the manifest claims about `vanillaSafe`.
+   */
+  physics?: string;
   capabilities?: string[];
   vanillaSafe?: boolean;
   /** Arbitrary tooling / inter-mod data. */

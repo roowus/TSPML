@@ -78,6 +78,11 @@ export async function refreshFromSources(
         manifest: result.mod.manifest,
         code: result.mod.code,
         ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+        // #43: the re-fetched physics.json REPLACES the stored one, and its
+        // absence means absence. A mod that dropped its physics.json upstream
+        // must stop patching the binary here too — keeping the old copy would
+        // apply constants the current build was never derived against.
+        ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
         enabled: mod.enabled,
         addedAt: mod.addedAt,
         sourceUrl: mod.sourceUrl,

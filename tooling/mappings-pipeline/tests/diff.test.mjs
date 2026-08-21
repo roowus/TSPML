@@ -1,6 +1,12 @@
 // Unit tests for src/diff.mjs — the pure human-review core (CI-runnable, no bundle).
 import { describe, expect, it } from 'vitest';
-import { diffMaps, formatDiff, assertTargetsCarried, assertChunksCarried } from '../src/diff.mjs';
+import {
+  diffMaps,
+  formatDiff,
+  assertTargetsCarried,
+  assertChunksCarried,
+  assertWasmCarried,
+} from '../src/diff.mjs';
 
 /** Build a minimal valid GameMap. */
 const map = (overrides = {}) => ({
@@ -400,5 +406,49 @@ describe('formatDiff', () => {
     const txt = formatDiff(diffMaps(a, a));
     expect(txt).not.toContain('chunk pins');
     expect(txt).not.toContain('chunks     :');
+  });
+});
+
+describe('assertWasmCarried (#43)', () => {
+  const wasm = (file, hash) => ({ file, hash, bytes: 396005, role: 'physics simulation' });
+  const WASM = { 'polytrack_physics.wasm': wasm('polytrack_physics.wasm', 'sha256:d4ef') };
+
+  it('throws when the candidate dropped the physics binary', () => {
+    // The guard's whole reason to exist. gen-map carries `wasm` across from the
+    // baseline; if that step ever stops running, the candidate still validates, still
+    // resolves, still serves a perfectly playable game — with physics patching
+    // silently off. Quieter than the chunk case, since regen has no fresh-pin path
+    // for the binary that could make the loss visible.
+    expect(() => assertWasmCarried(map({ wasm: WASM }), map({ gameVersion: '0.7.0' })))
+      .toThrow(/missing polytrack_physics\.wasm/);
+  });
+
+  it('explains the consequence, not just the delta', () => {
+    expect(() => assertWasmCarried(map({ wasm: WASM }), map({ gameVersion: '0.7.0' })))
+      .toThrow(/never patched/);
+  });
+
+  it('no-ops when the entry survives, even carrying a stale pin', () => {
+    // A stale pin is self-limiting: the portal hashes the live binary and serves
+    // vanilla on mismatch. A missing entry is not self-limiting, which is why one is
+    // a hard failure and the other is not even a warning here.
+    const prev = map({ wasm: WASM });
+    const next = map({ gameVersion: '0.7.0', wasm: WASM });
+    expect(() => assertWasmCarried(prev, next)).not.toThrow();
+  });
+
+  it('no-ops when the baseline declared no wasm (every pre-#43 map)', () => {
+    expect(() => assertWasmCarried(map({}), map({ gameVersion: '0.7.0' }))).not.toThrow();
+    expect(() => assertWasmCarried(map({}), map({ wasm: WASM }))).not.toThrow();
+  });
+
+  it('has no allowDrop escape hatch, unlike the chunk guard', () => {
+    // Deliberate asymmetry. A build really can stop splitting a chunk out, so that
+    // drop needs a human override. A game does not stop shipping its physics engine
+    // between point releases, so there is no legitimate drop to wave through — and an
+    // override nobody needs is an override somebody eventually uses to silence this.
+    const prev = map({ wasm: WASM });
+    const next = map({ gameVersion: '0.7.0' });
+    expect(() => assertWasmCarried(prev, next, { allowDrop: true })).toThrow(/missing/);
   });
 });

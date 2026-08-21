@@ -5,7 +5,9 @@
 > re-derivable across recompiles, the way anchor discipline works for JS?
 >
 > **Measured answer: yes, for 97.4% of functions in the shipped 0.6.2 binary.**
-> Tool: [`tooling/mappings-pipeline/src/wasm-locate.mjs`](../../tooling/mappings-pipeline/src/wasm-locate.mjs).
+> Tool: [`source/wasm/src/locate.ts`](../../source/wasm/src/locate.ts) (`@tspml/wasm`).
+> The spike ran as `tooling/mappings-pipeline/src/wasm-locate.mjs`; the code moved into a
+> package once the portal needed to reach it at runtime, unchanged in behaviour.
 
 ## Why the question matters
 

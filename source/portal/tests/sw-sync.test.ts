@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { BUNDLE_PATH_RE, isBundleProxyPath } from '../lib/rewrite';
+import { BUNDLE_PATH_RE, isBundleProxyPath, isWasmProxyPath, WASM_PATH_RE } from '../lib/rewrite';
 
 const SW_SRC = readFileSync(
   fileURLToPath(new URL('../public/sw.js', import.meta.url)),
@@ -42,6 +42,29 @@ describe('public/sw.js — inline copies match their canonical source', () => {
     expect(swConst('PLAN_CACHE_URL')).toBe(JSON.stringify(PLAN_CACHE.url).replace(/"/g, "'"));
   });
 
+  it('WASM_PATH_RE is character-identical to lib/rewrite.ts (#43)', () => {
+    expect(swConst('WASM_PATH_RE')).toBe(WASM_PATH_RE.toString());
+  });
+
+  it('the physics cache location matches lib/physics-plan.ts PHYSICS_CACHE (#43)', async () => {
+    const { PHYSICS_CACHE, PHYSICS_REPORT_MESSAGE } = await import('../lib/physics-plan');
+    expect(swConst('PHYSICS_CACHE_NAME')).toBe(JSON.stringify(PHYSICS_CACHE.name).replace(/"/g, "'"));
+    expect(swConst('PHYSICS_CACHE_URL')).toBe(JSON.stringify(PHYSICS_CACHE.url).replace(/"/g, "'"));
+    // The message type too: the page filters on it, so a drift here means physics
+    // reports are posted into the void and the panel stays permanently blank.
+    expect(swConst('PHYSICS_REPORT_MESSAGE')).toBe(
+      JSON.stringify(PHYSICS_REPORT_MESSAGE).replace(/"/g, "'"),
+    );
+  });
+
+  it('keeps the two plan caches at DIFFERENT locations', () => {
+    // They carry different shapes parsed by different validators. One entry holding
+    // both would be half-usable at either end, and the failure would look like "my
+    // mixins stopped applying when I added a physics mod".
+    expect(swConst('PHYSICS_CACHE_NAME')).not.toBe(swConst('PLAN_CACHE_NAME'));
+    expect(swConst('PHYSICS_CACHE_URL')).not.toBe(swConst('PLAN_CACHE_URL'));
+  });
+
   it('bumps SW_VERSION — a stale worker serves the old intercept logic forever', () => {
     // Browsers only replace an installed worker when its BYTES change; the version
     // string is how a change is made deliberate and greppable.
@@ -56,8 +79,23 @@ describe('the shipped worker actually uses the matcher it declares', () => {
     const uses = SW_SRC.match(/isBundleProxyPath\(/g) ?? [];
     // one definition + one call per branch
     expect(uses.length).toBeGreaterThanOrEqual(3);
-    expect(SW_SRC).toContain('isBundleProxyPath(rewritten.split');
+    expect(SW_SRC).toContain('isBundleProxyPath(rewrittenPath)');
     expect(SW_SRC).toContain('isBundleProxyPath(url.pathname)');
+  });
+
+  it('routes both fetch-handler branches through isWasmProxyPath too (#43)', () => {
+    // The same-origin branch is the one the physics binary actually lands in (the
+    // game requests it relative to the injected <base>), so a wasm matcher wired
+    // only into the cross-origin branch would never fire in production.
+    expect(SW_SRC).toContain('isWasmProxyPath(rewrittenPath)');
+    expect(SW_SRC).toContain('isWasmProxyPath(url.pathname)');
+  });
+
+  it('reports the physics outcome on BOTH the POST and the plain-GET path', () => {
+    // A wasm response carries no prelude, so the header is the only channel and the
+    // SW is the only reader. Reporting on the POST alone would leave 'stale-pin' —
+    // the case where no plan is even sent — permanently invisible.
+    expect((SW_SRC.match(/reportPhysics\(res\.clone\(\)/g) ?? []).length).toBe(2);
   });
 });
 
@@ -87,5 +125,43 @@ describe('isBundleProxyPath — the paths the SW replays as a POST', () => {
     // /public would go stale silently. An undeclared id gets a 405 and falls back
     // to the plain GET, which is the correct handling for it anyway.
     expect(isBundleProxyPath('/api/proxy/999999.bundle.js')).toBe(true);
+  });
+});
+
+describe('isWasmProxyPath — the paths the SW replays with the physics plan (#43)', () => {
+  it.each(['/api/proxy/polytrack_physics.wasm', '/api/proxy/sim.wasm', '/api/proxy/a-b.c.wasm'])(
+    'replays %s',
+    (p) => {
+      expect(isWasmProxyPath(p)).toBe(true);
+    },
+  );
+
+  it.each([
+    '/api/proxy/',
+    '/api/proxy/main.bundle.js',
+    '/api/proxy/sub/physics.wasm',
+    '/api/proxy/../physics.wasm',
+    '/api/proxy/physics.wasm/x',
+    '/api/proxy/physics.wasm.js',
+    '/api/proxy/physics.wasm?x=1',
+    '/physics.wasm',
+  ])('does not replay %s', (p) => {
+    expect(isWasmProxyPath(p)).toBe(false);
+  });
+
+  it('never overlaps with the bundle matcher', () => {
+    // The two POSTs carry different bodies and are read by different validators, so
+    // a path matching both would get one of them sent to the wrong parser.
+    for (const p of [
+      '/api/proxy/main.bundle.js',
+      '/api/proxy/112.bundle.js',
+      '/api/proxy/polytrack_physics.wasm',
+    ]) {
+      expect(isBundleProxyPath(p) && isWasmProxyPath(p)).toBe(false);
+    }
+  });
+
+  it('matches the SHAPE only — the route owns which binaries are declared', () => {
+    expect(isWasmProxyPath('/api/proxy/anything_at_all.wasm')).toBe(true);
   });
 });

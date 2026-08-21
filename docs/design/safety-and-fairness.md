@@ -19,6 +19,20 @@ Per the locked **warn-only** decision, TSPML **labels** these and **discloses ri
 
 **Ban-risk disclosure (must be prominent):** PolyTrack's leaderboards validate deterministic input replays, and a server-side anti-cheat is "in development." A physics/speed mod can trivially break replay validity, and once anti-cheat ships, uploading such runs risks **account bans from leaderboards.** Docs, the mod panel, and the publish flow state this plainly. (If the project later tightens to strict quarantine, the classification machinery already exists — only the gating policy changes.)
 
+### The game notices (measured, #43)
+
+Worth recording because it was verified rather than assumed. With the WASM patcher live, three runs were driven through the portal against the same server and the same headless browser:
+
+| Run | Physics plan | Game's determinism check |
+| --- | --- | --- |
+| no mod installed | none | passes |
+| mod installed, plan pinned to another build | **refused** (vanilla bytes served) | passes |
+| mod installed, plan applied | **1 constant rewritten** | **fails** — "Some leaderboard features are disabled" |
+
+The middle row is what makes this evidence rather than a coincidence: the same mod is installed and the same code runs, and the only difference is whether the constant was actually written. So PolyTrack detects the rewritten physics on its own and disables the affected leaderboard features itself, without TSPML telling it anything.
+
+This does not change the warn-only stance, and it is not a substitute for one. It does mean the honest thing to tell a player is not merely "this might be a problem later" but "the game already responded to this, in this session." The portal's physics panel says the session's lap times are not vanilla for exactly this reason.
+
 ## Determinism lint (warnings)
 
 Physics-context mods (worker environment, or subscribing to `physics.preStep/postStep`) are **statically linted** for non-deterministic APIs (`Date.now`, `Math.random`, `performance.now`, `crypto.getRandomValues`, `fetch`). Under warn-only these are **warnings** (not blocks), surfaced to the modder at authoring time and flagged on the mod's profile. A **seeded deterministic RNG** primitive is provided for mods that need randomness without breaking replays.

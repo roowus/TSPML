@@ -32,7 +32,7 @@ import { mkdir, readdir, readFile, stat, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { diffMaps, formatDiff, assertTargetsCarried, assertChunksCarried } from "../src/diff.mjs";
+import { diffMaps, formatDiff, assertTargetsCarried, assertChunksCarried, assertWasmCarried } from "../src/diff.mjs";
 import { verifyTargets, formatVerifications, loadModuleSources } from "../src/verify-targets.mjs";
 import { fetchVersion } from "../src/fetch.mjs";
 
@@ -261,6 +261,9 @@ async function modeRegen(version, flags) {
   // loss of the two: it validates, resolves every main-bundle symbol, and serves the
   // game correctly — only chunk transforms stop, with nothing logged.
   assertChunksCarried(prev, candidate, { allowDrop: flags.allowChunkDrop });
+  // And for the physics binary (#43) — quieter still, since regen never re-pins it and
+  // so has no fresh-pin path that could make the loss visible.
+  assertWasmCarried(prev, candidate);
 
   // 4. diff
   process.stderr.write(`[4/5] diff vs committed ${prevPath}\n`);

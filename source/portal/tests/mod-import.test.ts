@@ -174,6 +174,135 @@ describe('importModFromUrl — manifest URL', () => {
   });
 });
 
+describe('importModFromUrl — physics.json (#43)', () => {
+  const HASH = 'd4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e';
+  const SIG = '1'.repeat(64);
+  const PHYSICS = { wasmHash: HASH, patches: [{ name: 'grip', signature: SIG, oldValue: 1.05, newValue: 1.4 }] };
+
+  it('fetches the declared physics.json relative to the manifest', async () => {
+    const { impl, requested } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'physics.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+      [`${BASE}/physics.json`]: { body: JSON.stringify(PHYSICS), contentType: 'application/json' },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.mod.physics).toEqual(PHYSICS);
+    expect(requested).toContain(`${BASE}/physics.json`);
+  });
+
+  it('resolves a subdirectory path the same way the entrypoint does', async () => {
+    const { impl, requested } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'data/physics.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+      [`${BASE}/data/physics.json`]: { body: JSON.stringify(PHYSICS), contentType: 'application/json' },
+    });
+    expect((await importModFromUrl(`${BASE}/mod.json`, impl)).ok).toBe(true);
+    expect(requested).toContain(`${BASE}/data/physics.json`);
+  });
+
+  it('leaves physics undefined when the manifest declares none', async () => {
+    const { impl } = fakeFetch({
+      [`${BASE}/mod.json`]: { body: JSON.stringify(MANIFEST), contentType: 'application/json' },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.mod.physics).toBeUndefined();
+  });
+
+  it('fails the WHOLE import when the declared physics.json is missing', async () => {
+    // Not a partial success: the mod said it patches the binary, and importing
+    // it minus that file would install something that quietly is not the mod.
+    const { impl } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'physics.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('HTTP 404') });
+    if (r.ok) return;
+    expect(r.error).toContain('physics');
+  });
+
+  it('refuses a physics.json this build cannot parse, at import time', async () => {
+    // The author is here NOW. Storing it and excluding it from the plan an hour
+    // later would report the failure to whoever is playing, not whoever can fix it.
+    const { impl } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'physics.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+      [`${BASE}/physics.json`]: {
+        body: JSON.stringify({ patches: PHYSICS.patches }), // no wasmHash
+        contentType: 'application/json',
+      },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('wasmHash') });
+  });
+
+  it('refuses a physics path that resolves to a kodub URL, without fetching it', async () => {
+    const { impl, requested } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'https://app-polytrack.kodub.com/p.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r.ok).toBe(false);
+    expect(requested).not.toContain('https://app-polytrack.kodub.com/p.json');
+  });
+
+  it('enforces the physics size cap', async () => {
+    const { impl } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'physics.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+      [`${BASE}/physics.json`]: { body: 'x'.repeat(IMPORT_LIMITS.maxPhysicsChars + 1) },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('limit') });
+  });
+
+  it('stores the RAW file, not this build’s normalised plan', async () => {
+    // The record's contract is "the file as the author wrote it": it is re-parsed
+    // on every use, so freezing today's normalisation into storage would make an
+    // upgraded parser disagree with what the author actually shipped.
+    const raw = {
+      wasmHash: `sha256:${HASH.toUpperCase()}`,
+      patches: [{ name: 'grip', signature: SIG.toUpperCase(), oldValue: 1.05, newValue: 1.4 }],
+      note: 'a field this build ignores',
+    };
+    const { impl } = fakeFetch({
+      [`${BASE}/mod.json`]: {
+        body: JSON.stringify({ ...MANIFEST, physics: 'physics.json' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/index.js`]: { body: 'export default () => {};' },
+      [`${BASE}/physics.json`]: { body: JSON.stringify(raw), contentType: 'application/json' },
+    });
+    const r = await importModFromUrl(`${BASE}/mod.json`, impl);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.mod.physics).toEqual(raw);
+  });
+});
+
 describe('importModFromUrl — fresh (the ⟳ reload path)', () => {
   // A stub that matches routes IGNORING the query string and records what the
   // import actually sent, so the cache-defeat contract is pinned: without

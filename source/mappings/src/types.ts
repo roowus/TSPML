@@ -202,6 +202,35 @@ export interface ChunkEntry {
 }
 
 /**
+ * A patchable WebAssembly binary the game loads (#43), keyed by its served filename.
+ *
+ * Physics is the one subsystem the JS surfaces cannot reach: `polytrack_physics.wasm`
+ * is fetched as a separate file and never passes through the bundle transform. Giving
+ * it a map entry makes it the same kind of thing as a chunk — an allowlisted file with
+ * its OWN pin — rather than a special case in host code.
+ *
+ * The pin matters more here than anywhere else in the map. A stale JS anchor means a
+ * patch that misses; a stale byte offset in a binary means writing a float into
+ * whatever now occupies that address, which is silent corruption of a running physics
+ * sim. `@tspml/wasm` locates constants structurally so offsets are never stored, and
+ * this hash is the outer gate: bytes that are not the pinned build are served vanilla
+ * and nothing is attempted against them.
+ *
+ * No `role`-style free text and no per-constant data: what may be patched is decided
+ * per request by a plan naming function fingerprints, not by a list in the map.
+ */
+export interface WasmEntry {
+  /** Served filename, e.g. `polytrack_physics.wasm`. One path segment, no slashes. */
+  readonly file: string;
+  /** sha256 of THIS binary's bytes. Independent of every JS pin. */
+  readonly hash: BundleHash;
+  /** Byte length as fetched, for provenance / drift reporting. */
+  readonly bytes: number;
+  /** What the binary does, for humans reading a diff (e.g. "physics simulation"). */
+  readonly role: string;
+}
+
+/**
  * A versioned symbol map for a single PolyTrack build.
  *
  * `bundleHash` is the integrity pin: the resolver FAILS CLOSED when the live
@@ -231,6 +260,12 @@ export interface GameMap {
    * here is proxied verbatim, never transformed.
    */
   readonly chunks?: Readonly<Record<string, ChunkEntry>>;
+  /**
+   * Patchable WASM binaries for this build (#43), keyed by served filename. Optional
+   * and an allowlist on the same terms as `chunks`: a binary absent here is proxied
+   * verbatim, never patched.
+   */
+  readonly wasm?: Readonly<Record<string, WasmEntry>>;
 }
 
 /** The concrete target returned by a successful resolution. */

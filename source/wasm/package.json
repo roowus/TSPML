@@ -1,0 +1,29 @@
+{
+  "name": "@tspml/wasm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Structural location and fail-closed patching of constants inside PolyTrack's physics WASM (#43). Runtime-reachable: the portal serves patched physics bytes from this, and the mappings pipeline derives plans with it.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.tests.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

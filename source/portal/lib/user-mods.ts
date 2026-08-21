@@ -45,6 +45,17 @@ export interface UserModRecord {
    * labor as `manifest`.
    */
   readonly mixins?: readonly Record<string, unknown>[];
+  /**
+   * The mod's pasted `physics.json` (optional fourth paste, #43): a `wasmHash` pin
+   * plus f32 constant rewrites for `polytrack_physics.wasm`. Absent = the mod does
+   * not touch physics, which is almost every mod.
+   *
+   * Stored raw (unknown) like `manifest` and `mixins`. It is re-parsed by
+   * `buildPhysicsPlan` on every use and re-validated server-side by `@tspml/wasm`;
+   * a stored shape this build cannot read must degrade to "not applied, and here is
+   * why", never to a write into the binary.
+   */
+  readonly physics?: Record<string, unknown>;
   /** Disabled mods stay stored but are not loaded. */
   readonly enabled: boolean;
   /** ISO date the mod was added (display only). */
@@ -141,6 +152,11 @@ function isUserModRecord(v: unknown): v is UserModRecord {
     // array of objects — a wrong-typed field drops the row like any other
     // malformed entry rather than smuggling junk into the transform path.
     (v.mixins === undefined || (Array.isArray(v.mixins) && v.mixins.every(isRecord))) &&
+    // `physics` is optional (#43, and absent on almost every mod); when present it
+    // must be an object. Its CONTENTS are re-parsed on every use rather than trusted
+    // from storage — the store is user-editable and a physics patch is a write into
+    // a binary, so "it validated when it was pasted" is not a claim worth carrying.
+    (v.physics === undefined || isRecord(v.physics)) &&
     // `sourceUrl` is optional (pasted mods and pre-reload rows lack it); when
     // present it must be a string — reload hands it straight to the import
     // path, which re-checks the host rules on every use.
