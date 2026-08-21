@@ -45,15 +45,16 @@ export interface TransformSurface {
    * vanilla — that chunk only. The main bundle's gate is untouched by a chunk verdict.
    */
   readonly expectedHash: string;
-  /** Loader-owned patches for this file. Empty for chunks until #87 Phase B. */
+  /** Loader-owned patches for this file. Empty for chunks until #87 Phase C. */
   readonly basePatches: readonly Record<string, unknown>[];
 }
 
 /**
  * Loader-owned base patches per surface.
  *
- * Chunks have none yet: #98 builds the surface, #87 Phase B is what puts undo-integrated
- * editor patches on chunk 112. An empty base is not a no-op path — user mixins still
+ * Chunks have none yet. #98 (which IS #87's Phase B) builds the surface; #87 Phase C is
+ * what puts undo-integrated editor patches on chunk 112, making it the first chunk with a
+ * non-empty base. An empty base is not a no-op path — user mixins still
  * compose against the chunk — but with neither base nor applicable user patches the
  * caller serves the upstream bytes untouched rather than running them through a babel
  * round-trip that can only change them.
