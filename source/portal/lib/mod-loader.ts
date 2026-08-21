@@ -39,6 +39,17 @@ export interface ModLoadSummary {
    */
   readonly mixinsSkipped: readonly string[];
   /**
+   * The same gap for `physics` (#43): the manifest names a `physics.json` but
+   * the stored record carries none, so nothing reaches the wasm plan.
+   *
+   * Kept as its own list rather than folded into `mixinsSkipped` because the
+   * remedy differs and so does the stake. A missing mixins.json costs the
+   * author a JS patch; a missing physics.json means the mod's handling changes
+   * are absent while the mod itself loads and looks fine, which reads as "the
+   * physics patch did nothing" — the exact silence this project exists to end.
+   */
+  readonly physicsSkipped: readonly string[];
+  /**
    * Tear down every loaded mod, in reverse load order (#17). Idempotent.
    * The caller emits `loader.onUnload` around this — the loader itself has no
    * emit capability (`TspmlApi.events` is a subscribe-only view of the bus).
@@ -192,6 +203,10 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
   // them — see ModLoadSummary.mixinsSkipped. Records WITH pasted mixins ride
   // the request-carried plan (#62), so they don't belong here.
   const mixinsSkipped: string[] = [];
+  // #43: the same gap for physics. No environment filter here — unlike a mixin
+  // config there is only one physics binary and one declaration, so a manifest
+  // that names one names it for this host too.
+  const physicsSkipped: string[] = [];
   for (const desc of descriptors) {
     try {
       const manifest = parseVersionManifest(desc.manifest);
@@ -206,6 +221,9 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
       if (record !== undefined && record.mixins === undefined && declaresHostMixins) {
         mixinsSkipped.push(manifest.id);
       }
+      if (record !== undefined && record.physics === undefined && manifest.physics !== undefined) {
+        physicsSkipped.push(manifest.id);
+      }
     } catch {
       // Bad manifest — already in `failed`; skip classification.
     }
@@ -216,6 +234,7 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
     failed,
     safety,
     mixinsSkipped,
+    physicsSkipped,
     unload: async () => {
       const un = await result.unload();
       for (const [id, s] of Object.entries(un.status)) {

@@ -40,6 +40,13 @@ import {
   USER_PATCH_LIMITS,
 } from '@/lib/user-patches';
 import type { UserMixinReport } from '@/lib/user-patches';
+import {
+  asPhysicsReport,
+  buildPhysicsPlan,
+  parsePhysicsJson,
+  PHYSICS_CACHE,
+} from '@/lib/physics-plan';
+import type { PhysicsExclusion, PhysicsReport } from '@/lib/physics-plan';
 import { teardown } from '@/lib/teardown';
 import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
 
@@ -70,7 +77,8 @@ import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
  *
  * Layout/styling lives in globals.css. The headless smokes assert on this
  * page's rendered text and structure (aside[aria-label="Mods"], the Add form's
- * <summary> + three textareas, the "Your mixins" heading, the restart banner's
+ * <summary> + textareas 0-2 in that order — box 4 (physics.json, #43) is
+ * APPENDED after them for exactly this reason, the "Your mixins" heading, the restart banner's
  * "need a restart" / "reload now", the `mods:`/`safety:` status lines, and the
  * empty-list placeholder copy) — keep those stable when reshaping the UI.
  */
@@ -208,6 +216,44 @@ async function parkUserPatchPlan(mods: readonly UserModRecord[]): Promise<{
   return { fingerprint, sets: plan.sets.length, overCap, envSkipped, cacheOk };
 }
 
+/**
+ * The same park, for the PHYSICS plan (#43). Separate cache entry, separate
+ * fingerprint, separate everything — see lib/physics-plan.ts for why the two
+ * plans do not share a body.
+ *
+ * The fingerprint is just the serialized plan rather than a hash: it is only
+ * ever compared to another one for equality (parked vs served → restart
+ * banner), never transmitted, and a physics plan is at most 32 small patches,
+ * so hashing it would buy nothing but a dependency.
+ */
+async function parkPhysicsPlan(mods: readonly UserModRecord[]): Promise<{
+  fingerprint: string | null;
+  patches: number;
+  excluded: PhysicsExclusion[];
+  cacheOk: boolean;
+}> {
+  const { plan, excluded } = buildPhysicsPlan(mods);
+  const body = plan === null ? null : JSON.stringify(plan);
+  let cacheOk = true;
+  try {
+    const cache = await caches.open(PHYSICS_CACHE.name);
+    if (body === null) {
+      // No plan means the SW must issue the plain GET: the vanilla binary is
+      // the correct answer here, and a stale entry would patch a session whose
+      // mods no longer ask for it.
+      await cache.delete(PHYSICS_CACHE.url);
+    } else {
+      await cache.put(
+        PHYSICS_CACHE.url,
+        new Response(body, { headers: { 'content-type': 'application/json' } }),
+      );
+    }
+  } catch {
+    cacheOk = false;
+  }
+  return { fingerprint: body, patches: plan?.patches.length ?? 0, excluded, cacheOk };
+}
+
 export default function PlayPage(): ReactElement {
   const [swState, setSwState] = useState<SwState>('idle');
   const [swError, setSwError] = useState<string | null>(null);
@@ -233,6 +279,7 @@ export default function PlayPage(): ReactElement {
   const [draftManifest, setDraftManifest] = useState('');
   const [draftCode, setDraftCode] = useState('');
   const [draftMixins, setDraftMixins] = useState('');
+  const [draftPhysics, setDraftPhysics] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   // #62 user-mixin plumbing. The plan must sit in the Cache API BEFORE the game
   // iframe mounts (the SW reads it while serving the bundle), so the mount
@@ -247,6 +294,17 @@ export default function PlayPage(): ReactElement {
   // DIFFERENT environment (desktop/worker) — left out of the plan, said out loud.
   const [mixinEnvSkipped, setMixinEnvSkipped] = useState<readonly string[]>([]);
   const [mixinNotice, setMixinNotice] = useState<string | null>(null);
+  // #43 physics plumbing, deliberately parallel to the mixin plumbing above and
+  // deliberately not merged into it: a physics patch is a float written into the
+  // compiled binary, and the ways it can go wrong (a pin naming another build,
+  // two mods over one constant) have nothing in common with a mixin's.
+  const [physicsExcluded, setPhysicsExcluded] = useState<readonly PhysicsExclusion[]>([]);
+  const [physicsSkipped, setPhysicsSkipped] = useState<readonly string[]>([]);
+  const [physicsNotice, setPhysicsNotice] = useState<string | null>(null);
+  // The SW's report of what the route actually did to the served binary. Only
+  // the SW can see it (a wasm response carries no prelude to report in), so this
+  // arrives as a postMessage — until it does, the honest answer is "nothing yet".
+  const [physicsReport, setPhysicsReport] = useState<PhysicsReport | null>(null);
   const [needsRestart, setNeedsRestart] = useState(false);
   // Fullscreen is on the STAGE wrapper, not the iframe: the overlay button must
   // stay visible (and clickable) in fullscreen to offer the way back out.
@@ -313,6 +371,11 @@ export default function PlayPage(): ReactElement {
   // rapid toggles must not land their cache.put calls out of order, or the
   // parked plan and the fingerprint ref would disagree.
   const planChainRef = useRef<Promise<void>>(Promise.resolve());
+  // #43: the physics plan's counterparts. Rides the SAME chain as the mixin plan
+  // (both parks happen in one `.then`), so a single restart comparison sees both
+  // halves of a mod change settled.
+  const parkedPhysicsRef = useRef<string | null>(null);
+  const servedPhysicsRef = useRef<string | null>(null);
   // The Tier-1 event bus shared with the game iframe: the transform emits
   // `car.control` (and future events) to `window.__tspml`; mods subscribe here.
   // The handle is always exposed — harmless when the bundle is unmodified (the
@@ -502,11 +565,28 @@ export default function PlayPage(): ReactElement {
       if (!r.cacheOk) {
         setMixinNotice('Storage for mixin plans is unavailable — user-mod mixins will not be applied this session.');
       }
+      // #43: the physics plan is parked in the SAME step, before `planReady`
+      // releases the iframe. The wasm is fetched well after the bundle, so this
+      // has slack the mixin plan does not — but gating both on one flag keeps
+      // "the plan is parked" a single fact rather than two racing ones.
+      const p = await parkPhysicsPlan(stored);
+      if (cancelled) return;
+      parkedPhysicsRef.current = p.fingerprint;
+      servedPhysicsRef.current = p.fingerprint;
+      setPhysicsExcluded(p.excluded);
+      if (!p.cacheOk) {
+        setPhysicsNotice('Storage for physics plans is unavailable — physics patches will not be applied this session.');
+      }
       setPlanReady(true);
       log(
         r.sets > 0
           ? `mixin plan parked (${r.sets} mod${r.sets === 1 ? '' : 's'} with patches)`
           : 'mixin plan parked (empty — no user mixins)',
+      );
+      log(
+        p.patches > 0
+          ? `physics plan parked (${p.patches} patch${p.patches === 1 ? '' : 'es'})`
+          : 'physics plan parked (empty — no physics patches)',
       );
       // Prewarm the transformed bundle: the serverless babel pass costs
       // seconds, and without this it only starts AFTER the SW dance + iframe
@@ -616,6 +696,7 @@ export default function PlayPage(): ReactElement {
           manifest: result.mod.manifest,
           code: result.mod.code,
           ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+          ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
           enabled: true,
           addedAt: new Date().toISOString(),
           sourceUrl: url,
@@ -670,6 +751,7 @@ export default function PlayPage(): ReactElement {
     trackModsLoaded(s.loaded, s.failed.map((f) => f.id));
     setLoadedMods(rows);
     setMixinsSkipped(s.mixinsSkipped);
+    setPhysicsSkipped(s.physicsSkipped);
     setModsStatus(
       s.loaded.length > 0
         ? `✓ ${s.loaded.join(', ')}`
@@ -717,7 +799,16 @@ export default function PlayPage(): ReactElement {
       planSetsRef.current = r.sets;
       setMixinOverCap(r.overCap);
       setMixinEnvSkipped(r.envSkipped);
-      setNeedsRestart(r.fingerprint !== servedFingerprintRef.current);
+      // #43: same for the physics plan. A physics change needs a restart for a
+      // sharper reason than a mixin one — the binary is instantiated once at
+      // boot, so the running sim keeps whatever constants it was built with no
+      // matter what the cache now holds.
+      const p = await parkPhysicsPlan(next);
+      parkedPhysicsRef.current = p.fingerprint;
+      setPhysicsExcluded(p.excluded);
+      setNeedsRestart(
+        r.fingerprint !== servedFingerprintRef.current || p.fingerprint !== servedPhysicsRef.current,
+      );
     });
     const api = apiRef.current;
     if (!api || !modsLoadedRef.current) return; // frame not loaded yet; first load picks the list up
@@ -822,6 +913,11 @@ export default function PlayPage(): ReactElement {
     chunkReportOffRef.current = () => w.removeEventListener(CHUNK_REPORT_EVENT, onChunkReport);
 
     servedFingerprintRef.current = parkedFingerprintRef.current;
+    servedPhysicsRef.current = parkedPhysicsRef.current;
+    // A fresh frame refetches the wasm, so last frame's verdict is stale the
+    // moment this one loads — clear it rather than leave a report describing a
+    // binary that is no longer the one running.
+    setPhysicsReport(null);
     setNeedsRestart(false);
     // #67: handleFrameLoad runs on EVERY iframe load, and each load can mean a
     // new document + window (in-place game reload, React remount of the
@@ -964,10 +1060,26 @@ export default function PlayPage(): ReactElement {
       }
       mixins = parsed.patches;
     }
+    // Optional fourth paste (#43): the mod's physics.json. Validated here for the
+    // same reason as the mixins box and a sharper one — a physics patch ends up as
+    // a float written into the game's compiled binary, so a shape this build cannot
+    // parse must be refused at the door rather than silently excluded from the plan
+    // an hour later. The RAW object is stored, not the parsed plan: the record's
+    // contract is "the file as the author wrote it", re-parsed on every use.
+    let physics: Record<string, unknown> | undefined;
+    if (draftPhysics.trim().length > 0) {
+      const parsed = parsePhysicsJson(draftPhysics);
+      if (!parsed.ok) {
+        setAddError(parsed.error);
+        return;
+      }
+      physics = JSON.parse(draftPhysics) as Record<string, unknown>;
+    }
     const rec: UserModRecord = {
       manifest: manifest as Record<string, unknown>,
       code: draftCode,
       ...(mixins === undefined ? {} : { mixins }),
+      ...(physics === undefined ? {} : { physics }),
       enabled: true,
       addedAt: new Date().toISOString(),
     };
@@ -980,6 +1092,7 @@ export default function PlayPage(): ReactElement {
     setDraftManifest('');
     setDraftCode('');
     setDraftMixins('');
+    setDraftPhysics('');
     log(`added mod '${userModId(rec) ?? '(no id)'}' (pasted)`);
     trackModAdded(userModId(rec), 'paste');
     updateUserMods(next);
@@ -1011,6 +1124,7 @@ export default function PlayPage(): ReactElement {
         manifest: result.mod.manifest,
         code: result.mod.code,
         ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+        ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
         enabled: true,
         addedAt: new Date().toISOString(),
         // Remember where it came from — this is what "⟳ reload" re-fetches.
@@ -1134,6 +1248,31 @@ export default function PlayPage(): ReactElement {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // The SW's physics verdict (#43). A wasm response is a binary the game hands
+  // straight to `WebAssembly.instantiate` — there is no prelude to carry a report
+  // the way the bundle does, so the route states the outcome in `x-tspml-wasm-*`
+  // headers, only the SW can read them, and it forwards them here.
+  //
+  // Bound unconditionally rather than inside the registration effect above: the
+  // wasm is fetched ~13s into boot and this page can be controlled by an ALREADY
+  // active worker, in which case `controllerchange` never fires.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent): void => {
+      const report = asPhysicsReport(e.data);
+      if (report === null) return;
+      setPhysicsReport(report);
+      log(
+        `physics: ${report.status} for ${report.file}${
+          report.applied > 0 ? ` (${report.applied} patch${report.applied === 1 ? '' : 'es'})` : ''
+        }${report.detail ? ` — ${report.detail}` : ''}`,
+      );
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- log only touches its stable setter
   }, []);
 
   const bootDoneCount = bootSteps.filter((s) => s.done).length;
@@ -1490,11 +1629,19 @@ export default function PlayPage(): ReactElement {
                             {mod.enabled ? 'enabled' : 'disabled'}
                           </span>
                         </div>
-                        {version || mod.mixins ? (
+                        {version || mod.mixins || mod.physics ? (
                           <div className="meta">
-                            {version ? `v${version}` : ''}
-                            {version && mod.mixins ? ' · ' : ''}
-                            {mod.mixins ? `${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : ''}
+                            {[
+                              version ? `v${version}` : '',
+                              mod.mixins ? `${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : '',
+                              // Worth its own badge (#43): this is the one thing a
+                              // mod can carry that rewrites the physics binary, so
+                              // "why are my lap times different" has an answer
+                              // visible on the card.
+                              mod.physics ? 'physics patch' : '',
+                            ]
+                              .filter((s) => s.length > 0)
+                              .join(' · ')}
                           </div>
                         ) : null}
                         {/* Where the mod came from — the origin "⟳ reload" re-fetches
@@ -1580,6 +1727,12 @@ export default function PlayPage(): ReactElement {
                                 <pre className="source-pre">{JSON.stringify(mod.mixins, null, 2)}</pre>
                               </>
                             ) : null}
+                            {mod.physics ? (
+                              <>
+                                <div className="source-label">physics.json</div>
+                                <pre className="source-pre">{JSON.stringify(mod.physics, null, 2)}</pre>
+                              </>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -1614,6 +1767,22 @@ export default function PlayPage(): ReactElement {
                 different environment (this portal is <code>web</code>) — not applied.
               </p>
             ) : null}
+            {/* #43. The same gap as mixinsSkipped, said separately because the
+                consequence differs: the mod loads and looks fine while its
+                handling changes are simply absent. */}
+            {physicsSkipped.length > 0 ? (
+              <p className="warn">
+                <Icon name="warn" /> <code>{physicsSkipped.join(', ')}</code>: manifest declares
+                a <code>physics.json</code> but none was pasted — the physics binary is
+                unpatched. The mod still runs; its handling changes do not.
+              </p>
+            ) : null}
+            {physicsExcluded.map((x) => (
+              <p className="warn" key={`${x.modId}:${x.reason}`}>
+                <Icon name="warn" /> <code>{x.modId}</code>: physics patches left out
+                ({x.reason}) — {x.detail}.
+              </p>
+            ))}
 
             <details className="add-form">
               <summary>
@@ -1642,6 +1811,7 @@ export default function PlayPage(): ReactElement {
               {addMethod === 'paste' ? (
                 <p className="meta">
                   Paste each file into its box — only 1 and 2 are required.
+                  Box 4 rewrites constants in the game’s physics binary.
                 </p>
               ) : null}
               {addMethod === 'url' ? (
@@ -1719,6 +1889,19 @@ export default function PlayPage(): ReactElement {
                     placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
                     value={draftMixins}
                     onChange={(e) => setDraftMixins(e.target.value)}
+                  />
+                </label>
+                {/* #43. Deliberately LAST: the smoke fills textareas by index
+                    (0=manifest, 1=code, 2=mixins), so a new box may only be
+                    appended, never inserted. */}
+                <label className="add-label">
+                  <span className="field-tag opt">optional</span> 4 · physics.json
+                  <textarea
+                    rows={5}
+                    spellCheck={false}
+                    placeholder='{"wasmHash": "d4ef…", "patches": [{"name": "grip", "signature": "…", "oldValue": 1.05, "newValue": 1.4}]}'
+                    value={draftPhysics}
+                    onChange={(e) => setDraftPhysics(e.target.value)}
                   />
                 </label>
                 <p className="warn">
@@ -1808,6 +1991,56 @@ export default function PlayPage(): ReactElement {
                       </ul>
                     </div>
                   ))}
+                </>
+              ) : null}
+            </section>
+          ) : null}
+
+          {/* #43. Shown only once there is something to say — a session with no
+              physics mod should not carry a section explaining a feature it is
+              not using. `physicsNotice` covers the cache being unavailable;
+              `physicsReport` is the route's verdict, relayed by the SW. */}
+          {physicsNotice || physicsReport ? (
+            <section className="side-section">
+              <h2>Physics</h2>
+              {physicsNotice ? (
+                <p className="warn">
+                  <Icon name="warn" /> {physicsNotice}
+                </p>
+              ) : null}
+              {physicsReport ? (
+                <>
+                  <div className="row-head">
+                    <code>{physicsReport.file}</code>
+                    <span
+                      className="status-pill"
+                      style={{
+                        color:
+                          physicsReport.status === 'patched'
+                            ? 'var(--green)'
+                            : physicsReport.status === 'vanilla'
+                              ? 'var(--muted)'
+                              : 'var(--red)',
+                      }}
+                    >
+                      {physicsReport.status}
+                    </span>
+                  </div>
+                  {physicsReport.status === 'patched' ? (
+                    <p className="meta">
+                      {physicsReport.applied} constant{physicsReport.applied === 1 ? '' : 's'} rewritten
+                      — lap times from this session are not vanilla.
+                    </p>
+                  ) : null}
+                  {/* Every non-patched outcome that is not plain vanilla is a
+                      REFUSAL, and each has a fix the author can act on: re-pin
+                      against this build, or drop the patch. Say the route's own
+                      words rather than a paraphrase. */}
+                  {physicsReport.detail && physicsReport.status !== 'patched' ? (
+                    <p className="warn">
+                      <Icon name="warn" /> {physicsReport.detail}
+                    </p>
+                  ) : null}
                 </>
               ) : null}
             </section>

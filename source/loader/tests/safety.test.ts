@@ -57,3 +57,52 @@ describe('classifySafety (M6 — warn-only)', () => {
     expect(r.leaderboardRisk).toBe('warn');
   });
 });
+
+describe('classifySafety — physics (#43)', () => {
+  it('declaring physics is a leaderboard risk on its own', () => {
+    const r = classifySafety(manifest({ physics: 'physics.json' }));
+    expect(r.leaderboardRisk).toBe('warn');
+    expect(r.warnings.some((w) => w.kind === 'physics')).toBe(true);
+  });
+
+  it('the risk does NOT depend on what vanillaSafe claims', () => {
+    // Every other signal here is the author's own claim, taken at face value.
+    // This one cannot be: rewriting a constant in the compiled physics binary
+    // changes how each lap time is produced, whatever the manifest asserts.
+    const claimed = classifySafety(manifest({ physics: 'physics.json', vanillaSafe: true }));
+    expect(claimed.vanillaSafe).toBe(true);
+    expect(claimed.leaderboardRisk).toBe('warn');
+  });
+
+  it('says so plainly when a physics mod also claims vanillaSafe=true', () => {
+    const w = classifySafety(manifest({ physics: 'physics.json', vanillaSafe: true })).warnings.find(
+      (x) => x.kind === 'physics',
+    );
+    expect(w?.message).toMatch(/cannot be true of a physics patch/);
+  });
+
+  it('does not repeat the vanillaSafe caveat when the mod already declares false', () => {
+    const w = classifySafety(
+      manifest({ physics: 'physics.json', vanillaSafe: false }),
+    ).warnings.find((x) => x.kind === 'physics');
+    expect(w?.message).not.toMatch(/vanillaSafe=true/);
+  });
+
+  it('names the mod and what it does, so the warning stands alone in a list', () => {
+    const w = classifySafety(manifest({ physics: 'physics.json' })).warnings.find(
+      (x) => x.kind === 'physics',
+    );
+    expect(w?.message).toMatch(/^test-mod: /);
+    expect(w?.message).toMatch(/physics binary/);
+  });
+
+  it('is still warn-only — a physics mod is labelled, never blocked', () => {
+    const r = classifySafety(manifest({ physics: 'physics.json', capabilities: ['network'] }));
+    expect(r.leaderboardRisk).toBe('warn');
+    expect(r.leaderboardRisk).not.toBe('block');
+  });
+
+  it('no physics field => no physics warning', () => {
+    expect(classifySafety(manifest()).warnings.some((w) => w.kind === 'physics')).toBe(false);
+  });
+});

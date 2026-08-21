@@ -12,7 +12,7 @@
  */
 
 /* eslint-disable no-restricted-globals */
-const SW_VERSION = 'tspml-sw-98';
+const SW_VERSION = 'tspml-sw-43';
 const DEFAULT_GAME_HOST = 'app-polytrack.kodub.com';
 const GAME_VERSION = '0.6.2';
 const VERSION_RE = /^\d+\.\d+\.\d+/;
@@ -41,6 +41,21 @@ const BUNDLE_PATH_RE = /^\/api\/proxy\/(?:main|\d{1,6})\.bundle\.js$/;
 
 function isBundleProxyPath(pathname) {
   return BUNDLE_PATH_RE.test(pathname);
+}
+
+// #43: the physics binary is fetched as its own file and never passes through the
+// bundle path, so it needs its own matcher, its own cache entry, and its own replay.
+// Same shape-only rule: the route owns which binaries are declared patchable.
+//
+// INLINE COPIES of lib/rewrite.ts::WASM_PATH_RE and lib/physics-plan.ts::PHYSICS_CACHE
+// — tests/sw-sync.test.ts compares the literals, same as the #62 pair above.
+const WASM_PATH_RE = /^\/api\/proxy\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.wasm$/;
+const PHYSICS_CACHE_NAME = 'tspml-physics-plan-v1';
+const PHYSICS_CACHE_URL = '/__tspml/physics-plan';
+const PHYSICS_REPORT_MESSAGE = 'tspml:physics-report';
+
+function isWasmProxyPath(pathname) {
+  return WASM_PATH_RE.test(pathname);
 }
 
 function isGameHost(hostname) {
@@ -93,16 +108,25 @@ self.addEventListener('activate', (event) => {
 // plan JSON text, or null when there is none (or reading failed). NOTE the
 // awaits: `cache.match()` returns a Promise — optional-chaining `.text` on it
 // would make the plan silently always-null.
-async function readUserPatchPlan() {
+async function readPlanFrom(cacheName, cacheUrl) {
   try {
-    const cache = await caches.open(PLAN_CACHE_NAME);
-    const hit = await cache.match(PLAN_CACHE_URL);
+    const cache = await caches.open(cacheName);
+    const hit = await cache.match(cacheUrl);
     if (!hit) return null;
     const text = await hit.text();
     return text.length > 0 ? text : null;
   } catch {
     return null;
   }
+}
+
+async function readUserPatchPlan() {
+  return readPlanFrom(PLAN_CACHE_NAME, PLAN_CACHE_URL);
+}
+
+// #43: the physics plan, parked in its own cache entry by the page.
+async function readPhysicsPlan() {
+  return readPlanFrom(PHYSICS_CACHE_NAME, PHYSICS_CACHE_URL);
 }
 
 // #62: serve a bundle request (main, or a chunk since #98). When a plan exists,
@@ -129,14 +153,77 @@ async function fetchBundle(proxyUrl) {
   return fetch(proxyUrl, { credentials: 'omit' });
 }
 
+// #43: tell every open page what happened to a physics request. A wasm response is
+// bytes the game hands straight to WebAssembly.instantiate, so unlike a bundle there
+// is no prelude to ride — the outcome exists only in headers, and only the SW can see
+// them. Without this the mixin panel could say nothing at all about physics, which is
+// the "my mod did nothing and I cannot tell why" failure this whole path avoids.
+async function reportPhysics(res, file) {
+  try {
+    const status = res.headers.get('x-tspml-wasm-status');
+    if (!status) return;
+    const message = {
+      type: PHYSICS_REPORT_MESSAGE,
+      file,
+      status,
+      detail: res.headers.get('x-tspml-detail') || '',
+      applied: Number(res.headers.get('x-tspml-wasm-applied') || '0') || 0,
+    };
+    const clients = await self.clients.matchAll({ includeUncontrolled: true });
+    for (const client of clients) client.postMessage(message);
+  } catch {
+    // Reporting is best-effort: never let it affect the bytes the game receives.
+  }
+}
+
+// #43: serve a physics binary request. Same replay shape as fetchBundle and the same
+// degradation: no plan, a failed POST, or a non-OK POST response all fall back to the
+// plain GET, which is the pre-#43 path byte for byte. A physics mod can only ever
+// degrade to "not applied" — never to a binary the game cannot instantiate.
+async function fetchWasm(proxyUrl, file) {
+  const plan = await readPhysicsPlan();
+  if (plan !== null) {
+    try {
+      const res = await fetch(proxyUrl, {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'content-type': 'application/json' },
+        body: plan,
+      });
+      if (res.ok) {
+        void reportPhysics(res.clone(), file);
+        return res;
+      }
+    } catch {
+      // fall through to the plain GET
+    }
+  }
+  const res = await fetch(proxyUrl, { credentials: 'omit' });
+  // Report the plain GET too: 'vanilla' and 'stale-pin' are both outcomes an author
+  // needs to see, and a stale pin is exactly the case where no plan was even sent.
+  void reportPhysics(res.clone(), file);
+  return res;
+}
+
+/** Last path segment of a proxy path — the filename the route reports on. */
+function wasmFileOf(pathname) {
+  const parts = pathname.split('/');
+  return parts[parts.length - 1] || pathname;
+}
+
 self.addEventListener('fetch', (event) => {
   const rewritten = rewriteGameUrl(event.request.url);
   if (rewritten) {
     // The rewritten URL is same-origin (/api/proxy/...), so this fetch re-enters
     // the SW once — but rewriteGameUrl() returns null for it (it is not a kodub
     // URL), so it falls through to the network and there is no loop.
-    if (event.request.method === 'GET' && isBundleProxyPath(rewritten.split('?')[0])) {
+    const rewrittenPath = rewritten.split('?')[0];
+    if (event.request.method === 'GET' && isBundleProxyPath(rewrittenPath)) {
       event.respondWith(fetchBundle(rewritten));
+      return;
+    }
+    if (event.request.method === 'GET' && isWasmProxyPath(rewrittenPath)) {
+      event.respondWith(fetchWasm(rewritten, wasmFileOf(rewrittenPath)));
       return;
     }
     event.respondWith(fetch(rewritten, { credentials: 'omit' }));
@@ -162,6 +249,12 @@ self.addEventListener('fetch', (event) => {
     }
     if (url.origin === self.location.origin && isBundleProxyPath(url.pathname)) {
       event.respondWith(fetchBundle(event.request.url));
+      return;
+    }
+    // #43: the physics binary arrives here for the same reason the chunks do — the
+    // game requests it relative to the injected <base>, so it is already same-origin.
+    if (url.origin === self.location.origin && isWasmProxyPath(url.pathname)) {
+      event.respondWith(fetchWasm(event.request.url, wasmFileOf(url.pathname)));
       return;
     }
   }

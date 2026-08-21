@@ -3,10 +3,16 @@
  *
  * TSPML's fairness model is **warn-only**: it never hard-disables a mod or
  * blocks a leaderboard upload on the user's behalf. Instead it classifies each
- * mod from its declared manifest (`vanillaSafe`, `capabilities`, `mixins`) and
- * surfaces clear warnings + a `leaderboardRisk` signal the UI surfaces — leaving
- * the decision to the player. This is a deliberate contrast with PML, which has
- * no safety surface at all (docs/design/safety-and-fairness.md).
+ * mod from its declared manifest (`vanillaSafe`, `capabilities`, `mixins`,
+ * `physics`) and surfaces clear warnings + a `leaderboardRisk` signal the UI
+ * surfaces — leaving the decision to the player. See
+ * docs/design/safety-and-fairness.md.
+ *
+ * Most of what it reads is the author's own CLAIM. `physics` (#43) is the
+ * exception and the reason this file is not purely a formatter of declarations:
+ * a mod that rewrites a constant in the compiled physics binary changes how
+ * every lap time is produced, so it carries the risk regardless of what its
+ * `vanillaSafe` field says.
  *
  * `classifySafety` is a PURE function over a validated `VersionManifest` — fully
  * unit-testable, no game coupling.
@@ -19,7 +25,8 @@ export interface SafetyWarning {
     | 'leaderboard-risk'
     | 'network'
     | 'capability'
-    | 'unsafe-mixin';
+    | 'unsafe-mixin'
+    | 'physics';
   readonly message: string;
 }
 
@@ -52,6 +59,7 @@ export function classifySafety(manifest: VersionManifest): SafetyReport {
   const capabilities = manifest.capabilities ?? [];
   const vanillaSafe = manifest.vanillaSafe ?? true;
   const hasMixins = (manifest.mixins?.length ?? 0) > 0;
+  const hasPhysics = manifest.physics !== undefined;
   const id = manifest.id;
 
   if (!vanillaSafe) {
@@ -79,9 +87,21 @@ export function classifySafety(manifest: VersionManifest): SafetyReport {
       message: `${id}: declares vanillaSafe=true but uses Tier-2 mixins — verify the mixins don't touch physics/multiplayer before trusting the label.`,
     });
   }
+  if (hasPhysics) {
+    // #43. Unlike every other signal here this one is not a declaration to be
+    // taken at face value: rewriting a constant in the physics binary changes
+    // how each lap time is produced, so it is a leaderboard risk whatever the
+    // manifest says about vanillaSafe. Still warn-only — the player decides.
+    warnings.push({
+      kind: 'physics',
+      message: `${id}: rewrites constants in the game's physics binary — every lap time it produces is non-vanilla.${
+        vanillaSafe ? ' The manifest still declares vanillaSafe=true; that label cannot be true of a physics patch.' : ''
+      }`,
+    });
+  }
 
   const leaderboardRisk: LeaderboardRisk =
-    !vanillaSafe || capabilities.includes('network') ? 'warn' : 'none';
+    !vanillaSafe || hasPhysics || capabilities.includes('network') ? 'warn' : 'none';
 
   return { vanillaSafe, capabilities, leaderboardRisk, warnings };
 }
