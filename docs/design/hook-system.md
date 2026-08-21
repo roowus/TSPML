@@ -157,9 +157,21 @@ Three things about the capture are worth recording, because each was a wrong tur
 
 **The parts are not the editor's.** The editor mutates the *shared* `Track` instance the
 race scene also uses, and every editor edit goes through that object's `setPart` /
-`deleteSpecificPart` / `forEachPart`. Those live in the **main** bundle and the bridge
-already captures the `Track`. So placement never needed the chunk; only the undo stack
-and the open flag did.
+`deleteSpecificPart`. Those live in the **main** bundle and the bridge already captures
+the `Track`. So placement never needed the chunk; only the undo stack and the open flag
+did.
+
+Reading is one call further out, and getting that wrong cost a release: `forEachPart`
+belongs to the **track-data** object `getTrackData()` builds, not to the `Track`. The
+registry called `track.forEachPart` and the live game answered `"not a function"`,
+which the guard against partial reads turned into an empty array — so a full track read
+as an empty one and nothing reported a fault. Two lessons generalize past this bug.
+Fail-soft guards convert a wrong shape into a plausible value, so a shape assumption
+must be checked against the game rather than against the guard. And the unit tests all
+passed throughout, because the fake `Track` had been given a `forEachPart` too: a fake
+built from the same assumption as the code under test can never falsify it. Fakes for
+captured game objects are now shaped from the deobfuscated source, not from the calls
+the bridge happens to make.
 
 **TypeScript `#private` fields are not private in the bundle.** They downlevel to
 module-scope `WeakMap`s with a read helper (`(0,i.gn)(this, wn, "f")`), so the editor's

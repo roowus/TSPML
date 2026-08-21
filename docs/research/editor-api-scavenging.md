@@ -99,9 +99,17 @@ read off the minified source:
 | `setPart` | `(x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder)` | throws `"Track part color does not exist"` on a bad color; coordinates are in tiles (`* partSize` internally). **Both order arguments are nullable and `null` is the normal value** — the constructor validates each against the part's catalog entry and throws `"Non-start part has start order"` / `"Non-checkpoint has checkpoint order"` when one is supplied to a part that takes none, and the matching `"…has no…"` when one is missing from a part that requires it |
 | `deleteSpecificPart` | `(partId, x, y, z, rotation, rotationAxis)` | what undo uses to remove |
 | `getPart` | `(partId)` | part-catalog lookup (colors set, checkpoint flag) |
-| `forEachPart` | `(cb(x, y, z, id, rotation, rotationAxis, color, checkpointOrder, startOrder))` | the read counterpart |
 | `getNextStartOrder` | `()` | how the editor assigns start-pad order |
 | `clear` / `refreshMeshes` / `getTrackData` | | `getTrackData()` feeds both save (`saveCustomTrack(meta, data)`) and export (`.toExportString(meta)`) |
+
+**The read counterpart is one call further out.** `forEachPart(cb(x, y, z, id,
+rotation, rotationAxis, color, checkpointOrder, startOrder))` is a method of the
+**track-data** class, not of Track — an earlier revision of this table listed it as
+Track's and the registry was built against that, so `getParts` called
+`track.forEachPart` and got `"not a function"` from the live game. Reading a live
+Track means `track.getTrackData().forEachPart(...)`; the callback argument order
+above is correct, and `getTrackData()` rebuilds the object from the Track's current
+parts on every call, so a snapshot never goes stale but is also not free.
 
 So the mechanism `insertParts` needs — validated placement into the live
 session, mesh refresh, read-back — is **capturable with the existing
