@@ -424,7 +424,7 @@ export async function applyDemoTransform(
 ): Promise<DemoTransformResult> {
   const vanillaHash = `sha256:${createHash("sha256").update(bundleSource).digest("hex")}`;
   const base = surface.kind === "main" ? ALL_PATCHES : surface.basePatches;
-  // Nothing to do: a chunk with no base patches (the state until #87 Phase B) and no
+  // Nothing to do: a chunk with no base patches (the state until #87 Phase C) and no
   // user sets. Skipping the pass is not just an optimization — parsing and
   // regenerating ~100 KB of minified code to emit identical semantics is a round-trip
   // whose only possible outcomes are "unchanged" and "broken". Report it honestly as
