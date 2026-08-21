@@ -8,8 +8,15 @@
  */
 import { readFile } from 'node:fs/promises';
 
-import { MAP_FORMAT_VERSION } from './types.js';
-import type { BundleHash, GameMap, ModuleEntry, TargetSpec, UnresolvedEntry } from './types.js';
+import { MAIN_SURFACE_FILE, MAP_FORMAT_VERSION } from './types.js';
+import type {
+  BundleHash,
+  ChunkEntry,
+  GameMap,
+  ModuleEntry,
+  TargetSpec,
+  UnresolvedEntry,
+} from './types.js';
 
 /** Thrown when a map file is missing, unparseable, or schema-invalid. */
 export class MapParseError extends Error {
@@ -36,6 +43,9 @@ function isStringArray(v: unknown): v is string[] {
 }
 
 const BUNDLE_HASH_RE = /^sha256:[0-9a-fA-F]{64}$/;
+/** The two shapes a `targets[].surface` may name (#98). Mirrors the portal's
+ *  `BUNDLE_FILE_RE` — a surface is always a served filename, never a bare id. */
+const SURFACE_FILE_RE = /^(main|\d{1,6})\.bundle\.js$/;
 
 function validateModuleEntry(raw: unknown, key: string): ModuleEntry {
   assert(isObject(raw), `modules['${key}'] must be an object`);
@@ -133,12 +143,57 @@ function validateTargetSpec(raw: unknown, key: string): TargetSpec {
   } else {
     selector = { kind: 'factory' };
   }
+  if (raw.surface !== undefined) {
+    assert(
+      isString(raw.surface) && SURFACE_FILE_RE.test(raw.surface),
+      `targets['${key}'].surface must be 'main.bundle.js' or '<id>.bundle.js' (1-6 digits)`,
+    );
+  }
   return {
     anchor: {
       literals: raw.anchor.literals as readonly (string | number)[],
       ...(raw.anchor.minHits !== undefined ? { minHits: raw.anchor.minHits as number } : {}),
     },
     selector,
+    ...(raw.surface !== undefined ? { surface: raw.surface as string } : {}),
+  };
+}
+
+/**
+ * Validate one `chunks` entry (#98).
+ *
+ * Stricter than it looks like it needs to be, for two reasons:
+ *
+ *  - `id` must be DIGITS and must equal its own key. A host builds the request
+ *    path `<id>.bundle.js` from this value, so anything else is a path-traversal
+ *    primitive sitting in the allowlist. `assertVersion` in the pipeline's
+ *    fetch.mjs refuses loose versions for exactly this reason; same rule here.
+ *  - `hash` must be a real sha256. A malformed pin cannot match any live hash, so
+ *    a lenient parse would produce an entry that is permanently stale — a chunk
+ *    silently never transformed, which is the kind of quiet no-op this project
+ *    treats as worse than a crash.
+ */
+function validateChunkEntry(raw: unknown, key: string): ChunkEntry {
+  assert(isObject(raw), `chunks['${key}'] must be an object`);
+  assert(
+    isString(raw.id) && /^\d{1,6}$/.test(raw.id),
+    `chunks['${key}'].id must be 1-6 digits (it becomes the '<id>.bundle.js' request path)`,
+  );
+  assert(raw.id === key, `chunks['${key}'].id must equal its key (got '${String(raw.id)}')`);
+  assert(
+    isString(raw.hash) && BUNDLE_HASH_RE.test(raw.hash),
+    `chunks['${key}'].hash must be "sha256:<64 hex>"`,
+  );
+  assert(
+    isNumber(raw.bytes) && raw.bytes > 0,
+    `chunks['${key}'].bytes must be a positive number`,
+  );
+  assert(isString(raw.role) && raw.role.length > 0, `chunks['${key}'].role must be a non-empty string`);
+  return {
+    id: raw.id,
+    hash: raw.hash as BundleHash,
+    bytes: raw.bytes,
+    role: raw.role,
   };
 }
 
@@ -165,13 +220,41 @@ export function validateMap(raw: unknown): GameMap {
   // `generated` provenance is informational; validate loosely.
   assert(isObject(raw.generated), 'generated must be an object');
 
+  // `chunks` (#98, optional): chunk id -> ChunkEntry. Absent means "this build
+  // declares no transformable chunks" — the pre-#98 main-bundle-only surface.
+  // Validated BEFORE targets: a chunk-scoped target is only meaningful if its
+  // chunk is declared, and the check below needs this set.
+  let chunks: Record<string, ChunkEntry> | undefined;
+  if (raw.chunks !== undefined) {
+    assert(isObject(raw.chunks), 'chunks must be an object');
+    chunks = {};
+    for (const [key, value] of Object.entries(raw.chunks)) {
+      chunks[key] = validateChunkEntry(value, key);
+    }
+  }
+
   // `targets` (M5-C, optional): stable name -> TargetSpec.
   let targets: Record<string, TargetSpec> | undefined;
   if (raw.targets !== undefined) {
     assert(isObject(raw.targets), 'targets must be an object');
     targets = {};
     for (const [key, value] of Object.entries(raw.targets)) {
-      targets[key] = validateTargetSpec(value, key);
+      const spec = validateTargetSpec(value, key);
+      // A target scoped to an UNDECLARED chunk is dead on arrival: the host will not
+      // transform that file at all (`transformSurfaceFor` returns null for an
+      // undeclared id), so the target can never resolve — and the pipeline has no
+      // unpacked dir for it either, so verification never looks. Both failures are
+      // silent. Refuse the map instead: an undeclared chunk means the `chunks`
+      // section and the `targets` section disagree about what this build contains.
+      const surface = spec.surface;
+      if (surface !== undefined && surface !== MAIN_SURFACE_FILE) {
+        const id = surface.replace(/\.bundle\.js$/, '');
+        assert(
+          chunks !== undefined && Object.prototype.hasOwnProperty.call(chunks, id),
+          `targets['${key}'].surface names chunk '${id}', which the map's chunks section does not declare (an undeclared chunk is never transformed, so the target could never resolve)`,
+        );
+      }
+      targets[key] = spec;
     }
   }
 
@@ -188,6 +271,7 @@ export function validateMap(raw: unknown): GameMap {
     modules,
     unresolved,
     ...(targets ? { targets } : {}),
+    ...(chunks ? { chunks } : {}),
   };
 }
 

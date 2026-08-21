@@ -30,9 +30,14 @@
  * callers that already hold a map pass it directly, others pass
  * `expectedBundleHash`.
  *
- * DEFERRED (M9+): per-chunk transforms (the host calls `transform` once per
- * chunk; 0.6.2 splits into numbered chunks — issue #3), and IndexedDB
- * bundle-hash caching of the transformed output (a host concern).
+ * Per-chunk transforms landed in #98 and needed nothing here: the host calls
+ * `transform` once per SURFACE (`main.bundle.js` or `<id>.bundle.js`), passing that
+ * surface's own bytes and its own pin, and each call gates independently. A stale
+ * chunk pin therefore serves that chunk vanilla without disturbing the main
+ * transform. Which symbols belong to which surface is a mappings question
+ * (`targetSurface()`), and the caller resolves it before it gets here.
+ *
+ * DEFERRED: IndexedDB bundle-hash caching of the transformed output (a host concern).
  */
 import type { GameMap } from "@tspml/mappings";
 

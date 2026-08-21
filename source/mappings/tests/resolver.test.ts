@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { createResolver, loadDefaultMap, resolve, resolveTarget } from '../src/index.js';
+import {
+  createResolver,
+  loadDefaultMap,
+  resolve,
+  resolveChunk,
+  resolveTarget,
+  transformableChunkIds,
+} from '../src/index.js';
 import type { GameMap } from '../src/index.js';
 
 /** A tiny hand-rolled map for deterministic resolver tests. */
@@ -364,5 +371,94 @@ describe('resolveTarget (M5-C) — stable name -> TargetSpec, fail-closed', () =
     const res = resolveTarget(map, 'Nope.nada', { bundleHash: map.bundleHash });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe('not-found');
+  });
+});
+
+describe('resolveChunk (#98) — scoped, fail-closed chunk allowlist', () => {
+  const CHUNK_HASH =
+    'sha256:1094551ba359761a1a22d7b13a10f39a995c6efafe56504a093cd946110331f1';
+
+  function mapWithChunks(): GameMap {
+    return {
+      ...toyMap(),
+      chunks: {
+        '112': { id: '112', hash: CHUNK_HASH, bytes: 108037, role: 'track editor' },
+      },
+    };
+  }
+
+  it('allows a declared chunk whose live hash matches its own pin', () => {
+    const res = resolveChunk(mapWithChunks(), '112', CHUNK_HASH);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.chunk.role).toBe('track editor');
+  });
+
+  it('accepts a bare-hex live hash for the same bytes', () => {
+    // The proxy hashes bytes itself and may hand back an unprefixed digest; the
+    // same normalization the main-bundle gate uses has to apply here or every
+    // chunk would read as stale and silently never transform.
+    const res = resolveChunk(mapWithChunks(), '112', CHUNK_HASH.slice('sha256:'.length).toUpperCase());
+    expect(res.ok).toBe(true);
+  });
+
+  it("answers the allowlist question alone when no live hash is given", () => {
+    // A proxy has to decide whether to BUFFER a response before it can hash it.
+    // Asking without bytes must not be mistaken for "hash matched".
+    const res = resolveChunk(mapWithChunks(), '112');
+    expect(res.ok).toBe(true);
+  });
+
+  it("refuses an undeclared chunk as 'not-declared', not as an error", () => {
+    // Routine: TSPML has verified no anchors inside it, so a host proxies it verbatim.
+    const res = resolveChunk(mapWithChunks(), '999', CHUNK_HASH);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('not-declared');
+    expect('chunk' in res).toBe(false);
+  });
+
+  it("refuses a declared chunk whose bytes drifted as 'stale-chunk'", () => {
+    const res = resolveChunk(mapWithChunks(), '112', 'sha256:' + 'b'.repeat(64));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('stale-chunk');
+    expect('chunk' in res).toBe(false);
+  });
+
+  it('does not accept the MAIN bundle hash for a chunk', () => {
+    // The failure this guards is the tempting shortcut: gate chunks on the one
+    // hash the host already has. Chunks re-minify independently, so that pin
+    // says nothing about these bytes.
+    const map = mapWithChunks();
+    const res = resolveChunk(map, '112', map.bundleHash);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('stale-chunk');
+  });
+
+  it('treats a map with no chunks section as declaring none', () => {
+    const res = resolveChunk(toyMap(), '112', CHUNK_HASH);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('not-declared');
+    expect(transformableChunkIds(toyMap())).toEqual([]);
+  });
+
+  it('a stale chunk does not disturb the main bundle gate', () => {
+    // The load-bearing scoping rule: one re-minified chunk must not take the
+    // whole session vanilla over code the player may never load.
+    const map = mapWithChunks();
+    expect(resolveChunk(map, '112', 'sha256:' + 'c'.repeat(64)).ok).toBe(false);
+    expect(resolve(map, 'controlCar', MATCHING).ok).toBe(true);
+  });
+
+  it('lists ids numerically ascending, not lexicographically', () => {
+    // '1000' sorts before '604' as a string; a host printing the allowlist or
+    // iterating it in order would report a scrambled list.
+    const map: GameMap = {
+      ...toyMap(),
+      chunks: {
+        '604': { id: '604', hash: CHUNK_HASH, bytes: 1, role: 'a' },
+        '1000': { id: '1000', hash: CHUNK_HASH, bytes: 1, role: 'b' },
+        '112': { id: '112', hash: CHUNK_HASH, bytes: 1, role: 'c' },
+      },
+    };
+    expect(transformableChunkIds(map)).toEqual(['112', '604', '1000']);
   });
 });

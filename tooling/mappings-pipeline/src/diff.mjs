@@ -140,6 +140,14 @@ function sourceModuleForTarget(map, target) {
  */
 
 /**
+ * @typedef {Object} ChunkChange
+ * @property {string} id
+ * @property {"added" | "removed" | "repinned" | "unchanged"} kind
+ * @property {string} role   human label from whichever map still declares it
+ * @property {string} note   what the reviewer should do about it
+ */
+
+/**
  * @typedef {Object} MapDiff
  * @property {string} prevVersion
  * @property {string} nextVersion
@@ -151,6 +159,7 @@ function sourceModuleForTarget(map, target) {
  * @property {{ newlyResolved: string[], newlyUnresolved: string[] }} unresolved
  * @property {TargetImpact[]} targetImpacts
  * @property {ConfidenceDrop[]} confidenceDrops
+ * @property {ChunkChange[]} chunks
  * @property {"none" | "low" | "high"} riskLevel
  * @property {string} summary
  */
@@ -264,6 +273,50 @@ export function diffMaps(prev, next) {
     // else: target stable (or brand-new in both) — no impact.
   }
 
+  // --- chunks (#98): declared / gone / re-pinned / carried unchanged ---
+  // A chunk's pin is the gate on transforming that chunk, so the reviewer needs to
+  // see it move. The more interesting answer, though, is when it DOESN'T: across a
+  // real build (main bundleHash changed) a chunk shipping byte-identical is possible
+  // but uncommon, and it is indistinguishable-by-inspection from gen-map carrying the
+  // OLD pins forward because the regen ran without `--chunks`. A carried pin cannot
+  // match the live chunk, so that chunk silently never transforms. Flagged, not
+  // risk-scored: only a human knows which of the two it is.
+  const bundleHashChanged = prev.bundleHash !== next.bundleHash;
+  const prevChunks = prev.chunks ?? {};
+  const nextChunks = next.chunks ?? {};
+  const chunkIds = [...new Set([...Object.keys(prevChunks), ...Object.keys(nextChunks)])].sort(
+    (a, b) => Number(a) - Number(b),
+  );
+  /** @type {ChunkChange[]} */
+  const chunkChanges = [];
+  for (const id of chunkIds) {
+    const before = prevChunks[id];
+    const after = nextChunks[id];
+    if (!before) {
+      chunkChanges.push({
+        id, kind: "added", role: after.role,
+        note: `newly declared (${after.bytes} B) — give it a role label and check whether any target belongs in it`,
+      });
+    } else if (!after) {
+      chunkChanges.push({
+        id, kind: "removed", role: before.role,
+        note: `no longer declared — an undeclared chunk is never transformed, so every mixin anchored here stops applying`,
+      });
+    } else if (before.hash !== after.hash) {
+      chunkChanges.push({
+        id, kind: "repinned", role: after.role,
+        note: `re-pinned (${before.bytes} -> ${after.bytes} B) — re-verify any target scoped to ${id}.bundle.js`,
+      });
+    } else {
+      chunkChanges.push({
+        id, kind: "unchanged", role: after.role,
+        note: bundleHashChanged
+          ? `pin UNCHANGED while the main bundle changed — either this chunk really is byte-identical, or the pins were carried forward without a --chunks fetch (in which case the chunk will never transform)`
+          : `pin unchanged`,
+      });
+    }
+  }
+
   // --- risk level + summary ---
   const riskLevel =
     targetImpacts.length > 0 || newlyUnresolved.some((id) => backsAnyTarget(id, prev, prevMods))
@@ -274,13 +327,13 @@ export function diffMaps(prev, next) {
 
   const summary = summarize({
     prev, next, matched, relocated, added, removed, snRelocated, snAdded, snRemoved,
-    newlyResolved, newlyUnresolved, targetImpacts, confidenceDrops, riskLevel,
+    newlyResolved, newlyUnresolved, targetImpacts, confidenceDrops, chunkChanges, riskLevel,
   });
 
   return {
     prevVersion: prev.gameVersion,
     nextVersion: next.gameVersion,
-    bundleHashChanged: prev.bundleHash !== next.bundleHash,
+    bundleHashChanged,
     prevBundleHash: prev.bundleHash,
     nextBundleHash: next.bundleHash,
     modules: { matched, relocated, added, removed },
@@ -288,6 +341,7 @@ export function diffMaps(prev, next) {
     unresolved: { newlyResolved, newlyUnresolved },
     targetImpacts,
     confidenceDrops,
+    chunks: chunkChanges,
     riskLevel,
     summary,
   };
@@ -311,7 +365,7 @@ function backsAnyTarget(srcId, prev, prevMods) {
  */
 function summarize(p) {
   const { prev, next, matched, relocated, added, removed, snRelocated,
-    newlyResolved, newlyUnresolved, targetImpacts, confidenceDrops, riskLevel } = p;
+    newlyResolved, newlyUnresolved, targetImpacts, confidenceDrops, chunkChanges, riskLevel } = p;
   const lines = [];
   lines.push(`map diff: ${prev.gameVersion} -> ${next.gameVersion}`);
   lines.push(`  bundleHash : ${prev.bundleHash === next.bundleHash ? "unchanged" : "CHANGED"}`);
@@ -321,8 +375,26 @@ function summarize(p) {
   if (newlyUnresolved.length) lines.push(`  unresolved : ${newlyUnresolved.length} newly UNRESOLVED (regression)`);
   if (confidenceDrops.length) lines.push(`  confidence : ${confidenceDrops.length} module(s) with a large match-weight drop`);
   if (targetImpacts.length) lines.push(`  targets    : ${targetImpacts.length} at risk (RE-VERIFY before promoting)`);
+  const chunkTally = tallyChunks(chunkChanges ?? []);
+  if (chunkTally) lines.push(`  chunks     : ${chunkTally}`);
   lines.push(`  risk       : ${riskLevel.toUpperCase()}`);
   return lines.join("\n");
+}
+
+/**
+ * One-line chunk tally for the summary, or "" when neither map declares any.
+ * @param {ChunkChange[]} changes
+ * @returns {string}
+ */
+function tallyChunks(changes) {
+  if (changes.length === 0) return "";
+  const n = (kind) => changes.filter((c) => c.kind === kind).length;
+  const parts = [`${changes.length - n("removed")} declared`];
+  if (n("repinned")) parts.push(`${n("repinned")} re-pinned`);
+  if (n("added")) parts.push(`+${n("added")} new`);
+  if (n("removed")) parts.push(`-${n("removed")} DROPPED`);
+  if (n("unchanged")) parts.push(`${n("unchanged")} unchanged`);
+  return parts.join(", ");
 }
 
 /**
@@ -363,6 +435,22 @@ export function formatDiff(diff) {
     out.push("confidence drops (match still holds but markedly weaker — re-verify):");
     for (const c of diff.confidenceDrops) {
       out.push(`  ${c.concept} [src ${c.sourceModuleId}]  w ${c.fromWeight}->${c.toWeight} (${c.weightDelta})`);
+    }
+    out.push("");
+  }
+  // Chunk pins (#98). Printed selectively: a chunk that re-pinned on a build where
+  // main also changed is the expected case and says nothing a reviewer must act on,
+  // so it is left to the summary tally. What gets a line is anything that could be a
+  // silent no-transform — a dropped chunk, a new unlabelled one, or a pin that
+  // stayed put while the main bundle moved.
+  const notableChunks = diff.chunks.filter(
+    (c) => c.kind !== "unchanged" || diff.bundleHashChanged,
+  );
+  if (notableChunks.length) {
+    out.push("chunk pins (#98) — an undeclared or mis-pinned chunk transforms nothing, silently:");
+    for (const c of notableChunks) {
+      out.push(`  [${c.kind.toUpperCase()}] ${c.id}.bundle.js  (${c.role})`);
+      out.push(`      ${c.note}`);
     }
     out.push("");
   }
@@ -408,6 +496,46 @@ export function assertTargetsCarried(prev, next) {
     throw new Error(
       `carry-forward lost targets: baseline has ${a}, candidate has ${b}. ` +
       `gen-map must read targets from the committed baseline (GEN_PREV_MAP). Refusing to emit a target-less candidate.`,
+    );
+  }
+}
+
+/**
+ * The same guard for `chunks` (#98) — and it guards a quieter failure than the
+ * targets one does.
+ *
+ * A candidate that loses its chunks section is not obviously broken: it validates,
+ * it resolves every main-bundle symbol, every test passes, and the portal serves the
+ * game correctly. What silently stops is chunk transformation — `transformSurfaceFor`
+ * returns null for an undeclared id, so every chunk is proxied verbatim and every
+ * mixin anchored in one reports 'not-found' with no explanation pointing here.
+ *
+ * Promoting such a candidate would undo #98 entirely, and the only visible symptom
+ * would be mod authors reporting that editor mixins "stopped working".
+ *
+ * Unlike targets, a chunk CAN legitimately vanish: a new build may simply stop
+ * splitting one out, in which case a `--chunks` regen correctly drops it. That case
+ * is indistinguishable here from the silent-drop bug — both look like "fewer ids" —
+ * so it is resolved by a human rather than a heuristic: `allowDrop` (regen's
+ * `--allow-chunk-drop`) is the reviewer stating they checked the new runtime. Default
+ * is to refuse, because the bug is the far commoner cause and the quieter one.
+ * @param {GameMap} prev  committed baseline
+ * @param {GameMap} next  candidate
+ * @param {{allowDrop?: boolean}} [opts]
+ */
+export function assertChunksCarried(prev, next, opts = {}) {
+  const before = Object.keys(prev.chunks ?? {});
+  const after = new Set(Object.keys(next.chunks ?? {}));
+  if (before.length === 0) return; // baseline declared none — nothing to lose
+  const lost = before.filter((id) => !after.has(id));
+  if (lost.length > 0 && !opts.allowDrop) {
+    throw new Error(
+      `carry-forward lost chunks: baseline declares ${before.length} (${before.join(", ")}), ` +
+      `candidate is missing ${lost.join(", ")}. An undeclared chunk is never transformed — ` +
+      `promoting this would silently disable every mixin anchored in it. ` +
+      `Re-run regen with --chunks (or check gen-map's GEN_CHUNKS/carry-forward step). ` +
+      `If this build genuinely stopped shipping ${lost.length === 1 ? "that chunk" : "those chunks"}, ` +
+      `confirm it against the new webpack runtime and re-run with --allow-chunk-drop.`,
     );
   }
 }

@@ -76,7 +76,16 @@ describe.skipIf(!existsSync(BUNDLE_PATH))(
     expect(r.bytesAfter).toBeGreaterThan(r.bytesBefore); // we added code
     for (const k of ["parse", "transform", "generate", "reparse"]) {
       expect(Number.isFinite(r.timingMs[k])).toBe(true);
-      expect(r.timingMs[k]).toBeLessThan(20_000); // generous upper bound for CI
+      expect(r.timingMs[k]).toBeGreaterThan(0);
+      // A hang guard, NOT a performance budget. This gate is gate (iv) — "timings are
+      // reported" — and the timings are wall-clock over a real 1.78 MB bundle, measured
+      // on whatever else the machine is doing. A 20s bound here failed under a fully
+      // parallel `pnpm -r test` while the same run passed in isolation, which is a
+      // flake reporting itself as a transform regression. Real cold-start budgets
+      // belong in a dedicated benchmark that controls for load, not in a finiteness
+      // assertion. Vitest's own timeout already catches a true hang; this only catches
+      // one that somehow reports a number.
+      expect(r.timingMs[k]).toBeLessThan(120_000);
     }
   });
 });

@@ -93,6 +93,76 @@ export interface UserMixinReport {
     | 'base-failed'
     | 'output-invalid';
   readonly mods: readonly UserMixinModReport[];
+  /**
+   * Which served file this report describes (#98) — `'main.bundle.js'` or a
+   * `<id>.bundle.js` chunk. Optional because a pre-#98 prelude has no such field;
+   * absent means the main bundle.
+   */
+  readonly surface?: string;
+  /**
+   * Chunk reports merged in by a chunk prelude, keyed by `<id>.bundle.js` (#98).
+   * Only ever present on the MAIN report living at `window.__tspmlUserMixins` —
+   * each value is itself a whole-file report carrying its own `surface`.
+   */
+  readonly chunks?: Readonly<Record<string, UserMixinReport>>;
+}
+
+/** The DOM event a CHUNK prelude dispatches on `window` after merging itself in. */
+export const CHUNK_REPORT_EVENT = 'tspml:chunk-mixins';
+
+/** One served file's rows, for display. */
+export interface SurfaceReport {
+  /** `'main.bundle.js'` or `'<id>.bundle.js'`. */
+  readonly file: string;
+  readonly report: UserMixinReport;
+}
+
+/** Numeric ordering for `<id>.bundle.js` keys — `'535'` before `'1120'`, which
+ *  a lexicographic sort gets backwards. Non-numeric keys sort last, by string. */
+function chunkFileOrder(a: string, b: string): number {
+  const na = Number.parseInt(a, 10);
+  const nb = Number.parseInt(b, 10);
+  const aNum = Number.isFinite(na);
+  const bNum = Number.isFinite(nb);
+  if (aNum && bNum) return na - nb;
+  if (aNum) return -1;
+  if (bNum) return 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Flatten a main report plus its merged chunk reports (#98) into per-file rows:
+ * main first, then chunks by ascending id.
+ *
+ * The UI shows them SEPARATELY rather than summing the counts, because the plan
+ * carries every mod's whole patch list to every surface: a mixin anchored inside
+ * the editor chunk is declared once but ATTEMPTED twice, so it legitimately reads
+ * 0/1 on main and 1/1 on `112.bundle.js`. Adding those together would invent a
+ * "1/2 applied" that describes nothing the author wrote. {@link modAppliedOn}
+ * supplies the missing context instead.
+ */
+export function surfaceReports(report: UserMixinReport): SurfaceReport[] {
+  const out: SurfaceReport[] = [{ file: report.surface ?? 'main.bundle.js', report }];
+  const chunks = report.chunks;
+  if (chunks) {
+    for (const file of Object.keys(chunks).sort(chunkFileOrder)) {
+      const r = chunks[file];
+      if (r) out.push({ file, report: r });
+    }
+  }
+  return out;
+}
+
+/** The other files where `modId` applied at least one patch — the answer to
+ *  "why is this mod red here but the mixin clearly works?". */
+export function modAppliedOn(
+  reports: readonly SurfaceReport[],
+  modId: string,
+  exceptFile: string,
+): string[] {
+  return reports
+    .filter((s) => s.file !== exceptFile && s.report.mods.some((m) => m.modId === modId && m.applied > 0))
+    .map((s) => s.file);
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -187,8 +257,34 @@ export function parseUserPatchPlan(raw: unknown): UserPatchPlan | null {
  * Serialize the report as the bundle prelude. `JSON.stringify` output contains
  * no raw `<` escapes issues here (this is a JS file, not inline HTML), but
  * `</script>`-safe hygiene costs nothing: escape forward slashes after `<`.
+ *
+ * MAIN vs CHUNK (#98). A chunk executes LONG after the main bundle — when the player
+ * opens the editor, possibly minutes in — so a chunk prelude must not do what the main
+ * one does. Two differences, both load-bearing:
+ *
+ *  - it MERGES into `chunks[file]` instead of assigning `window.__tspmlUserMixins`.
+ *    A plain assignment would erase the main bundle's report, silently blanking every
+ *    row the mixin panel is already showing.
+ *  - it dispatches {@link CHUNK_REPORT_EVENT}, because page.tsx reads the global on
+ *    iframe `load` and that fired long ago. Without a signal the rows would exist in
+ *    the frame and never reach the UI.
+ *
+ * The chunk prelude is defensive about the main report being absent (transform off for
+ * main, or a chunk that somehow loads first): it creates the container rather than
+ * throwing inside the game's own script.
  */
 export function reportPrelude(report: UserMixinReport): string {
   const json = JSON.stringify(report).replace(/<\//g, '<\\/');
-  return `;window.${REPORT_GLOBAL}=${json};\n`;
+  const surface = report.surface;
+  if (surface === undefined || surface === 'main.bundle.js') {
+    return `;window.${REPORT_GLOBAL}=${json};\n`;
+  }
+  const key = JSON.stringify(surface).replace(/<\//g, '<\\/');
+  return (
+    `;(function(){var r=${json},w=window,m=w.${REPORT_GLOBAL};` +
+    `if(!m||typeof m!=="object"){m=w.${REPORT_GLOBAL}={v:1,planStatus:"applied",mods:[],chunks:{}};}` +
+    `if(!m.chunks){m.chunks={};}m.chunks[${key}]=r;` +
+    `try{w.dispatchEvent(new CustomEvent(${JSON.stringify(CHUNK_REPORT_EVENT)},{detail:r}));}catch(e){}` +
+    `})();\n`
+  );
 }

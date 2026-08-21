@@ -1,6 +1,6 @@
 // Unit tests for src/diff.mjs — the pure human-review core (CI-runnable, no bundle).
 import { describe, expect, it } from 'vitest';
-import { diffMaps, formatDiff, assertTargetsCarried } from '../src/diff.mjs';
+import { diffMaps, formatDiff, assertTargetsCarried, assertChunksCarried } from '../src/diff.mjs';
 
 /** Build a minimal valid GameMap. */
 const map = (overrides = {}) => ({
@@ -258,6 +258,107 @@ describe('assertTargetsCarried', () => {
   });
 });
 
+describe('assertChunksCarried (#98)', () => {
+  const chunk = (id, hash, role = 'track editor') => ({ id, hash, bytes: 108037, role });
+  const CHUNKS = { 112: chunk('112', 'sha256:c112'), 535: chunk('535', 'sha256:c535', 'verifier UI') };
+
+  it('throws when the candidate dropped a chunk the baseline declares', () => {
+    const prev = map({ chunks: CHUNKS });
+    const next = map({ gameVersion: '0.7.0', chunks: { 112: chunk('112', 'sha256:new112') } });
+    expect(() => assertChunksCarried(prev, next)).toThrow(/missing 535/);
+  });
+
+  it('throws when the candidate has no chunks section at all (the gen-map silent-drop case)', () => {
+    // The failure this guard exists for: gen-map emits a candidate with no `chunks`,
+    // everything still validates and passes, and every chunk quietly serves vanilla.
+    expect(() => assertChunksCarried(map({ chunks: CHUNKS }), map({ gameVersion: '0.7.0' })))
+      .toThrow(/never transformed/);
+  });
+
+  it('no-ops when every baseline chunk survives, even re-pinned', () => {
+    const prev = map({ chunks: CHUNKS });
+    const next = map({
+      gameVersion: '0.7.0',
+      chunks: { 112: chunk('112', 'sha256:new112'), 535: chunk('535', 'sha256:new535', 'verifier UI') },
+    });
+    expect(() => assertChunksCarried(prev, next)).not.toThrow();
+  });
+
+  it('no-ops when the baseline declared no chunks (pre-#98 maps)', () => {
+    expect(() => assertChunksCarried(map({}), map({ gameVersion: '0.7.0' }))).not.toThrow();
+  });
+
+  it('accepts a drop only under the explicit allowDrop override', () => {
+    // A build really can stop splitting a chunk out. That is indistinguishable here
+    // from the silent-drop bug, so it takes a human saying so — never a heuristic.
+    const prev = map({ chunks: CHUNKS });
+    const next = map({ gameVersion: '0.7.0', chunks: { 112: chunk('112', 'sha256:new112') } });
+    expect(() => assertChunksCarried(prev, next, { allowDrop: true })).not.toThrow();
+    expect(() => assertChunksCarried(prev, next, { allowDrop: false })).toThrow(/missing 535/);
+  });
+
+  it('points a dropped-chunk failure at the override rather than dead-ending', () => {
+    const prev = map({ chunks: CHUNKS });
+    expect(() => assertChunksCarried(prev, map({ gameVersion: '0.7.0' })))
+      .toThrow(/--allow-chunk-drop/);
+  });
+});
+
+describe('diffMaps — chunk pins (#98)', () => {
+  const chunk = (id, hash, bytes = 100, role = 'track editor') => ({ id, hash, bytes, role });
+  const byId = (d, id) => d.chunks.find((c) => c.id === id);
+
+  it('classifies added / removed / repinned / unchanged', () => {
+    const prev = map({
+      chunks: { 112: chunk('112', 'sha256:a'), 535: chunk('535', 'sha256:b'), 604: chunk('604', 'sha256:c') },
+    });
+    const next = map({
+      gameVersion: '0.7.0',
+      bundleHash: 'sha256:bbb',
+      chunks: { 112: chunk('112', 'sha256:a'), 535: chunk('535', 'sha256:B2', 200), 657: chunk('657', 'sha256:d') },
+    });
+    const d = diffMaps(prev, next);
+    expect(byId(d, '112').kind).toBe('unchanged');
+    expect(byId(d, '535').kind).toBe('repinned');
+    expect(byId(d, '604').kind).toBe('removed');
+    expect(byId(d, '657').kind).toBe('added');
+    expect(d.chunks.map((c) => c.id)).toEqual(['112', '535', '604', '657']); // numeric order
+  });
+
+  it('reports no chunks when neither map declares any', () => {
+    expect(diffMaps(map({}), map({ gameVersion: '0.7.0' })).chunks).toEqual([]);
+  });
+
+  it('does not let chunk drift change riskLevel', () => {
+    // Deliberate: a re-pin is the NORMAL outcome of a new build. Scoring it as risk
+    // would make every regen read HIGH and train reviewers to ignore the field.
+    const prev = map({ chunks: { 112: chunk('112', 'sha256:a') } });
+    const next = map({ gameVersion: '0.7.0', bundleHash: 'sha256:bbb', chunks: { 112: chunk('112', 'sha256:z') } });
+    expect(diffMaps(prev, next).riskLevel).toBe('none');
+  });
+
+  it('warns about a pin that did NOT move while the main bundle did', () => {
+    // The signature of a regen run without --chunks: gen-map carries the old pins,
+    // which can never match the new build's chunk bytes, so the chunk silently
+    // never transforms. Indistinguishable from a genuinely identical chunk except
+    // by a human, so it is called out rather than scored.
+    const prev = map({ chunks: { 112: chunk('112', 'sha256:a') } });
+    const next = map({ gameVersion: '0.7.0', bundleHash: 'sha256:bbb', chunks: { 112: chunk('112', 'sha256:a') } });
+    const d = diffMaps(prev, next);
+    expect(byId(d, '112').note).toMatch(/carried forward without a --chunks fetch/);
+    expect(formatDiff(d)).toContain('[UNCHANGED] 112.bundle.js');
+  });
+
+  it('stays quiet about an unchanged pin when the main bundle did not change either', () => {
+    // Same map twice: nothing was rebuilt, so an identical chunk pin is expected and
+    // a warning here would be noise on every no-op regen.
+    const a = map({ chunks: { 112: chunk('112', 'sha256:a') } });
+    const d = diffMaps(a, a);
+    expect(byId(d, '112').note).toBe('pin unchanged');
+    expect(formatDiff(d)).not.toContain('[UNCHANGED]');
+  });
+});
+
 describe('formatDiff', () => {
   it('renders a high-risk report with the target-impact section', () => {
     const prev = map({
@@ -279,5 +380,25 @@ describe('formatDiff', () => {
     const a = map({ modules: { a: mod('1', '10', ['Foo']) } });
     const txt = formatDiff(diffMaps(a, a));
     expect(txt).toContain('NO DRIFT');
+  });
+
+  it('summarises the chunk tally and calls out a DROPPED chunk in the body', () => {
+    const c = (id, hash) => ({ id, hash, bytes: 100, role: 'ui' });
+    const prev = map({ chunks: { 112: c('112', 'sha256:a'), 604: c('604', 'sha256:c') } });
+    const next = map({
+      gameVersion: '0.7.0', bundleHash: 'sha256:bbb',
+      chunks: { 112: c('112', 'sha256:a2'), 657: c('657', 'sha256:d') },
+    });
+    const txt = formatDiff(diffMaps(prev, next));
+    expect(txt).toContain('chunks     : 2 declared, 1 re-pinned, +1 new, -1 DROPPED');
+    expect(txt).toContain('[REMOVED] 604.bundle.js');
+    expect(txt).toContain('[ADDED] 657.bundle.js');
+  });
+
+  it('omits the chunk section entirely for a map with no chunks', () => {
+    const a = map({ modules: { a: mod('1', '10', ['Foo']) } });
+    const txt = formatDiff(diffMaps(a, a));
+    expect(txt).not.toContain('chunk pins');
+    expect(txt).not.toContain('chunks     :');
   });
 });

@@ -32,7 +32,7 @@ import { mkdir, readdir, readFile, stat, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { diffMaps, formatDiff, assertTargetsCarried } from "../src/diff.mjs";
+import { diffMaps, formatDiff, assertTargetsCarried, assertChunksCarried } from "../src/diff.mjs";
 import { verifyTargets, formatVerifications, loadModuleSources } from "../src/verify-targets.mjs";
 import { fetchVersion } from "../src/fetch.mjs";
 
@@ -118,17 +118,51 @@ async function modeDiff() {
   process.exit(diff.riskLevel === "high" ? 1 : 0);
 }
 
+/**
+ * Load `surfaceFile -> moduleId -> source` for verification (#98).
+ *
+ * A surface with no unpacked dir is simply absent from the returned map, which
+ * `verifyTargets` reports as SKIPPED. Absent-means-unchecked is the whole contract
+ * here: substituting main's modules for a missing chunk would produce confident
+ * passes for anchors nobody looked at.
+ * @param {string} mainDir           unpacked main bundle
+ * @param {Record<string,string>} chunkDirs  chunk id -> unpacked dir
+ */
+async function loadSurfaceSources(mainDir, chunkDirs = {}) {
+  const bySurface = new Map();
+  bySurface.set("main.bundle.js", await loadModuleSources(mainDir));
+  for (const [id, dir] of Object.entries(chunkDirs)) {
+    bySurface.set(`${id}.bundle.js`, await loadModuleSources(dir));
+  }
+  return bySurface;
+}
+
 async function modeVerify() {
-  const [mapPath, dir] = process.argv.slice(process.argv.indexOf("--verify") + 1);
+  const rest = process.argv.slice(process.argv.indexOf("--verify") + 1);
+  const [mapPath, dir, ...pairs] = rest;
   if (!mapPath || !dir) {
-    console.error("usage: regen.mjs --verify <map.json> <unpacked-dir>");
+    console.error("usage: regen.mjs --verify <map.json> <unpacked-main-dir> [<chunkId>=<unpacked-chunk-dir> ...]");
     process.exit(2);
   }
+  // `112=/path/to/unpacked` — explicit rather than inferred from a directory naming
+  // convention, so a typo'd path is a hard error here instead of a silent SKIPPED.
+  /** @type {Record<string, string>} chunk id -> unpacked dir */
+  const chunkDirs = {};
+  for (const p of pairs) {
+    const eq = p.indexOf("=");
+    const id = eq > 0 ? p.slice(0, eq) : "";
+    if (!/^\d{1,6}$/.test(id)) {
+      console.error(`--verify: expected <chunkId>=<dir> (chunk id is 1-6 digits), got: ${p}`);
+      process.exit(2);
+    }
+    chunkDirs[id] = p.slice(eq + 1);
+  }
   const map = await readJson(mapPath);
-  const sources = await loadModuleSources(dir);
-  const v = verifyTargets(map, sources);
+  const v = verifyTargets(map, await loadSurfaceSources(dir, chunkDirs));
   process.stdout.write(formatVerifications(v) + "\n");
-  process.exit(v.some((x) => x.status === "fail") ? 1 : 0);
+  // SKIPPED is a non-zero exit alongside fail: the run verified less than the map
+  // claims, and a 0 here would let a partial check pass for a complete one in CI.
+  process.exit(v.some((x) => x.status === "fail" || x.status === "skipped") ? 1 : 0);
 }
 
 async function modeRegen(version, flags) {
@@ -150,24 +184,36 @@ async function modeRegen(version, flags) {
   }
 
   // 1. fetch
+  /** @type {{id:string, file:string, hash:string, bytes:number}[]} */
+  let chunkFetches = [];
   if (!flags.noFetch) {
     process.stderr.write(`[1/5] fetch ${version} from CDN\n`);
     const fetched = await fetchVersion(version, CACHE, { only: "main", chunks: flags.chunks });
-    // Chunk coverage is a review signal, not a pipeline input (#3): in 0.6.2 the four
-    // split chunks are UI-only (editor/verifier/profile/settings panels) and hold zero
-    // mod-facing target anchors, so gen-map still matches main alone. Report what was
-    // downloaded so a release that moves game logic into a chunk is visible here
-    // rather than discovered as a mystery drop in match rate.
-    const chunks = fetched.filter((r) => r.kind.startsWith("chunk-"));
+    // Chunks are a real pipeline input since #98: their bytes are pinned in the map
+    // and their modules are verified like main's. Still opt-in via --chunks, because
+    // the 0.6.2 chunks are UI-only and paying four requests plus four webcrack runs on
+    // every regen buys nothing — but a release that moves game logic into one is
+    // visible here rather than as a mystery drop in match rate.
+    chunkFetches = fetched
+      .filter((r) => r.kind.startsWith("chunk-"))
+      .map((r) => ({ id: r.kind.slice("chunk-".length), file: r.outFile, hash: r.sha256, bytes: r.bytes }));
     if (flags.chunks) {
       process.stderr.write(
-        chunks.length
-          ? `      chunks: ${chunks.map((c) => c.kind.slice(6)).join(", ")} (fetched for review; not matched)\n`
+        chunkFetches.length
+          ? `      chunks: ${chunkFetches.map((c) => c.id).join(", ")} (re-pinned + unpacked below)\n`
           : `      chunks: none — this build declares no split chunks\n`,
       );
     }
   } else {
     process.stderr.write(`[1/5] fetch skipped (--no-fetch)\n`);
+    if (flags.chunks) {
+      // --no-fetch --chunks cannot re-pin: a pin is a hash of bytes this run did not
+      // download. Emitting carried-forward pins while the caller asked for --chunks
+      // would look like a re-pin and silently ship stale hashes.
+      throw new Error(
+        "--chunks needs a fetch to re-pin chunk hashes; --no-fetch would carry the previous build's pins forward while looking like a re-pin. Drop one of the two flags.",
+      );
+    }
   }
   if (!(await exists(bundle))) throw new Error(`bundle not found after fetch step: ${bundle}`);
 
@@ -178,38 +224,70 @@ async function modeRegen(version, flags) {
     process.stderr.write(`[2/5] unpack -> ${tgtDir}\n`);
     await runNode(UNPACK, [bundle, tgtDir]);
   }
+  // Each chunk unpacks into its OWN dir, never merged with main's: two surfaces can
+  // both contain a module named `112.js`, and a merged map would silently drop one.
+  /** @type {Record<string,string>} chunk id -> unpacked dir */
+  const chunkDirs = {};
+  for (const c of chunkFetches) {
+    const dir = join(CACHE, `webcrack/${tag}-chunk-${c.id}`);
+    chunkDirs[c.id] = dir;
+    if ((await exists(dir)) && !flags.reunpack) {
+      process.stderr.write(`      chunk ${c.id}: unpack skipped (${dir} exists)\n`);
+    } else {
+      process.stderr.write(`      chunk ${c.id}: unpack -> ${dir}\n`);
+      await runNode(UNPACK, [c.file, dir]);
+    }
+  }
 
   // 3. gen-map (spawn the verbatim matcher; carry targets forward into the candidate)
   process.stderr.write(`[3/5] gen-map candidate -> ${outPath}\n`);
-  await runNode(GEN_MAP, [], {
+  /** @type {Record<string, string>} */
+  const genEnv = {
     GEN_SRC: srcDir, GEN_TGT: tgtDir, GEN_BUNDLE: bundle,
     GEN_VERSION: version, GEN_OUT: outPath, GEN_PREV_MAP: prevPath,
-  });
+  };
+  // Fresh pins from THIS fetch. Absent on a run without --chunks, in which case
+  // gen-map carries the baseline's pins and stamps a warning into generated.note.
+  if (chunkFetches.length) {
+    genEnv.GEN_CHUNKS = JSON.stringify(chunkFetches.map((c) => ({ id: c.id, hash: c.hash, bytes: c.bytes })));
+  }
+  await runNode(GEN_MAP, [], genEnv);
   const candidate = await readJson(outPath);
 
   // Non-vacuous gate: refuse a candidate that lost targets vs the baseline — otherwise
   // verify-targets would check 0 targets and print a misleading "ALL TARGETS RESOLVE".
   assertTargetsCarried(prev, candidate);
+  // Same gate for the chunk allowlist (#98). A chunk-less candidate is the quieter
+  // loss of the two: it validates, resolves every main-bundle symbol, and serves the
+  // game correctly — only chunk transforms stop, with nothing logged.
+  assertChunksCarried(prev, candidate, { allowDrop: flags.allowChunkDrop });
 
   // 4. diff
   process.stderr.write(`[4/5] diff vs committed ${prevPath}\n`);
   const diff = diffMaps(prev, candidate);
   process.stdout.write("\n=== MAP DIFF ===\n" + formatDiff(diff) + "\n");
 
-  // 5. verify targets against the unpacked new bundle
-  process.stderr.write(`[5/5] verify targets against ${tgtDir}\n`);
-  const sources = await loadModuleSources(tgtDir);
-  const verif = verifyTargets(candidate, sources);
+  // 5. verify targets, each against its OWN surface's unpacked modules (#98)
+  const surfaceList = ["main", ...Object.keys(chunkDirs)].join(", ");
+  process.stderr.write(`[5/5] verify targets against ${surfaceList}\n`);
+  const verif = verifyTargets(candidate, await loadSurfaceSources(tgtDir, chunkDirs));
   process.stdout.write("\n=== TARGET VERIFICATION ===\n" + formatVerifications(verif) + "\n");
 
+  // A skipped target is not a pass. Without --chunks a chunk-scoped target has no
+  // sources to check against, so the run verified less than the map claims — the
+  // same vacuous-green that assertTargetsCarried guards from the other side.
+  const notVerified = verif.some((v) => v.status === "fail" || v.status === "skipped");
   process.stdout.write(`\ncandidate written: ${outPath}\n`);
   process.stdout.write(`committed baseline: ${prevPath}\n`);
-  if (diff.riskLevel !== "high" && !verif.some((v) => v.status === "fail")) {
+  if (diff.riskLevel !== "high" && !notVerified) {
     process.stdout.write(`\nGREEN: review the diff, then promote:\n  cp ${outPath} ${join(MAPS_DIR, `polytrack-${version}.json`)} && git add -A && git commit\n`);
   } else {
     process.stdout.write("\nACTION REQUIRED: address the items above before promoting.\n");
+    if (verif.some((v) => v.status === "skipped") && !flags.chunks) {
+      process.stdout.write("  (some targets live in chunks — re-run with --chunks to fetch, unpack and verify them.)\n");
+    }
   }
-  process.exit(diff.riskLevel === "high" || verif.some((v) => v.status === "fail") ? 1 : 0);
+  process.exit(diff.riskLevel === "high" || notVerified ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +302,10 @@ async function main() {
     console.error(`usage:
   regen.mjs <version> [options]        full regen + review
     --no-fetch        use an already-cached bundle (skip CDN download)
-    --chunks          also fetch the build's split chunks (review only; see #3)
+    --chunks          also fetch + re-pin the build's split chunks (#98)
+    --allow-chunk-drop  accept a candidate that declares fewer chunks than the
+                      baseline (only after confirming the new runtime really
+                      stopped shipping them)
     --reunpack        re-webcrack even if the unpacked dir exists
     --src <dir>       source unpacked dir (default .cache/webcrack/v060-renamed)
     --tgt <dir>       target unpacked dir (default .cache/webcrack/v<ver>-raw)
@@ -232,13 +313,14 @@ async function main() {
     --prev <map.json> committed baseline (default: latest map < <version>)
     --out <map.json>  candidate output (default maps/polytrack-<ver>.candidate.json)
   regen.mjs --diff <prev.json> <next.json>
-  regen.mjs --verify <map.json> <unpacked-dir>`);
+  regen.mjs --verify <map.json> <unpacked-main-dir> [<chunkId>=<unpacked-chunk-dir> ...]`);
     process.exit(2);
   }
   const flag = (k) => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : undefined; };
   return modeRegen(version, {
     noFetch: process.argv.includes("--no-fetch"),
     chunks: process.argv.includes("--chunks"),
+    allowChunkDrop: process.argv.includes("--allow-chunk-drop"),
     reunpack: process.argv.includes("--reunpack"),
     src: flag("--src"), tgt: flag("--tgt"), bundle: flag("--bundle"),
     prev: flag("--prev"), out: flag("--out"),
