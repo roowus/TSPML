@@ -1,0 +1,11 @@
+// Typecheck-only config for the test suite (see source/shared/tsconfig.tests.json
+// for the rationale in full): the build config emits `src` with `rootDir: src`, so
+// it cannot also include `tests`, and vitest's esbuild transform strips types
+// without checking them.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "tests"]
+}
