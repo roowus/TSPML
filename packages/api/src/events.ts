@@ -120,6 +120,16 @@ export interface TspmlEventMap {
   'checkpoint.respawn': readonly [checkpoint: CheckpointInfo];
   'race.started': readonly [car: CarRef];
   'race.finished': readonly [result: RaceFinishInfo];
+
+  // ── track editor (#87) ──────────────────────────────────────────────────────
+  // Raised from the editor's OWN `enable()`/`disable()`, so they track the flag
+  // `api.editor.isOpen()` reads rather than anything inferred. Both can fire more
+  // than once per session, and they bracket the test-drive round trip too: taking
+  // a track for a test drive closes the editor and returning re-opens it.
+  /** The editor became interactive (opened, or returned from a test drive). */
+  'editor.opened': readonly [];
+  /** The editor stopped being interactive (closed, or entered a test drive). */
+  'editor.closed': readonly [];
 }
 
 /** Listener for a given event. */

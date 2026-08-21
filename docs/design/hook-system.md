@@ -46,6 +46,7 @@ two-car bundle in `source/shared/tests/per-car-events.test.ts`.
   game's clips by URL, or add new ones (**implemented**, [#11](https://github.com/roowus/TSPML/issues/11);
   see *instance capture* below)
 - `api.tracks` — register custom tracks by import code (**implemented**, [#12](https://github.com/roowus/TSPML/issues/12); see *instance capture* below)
+- `api.editor` — read and write the open track, undo-integrated (**implemented**, [#87](https://github.com/roowus/TSPML/issues/87); see *reaching a chunk* below)
 - `api.ui` — HUD widgets/panels
 - `api.keybinds` / `api.settings` — where `getSetting` returns a **typed** value, so a numeric setting arrives as a number rather than a string you have to parse
 
@@ -140,6 +141,62 @@ track store's late-running constructor — so it needed no stub slot.
 > The portal's committed smoke reports which captures arrived early
 > (`scripts/smoke-tracks.mjs`); in practice it is the codec, empirically confirming the
 > stub is load-bearing rather than defensive.
+
+### Reaching a chunk — the track editor (#87)
+
+The editor is the first thing TSPML hooks that is not in `main.bundle.js` at all. It
+ships in a numbered webpack chunk the game fetches on demand (`i.e(112)` →
+`<version>/112.bundle.js`), so before [#98](https://github.com/roowus/TSPML/issues/98)
+gave every served file its own *transform surface* — its own hash pin, its own base
+patch set, its own source-map filename — there was no way to anchor anything in it. The
+chunk re-minifies on its own schedule, so sharing the main bundle's pin would either
+trip on every unrelated main-bundle change or, worse, accept a re-minified chunk whose
+anchors no longer fit.
+
+Three things about the capture are worth recording, because each was a wrong turn first:
+
+**The parts are not the editor's.** The editor mutates the *shared* `Track` instance the
+race scene also uses, and every editor edit goes through that object's `setPart` /
+`deleteSpecificPart`. Those live in the **main** bundle and the bridge already captures
+the `Track`. So placement never needed the chunk; only the undo stack and the open flag
+did.
+
+Reading is one call further out, and getting that wrong cost a release: `forEachPart`
+belongs to the **track-data** object `getTrackData()` builds, not to the `Track`. The
+registry called `track.forEachPart` and the live game answered `"not a function"`,
+which the guard against partial reads turned into an empty array — so a full track read
+as an empty one and nothing reported a fault. Two lessons generalize past this bug.
+Fail-soft guards convert a wrong shape into a plausible value, so a shape assumption
+must be checked against the game rather than against the guard. And the unit tests all
+passed throughout, because the fake `Track` had been given a `forEachPart` too: a fake
+built from the same assumption as the code under test can never falsify it. Fakes for
+captured game objects are now shaped from the deobfuscated source, not from the calls
+the bridge happens to make.
+
+**TypeScript `#private` fields are not private in the bundle.** They downlevel to
+module-scope `WeakMap`s with a read helper (`(0,i.gn)(this, wn, "f")`), so the editor's
+undo stack, redo stack, and open flag are all reachable — but only from *inside* the
+chunk's module scope. That is what the capture patch is for: a `before`/`after` inject is
+spliced lexically into the target's body, so it sits in that scope chain and can close
+over the `WeakMap` bindings directly. What it hands the host is a set of **closures**,
+not state.
+
+**The instance arrives separately, and from the editor's own methods.** The capture runs
+at module scope, which is before any editor exists, so it cannot supply one. `this`
+inside the editor's `enable()` / `disable()` is the live editor, which supplies the
+instance *and* makes `editor.opened` / `editor.closed` exact rather than polled: the
+events and `api.editor.isOpen()` end up reading the same flag and cannot disagree. Note
+what was rejected — `dispose` looked like the natural close signal, but the method
+locator takes the **first** matching method in source order and the chunk's first
+`dispose` belongs to an unrelated resource-cleanup class. An editor-closed signal built
+on it would have attached to the wrong object silently, which is the same first-match
+trap that rules out `constructor`.
+
+Chunk 112 is also the first surface whose base patch set is neither the bridge patches
+nor empty. Base patches are all-or-nothing per surface, so feeding a chunk the main
+bundle's set would make every one of them miss and serve that chunk vanilla *for a
+reason that is not drift* — the lookup is therefore keyed on the chunk id, not on
+whether the surface is a chunk.
 
 ## Tier 2 — mixin surgery (escape hatch)
 

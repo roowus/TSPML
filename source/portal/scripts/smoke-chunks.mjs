@@ -24,14 +24,36 @@
 //   1. HTTP 200 with a non-empty body — the #106 regression was 500 + 0 bytes;
 //   2. `x-tspml-surface: chunk:<id>` — it was recognised as a surface, not
 //      quietly passed through as an unknown file, which would also give a 200;
-//   3. the served bytes hash to the map's pin for THAT chunk — a 200 serving
-//      the wrong bytes is not a pass;
+//   3. the served bytes are the RIGHT bytes, which since #87 means two different
+//      things depending on the chunk — see the note below;
 //   4. `x-tspml-detail` is present and pure printable ASCII. A header value is
 //      a ByteString; the detail is house-style prose containing em-dashes, and
 //      `Headers.set` throws above U+00FF. The throw is the bug, so the fact
 //      that a response arrived at all is most of the assertion — but the ASCII
 //      check is what fails if someone sanitizes on a path that only *some*
 //      details take.
+//
+// ON ASSERTION 3, AND WHY IT IS NOT ONE RULE. Until #87 every declared chunk had
+// an empty base, so every chunk was served byte-identical to its pin and one
+// hash comparison covered them all. Chunk 112 now carries the editor capture
+// patches, so a HEALTHY response for it is transformed bytes that DIFFER from
+// the pin — the pin describes what came off the CDN, not what we serve. Keeping
+// the old rule would fail on correct behaviour; dropping it would stop checking
+// the bytes at all. So the rule branches on the surface's own
+// `x-tspml-transformed` header:
+//
+//   transformed=0 → served bytes MUST equal the pin (untouched pass-through);
+//   transformed=1 → served bytes MUST NOT equal the pin (something really ran),
+//                   and the body must still parse as JavaScript.
+//
+// The parse is what makes the transformed branch worth anything. "Different from
+// the pin" is satisfied by truncation and by garbage, and a chunk that arrives
+// as 200 + non-empty + corrupt is exactly the failure the hash check used to
+// catch for free.
+//
+// Which chunks transform is read from the map and the response, never asserted
+// from a literal id — a PolyTrack release can renumber chunks, and #87's own
+// notes are explicit that 112 moves when it does.
 //
 // The chunk ids come from the map, never a literal: `112` is build-specific and
 // will not survive a PolyTrack release. Hardcoding it would turn this into a
@@ -55,14 +77,33 @@ const isPrintableAscii = (s) => /^[\x20-\x7E]*$/.test(s);
 
 const sha256 = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')}`;
 
+/**
+ * Does the served body still parse as JavaScript?
+ *
+ * `new Function` compiles without executing, which is the point: this is game
+ * code, and running it here would be both wrong and unsurvivable outside a
+ * browser. It is a syntax check only — it catches the truncation and brace
+ * damage a bad inject produces, not a semantic break.
+ */
+function parsesAsJs(source) {
+  try {
+    // eslint-disable-next-line no-new-func
+    new Function(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Fetch one proxied bundle file and report everything the assertions need. */
 async function fetchSurface(file) {
   const res = await fetch(`${BASE_URL}/api/proxy/${file}?version=${VERSION}`);
-  const body = Buffer.from(await res.arrayBuffer());
+  const buf = Buffer.from(await res.arrayBuffer());
   return {
     status: res.status,
-    bytes: body.length,
-    hash: sha256(body),
+    bytes: buf.length,
+    hash: sha256(buf),
+    body: buf.toString('utf8'),
     surface: res.headers.get('x-tspml-surface'),
     transformed: res.headers.get('x-tspml-transformed'),
     detail: res.headers.get('x-tspml-detail'),
@@ -96,37 +137,71 @@ for (const id of declared) {
   const pin = MAP.chunks[id].hash;
   step(`${file} (${MAP.chunks[id].role ?? 'unknown role'})`);
   const r = await fetchSurface(file);
+  const wasTransformed = r.transformed === '1';
   const verdict = {
     status: r.status,
     bytes: r.bytes,
     surface: r.surface,
+    transformed: r.transformed,
     detail: r.detail,
     ok200: r.status === 200,
     nonEmpty: r.bytes > 0,
     recognised: r.surface === `chunk:${id}`,
-    matchesPin: r.hash === pin,
+    // An untouched chunk must be byte-identical to the pin; a transformed one
+    // must not be, or nothing ran. Both directions are real failures.
+    bytesCorrect: wasTransformed ? r.hash !== pin : r.hash === pin,
+    // Only meaningful on the transformed branch, where "differs from the pin"
+    // alone would also accept truncation and corruption.
+    parses: wasTransformed ? parsesAsJs(r.body) : null,
     detailPresent: typeof r.detail === 'string' && r.detail.length > 0,
     detailAscii: typeof r.detail === 'string' && isPrintableAscii(r.detail),
   };
-  if (!verdict.matchesPin) {
-    // Worth printing both: a mismatch here is either drift (the game shipped a
-    // new build, canary is red too) or the proxy serving the wrong bytes.
+  if (!verdict.bytesCorrect) {
+    // Worth printing both. Untouched: either drift (the game shipped a new
+    // build, canary is red too) or the proxy serving the wrong bytes.
+    // Transformed: the base silently failed and the chunk fell back to vanilla,
+    // which looks identical to a healthy pass-through from the outside — this
+    // comparison is the only thing that tells them apart.
+    step(`  !! transformed=${r.transformed}`);
     step(`  !! hash ${r.hash}`);
     step(`  !! pin  ${pin}`);
   }
+  if (verdict.parses === false) step(`  !! transformed body does not parse as JavaScript`);
   if (!verdict.ok200) step(`  !! HTTP ${r.status} with ${r.bytes} byte(s)`);
   if (!verdict.detailAscii) step(`  !! non-ASCII detail: ${JSON.stringify(r.detail)}`);
   out.chunks[id] = verdict;
+}
+
+// At least one declared chunk must actually transform. Without this the whole
+// suite passes on a build where every base silently failed: each chunk would
+// then match its pin, take the untouched branch, and report a clean green — the
+// same shape of vacuous pass the TSPML_TRANSFORM guard above exists to prevent.
+out.transformedChunks = Object.entries(out.chunks)
+  .filter(([, c]) => c.transformed === '1')
+  .map(([id]) => id);
+const someChunkTransformed = out.transformedChunks.length > 0;
+if (!someChunkTransformed) {
+  step(`  !! no declared chunk transformed — the editor base (#87) is not running`);
 }
 
 const everyChunkOk =
   declared.length > 0 &&
   Object.values(out.chunks).every(
     (c) =>
-      c.ok200 && c.nonEmpty && c.recognised && c.matchesPin && c.detailPresent && c.detailAscii,
+      c.ok200 &&
+      c.nonEmpty &&
+      c.recognised &&
+      c.bytesCorrect &&
+      c.parses !== false &&
+      c.detailPresent &&
+      c.detailAscii,
   );
 
-const PASS = out.transformEnabled === true && out.mainDetailAscii === true && everyChunkOk === true;
+const PASS =
+  out.transformEnabled === true &&
+  out.mainDetailAscii === true &&
+  someChunkTransformed === true &&
+  everyChunkOk === true;
 
 console.log(JSON.stringify({ PASS, verdict: out }, null, 2));
 process.exit(PASS ? 0 : 1);

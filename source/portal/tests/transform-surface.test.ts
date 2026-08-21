@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { GameMap } from '@tspml/mappings';
+import { BRIDGE_PATCHES, EDITOR_PATCHES } from '@tspml/shared';
 import { transformSurfaceFor } from '../lib/transform-surface';
 
 const MAIN_HASH = `sha256:${'a'.repeat(64)}`;
@@ -81,10 +82,33 @@ describe('transformSurfaceFor — declared chunks', () => {
     expect(surface('535.bundle.js')?.expectedHash).toBe(CHUNK_535_HASH);
   });
 
-  it('gives a chunk NO base patches — the bridge patches anchor only in main', () => {
-    // Feeding them to a chunk makes every one miss, and base patches are
-    // all-or-nothing, so the chunk would fail closed for a reason that is not drift.
-    expect(surface('112.bundle.js')?.basePatches).toEqual([]);
+  it('gives chunk 112 the EDITOR base patches, not the bridge patches (#87 Phase C)', () => {
+    const base = surface('112.bundle.js')?.basePatches ?? [];
+    expect(base.length).toBeGreaterThan(0);
+    expect(base).toEqual(EDITOR_PATCHES);
+    // The direction that matters. Feeding the bridge patches here would make every
+    // one of them miss, and base patches are all-or-nothing, so the chunk would
+    // fail closed to vanilla for a reason that is not drift.
+    expect(base).not.toEqual(BRIDGE_PATCHES);
+    for (const p of base) {
+      expect(BRIDGE_PATCHES).not.toContain(p);
+    }
+  });
+
+  it('gives every OTHER declared chunk an empty base — a live path, not a no-op', () => {
+    // 535 has no loader-owned patches, and user mixins still compose against it.
+    // This is also the branch whose detail string shipped a bodyless 500 (#106),
+    // so it stays asserted rather than assumed gone.
+    expect(surface('535.bundle.js')?.basePatches).toEqual([]);
+  });
+
+  it('never hands one chunk another chunk’s base patches', () => {
+    // The editor patches anchor in module 7112 of chunk 112 and nowhere else. If
+    // the lookup ever keyed on `kind` instead of the chunk id, 535 would inherit
+    // them and fail closed.
+    const editorBase = surface('112.bundle.js')?.basePatches ?? [];
+    const otherBase = surface('535.bundle.js')?.basePatches ?? [];
+    expect(editorBase).not.toEqual(otherBase);
   });
 });
 

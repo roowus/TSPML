@@ -1,4 +1,5 @@
 import type { AudioRegistry } from './audio.js';
+import type { EditorRegistry } from './editor.js';
 import type { TspmlEventSubscriber } from './events.js';
 import type { KeybindsRegistry } from './keybinds.js';
 import type { TracksRegistry } from './tracks.js';
@@ -24,6 +25,12 @@ export interface TspmlApi {
   readonly tracks: TracksRegistry;
   /** Audio registry (Tier 1) — override or add a game sound by URL. */
   readonly audio: AudioRegistry;
+  /**
+   * Track-editor registry (Tier 1) — read and place parts in the open editor
+   * session. Always present; unavailable until the player opens the editor,
+   * which the individual calls report (#87).
+   */
+  readonly editor: EditorRegistry;
   /** Console-shaped logger for mod diagnostics. */
   readonly logger: TspmlLogger;
   /** The TSPML loader's semantic version. */

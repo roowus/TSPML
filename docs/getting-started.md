@@ -92,6 +92,12 @@ export default function entrypoint(api: TspmlApi): void {
 | Registry | Method | Notes |
 |---|---|---|
 | `api.keybinds` | `.register({ id, key, onDown, onUp })` | Bridge-owned parallel listener; doesn't appear in the game's Controls settings. |
+| `api.tracks` | `.register({ code, name?, author?, overwrite?, persist? })` | Takes a `PolyTrack2…` import code. Session-scoped unless you pass `persist`. Safe to call at `init` — early calls queue. |
+| `api.audio` | `.register({ key, url, overwrite? })` | Overrides a builtin clip or adds a new one. `unregister` brings the game's original back. Safe to call at `init`. |
+| `api.editor` | `.getParts()` / `.insertParts(parts)` | Reads and writes the open track; one insert = one Ctrl+Z. **Not** queued — drive it from `editor.opened`, since the editor loads on demand and is absent most sessions. |
+
+Every one of these returns a typed result rather than throwing, so a failed
+registration is a `reason` you can branch on, never an exception in your `init`.
 
 ## 3. Build
 
