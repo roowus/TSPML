@@ -190,11 +190,31 @@ Two of four hold up, both unique, and both land in **module 7112**, which is the
 module Phase C has to reach. So a two-literal anchor for it is available, which
 is the same discipline the main-bundle targets already use.
 
-Worth knowing before picking anchors: the chunk contains only **7 webpack
-modules**. Uniqueness is easy to establish in a search space that small and
-correspondingly easy to lose on a re-minify. These are hash-gate-protected 0.6.2
-specifics like every other minified reading in this doc, so re-fetch with
-`pnpm run fetch 0.6.2 --chunks` and re-check against a new build rather than
+The module attribution is confirmed twice, by two methods that can fail
+independently: a webpack-id scan, and the raw byte offsets of the literals
+against module spans. The chunk holds **7 modules**, and 7112 owns 83% of it:
+
+| module | span | bytes |
+|---|---|---|
+| 2346 | 67 | 2,687 |
+| 4512 | 2,754 | 4,782 |
+| 5298 | 7,536 | 1,549 |
+| 6057 | 9,085 | 5,457 |
+| **7112** | **14,542** | **89,808** |
+| 7296 | 104,350 | 1,489 |
+| 9242 | 105,839 | 2,195 |
+
+`"How to use the editor"` sits at offset 28,396 and `"Part index out of bounds"`
+at 59,961, both inside 7112's span of `[14,542 .. 104,350)`.
+
+That 83% is the fact to carry into Phase C. Chunk 112 is essentially one module
+with a small support cast, so "anchor the chunk" and "anchor the editor class"
+are close to the same problem, and there is no sibling module for a locator to
+mis-select into. The flip side is that uniqueness within a 7-module space is
+cheap to establish and correspondingly cheap to lose: a re-minify that merges or
+reorders modules moves everything here at once. These are hash-gate-protected
+0.6.2 specifics like every other minified reading in this doc, so re-fetch with
+`pnpm run fetch 0.6.2 --chunks` and re-measure against a new build rather than
 trusting the table across a release.
 
 **Phase C — full #87 on top of B:** capture the `fi` instance, push a proper
