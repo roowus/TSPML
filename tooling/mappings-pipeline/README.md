@@ -188,24 +188,36 @@ convention, so a typo'd path is a hard error instead of a silent SKIPPED.
 Convenience scripts (`package.json`): `pnpm fetch 0.7.0`, `pnpm gen`, `pnpm diff -- …`,
 `pnpm verify -- …`, `pnpm regen 0.7.0`.
 
-## `wasm-locate.mjs` — structural location inside the physics WASM (#43 spike)
+## Physics WASM location and patching (#43) — now in `@tspml/wasm`
 
 Not part of the five-stage pipeline; it answers a separate question. The obvious way to
 patch `polytrack_physics.wasm` is by **raw byte offset**, and that has the worst possible
 failure mode — a stale offset doesn't miss, it writes a float into whatever now lives at
 that address.
 
-`src/wasm-locate.mjs` tests whether a constant can be located **structurally**
-instead, by fingerprinting the function that contains it (sorted multiset of float
-constants + opcode-byte histogram — no offsets, no indices). Measured against the real
-0.6.2 binary: **535 of 549 functions (97.4%) uniquely identified**, and a real
-4,096-byte shift re-derives the correct new address where a hardcoded offset points at
-garbage.
+The locator and writer **used to live here** as `src/wasm-locate.mjs` and
+`src/wasm-patch.mjs`. They now live in [`source/wasm`](../../source/wasm)
+(`@tspml/wasm`), which this package depends on. The move was forced by where the code
+needs to run: this workspace is dev-only (it pulls webcrack, whose optional native build
+CI skips), so the portal could never import from it — and the portal is what has to serve
+patched physics bytes at runtime. Keeping a second copy here would mean two
+implementations of a fail-closed binary patcher, which is the kind of drift you find out
+about by corrupting someone's physics sim. One implementation, two callers.
+
+What stays here is `scripts/wasm-patch-validate.mjs`, which exercises the package against
+the real cached binary in `.cache/` — a local-only check, since that binary is never
+committed.
+
+`fingerprint` identifies a function by the sorted multiset of its float constants plus an
+opcode-byte histogram — no offsets, no indices, so relocation cannot change it. Measured
+against the real 0.6.2 binary: **535 of 549 functions (97.4%) uniquely identified**, and a
+real 4,096-byte shift re-derives the correct new address where a hardcoded offset points
+at garbage.
 
 `locateBySignature` **fails closed on ambiguity as well as absence** — same posture as
 the `bundleHash` gate.
 
-## `wasm-patch.mjs` — the writer half (#43)
+### The writer half
 
 Built on the locator. A **patch plan** is data: a pinned `wasmHash` (sha256 of the exact
 binary the plan was verified against) plus `{ name, signature, oldValue, newValue }`
@@ -299,7 +311,7 @@ evidence ranking (`lexical > structural > edge` on stable-name collisions):
 ## Tests
 
 ```sh
-pnpm test    # 173 unit tests — CI-runnable, no bundle needed
+pnpm test    # 148 unit tests — CI-runnable, no bundle needed
 ```
 
 Covering `diff` (36, incl. the chunk-pin report + carry guard #98), `verify-targets`
@@ -307,8 +319,11 @@ Covering `diff` (36, incl. the chunk-pin report + carry guard #98), `verify-targ
 discovery #3), the webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2),
 `regen`'s Node-invocation helper (5, #25), `regen --verify` end-to-end (4, #98 —
 spawns the real script, because the thing most likely to break is the exit code and an
-exit code only exists in a process), `wasm-locate` (16, #43), `wasm-patch` (9, #43),
-`fingerprint` (20, #1), `select` (17, #1) and `edges` (16, #1).
+exit code only exists in a process), `fingerprint` (20, #1), `select` (17, #1) and
+`edges` (16, #1).
+
+The #43 WASM tests moved out with the code they cover: 27 of them now run in
+[`source/wasm`](../../source/wasm) via `pnpm --filter @tspml/wasm test`.
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.

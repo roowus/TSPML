@@ -15,6 +15,9 @@
     "verify": "node scripts/regen.mjs --verify",
     "regen": "node scripts/regen.mjs"
   },
+  "dependencies": {
+    "@tspml/wasm": "workspace:*"
+  },
   "devDependencies": {
     "vitest": "^2.1.0",
     "webcrack": "^2.16.0"

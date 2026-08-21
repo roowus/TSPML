@@ -169,6 +169,20 @@ function parseVersionManifestImpl(input: unknown, idHint: string | undefined): V
     mixins = validateMixins(m.mixins, idHint);
   }
 
+  // physics (#43): one path, validated as a non-empty string here. Its CONTENTS
+  // are the host's business — the constants only mean anything against a binary,
+  // which this package never sees.
+  let physics: string | undefined;
+  if (m.physics !== undefined) {
+    if (!isString(m.physics) || m.physics.length === 0) {
+      throw new ManifestError(
+        field(idHint, 'physics'),
+        "field 'physics' must be a non-empty string (path to the mod's physics.json)",
+      );
+    }
+    physics = m.physics;
+  }
+
   // capabilities
   let capabilities: string[] | undefined;
   if (m.capabilities !== undefined) {
@@ -216,6 +230,7 @@ function parseVersionManifestImpl(input: unknown, idHint: string | undefined): V
   if (includes !== undefined) manifest.includes = includes;
   if (provides !== undefined) manifest.provides = provides;
   if (mixins !== undefined) manifest.mixins = mixins;
+  if (physics !== undefined) manifest.physics = physics;
   if (capabilities !== undefined) manifest.capabilities = capabilities;
   if (vanillaSafe !== undefined) manifest.vanillaSafe = vanillaSafe;
   if (custom !== undefined) manifest.custom = custom;

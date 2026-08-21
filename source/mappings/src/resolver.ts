@@ -22,6 +22,7 @@ import type {
   ResolveContext,
   ResolveResult,
   TargetSpec,
+  WasmEntry,
 } from './types.js';
 
 /**
@@ -223,12 +224,26 @@ export type ChunkResolveResult =
  * the allowlist question ("is this id declared at all") — used by a proxy deciding
  * whether to buffer a response for hashing before it has the bytes.
  */
+/**
+ * Own-property lookup in an allowlist keyed by a REQUEST-DERIVED string.
+ *
+ * A plain `record[key]` walks the prototype chain, so `'constructor'` and
+ * `'toString'` come back truthy on any object literal and would sail past an
+ * `=== undefined` check as if they were declared entries. The caller would then read
+ * `.hash` off a function and compare it to a live hash — an allowlist that answers
+ * "yes" for names nobody declared. Never a plain index here.
+ */
+function ownEntry<T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+  if (record === undefined) return undefined;
+  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
+}
+
 export function resolveChunk(
   map: GameMap,
   chunkId: string,
   liveHash?: string,
 ): ChunkResolveResult {
-  const entry = map.chunks?.[chunkId];
+  const entry = ownEntry(map.chunks, chunkId);
   if (entry === undefined) {
     return {
       ok: false,
@@ -249,4 +264,65 @@ export function resolveChunk(
 /** Chunk ids this map declares transformable, ascending. Empty when none. */
 export function transformableChunkIds(map: GameMap): string[] {
   return Object.keys(map.chunks ?? {}).sort((a, b) => Number(a) - Number(b));
+}
+
+// ── WASM resolution (#43) ───────────────────────────────────────────────────
+
+export type WasmResolveResult =
+  | { readonly ok: true; readonly wasm: WasmEntry }
+  | {
+      readonly ok: false;
+      readonly reason: 'not-declared' | 'stale-wasm';
+      readonly message: string;
+    };
+
+/**
+ * May this build's `<name>.wasm` be patched, and against which pin?
+ *
+ * Same two-refusal shape as {@link resolveChunk}, and the same reason for keeping them
+ * distinct — a host reports them differently:
+ *
+ *  - `'not-declared'` — the filename is not in the allowlist. Routine: TSPML has
+ *    verified nothing against that binary, so it is proxied verbatim.
+ *  - `'stale-wasm'`   — declared, but the live bytes do not match the pin. The binary
+ *    recompiled, so every fingerprint derived from the old build is unverified against
+ *    these bytes. Fail closed.
+ *
+ * The stakes differ from the chunk case, which is why this is a hard gate and not a
+ * warning. A stale JS pin risks a patch that misses. A stale binary pin risks writing
+ * a float into whatever now occupies an address — the physics sim keeps running, wrong,
+ * with no error anywhere. `@tspml/wasm` additionally re-derives every location
+ * structurally at patch time and refuses on ambiguity, so this pin is the outer of two
+ * independent gates rather than the only one.
+ *
+ * `liveHash` is the hash of the bytes about to be served, prefixed or bare. Omit it to
+ * ask only the allowlist question — used by a proxy deciding whether to buffer a
+ * response before it has the bytes to hash.
+ */
+export function resolveWasm(
+  map: GameMap,
+  file: string,
+  liveHash?: string,
+): WasmResolveResult {
+  const entry = ownEntry(map.wasm, file);
+  if (entry === undefined) {
+    return {
+      ok: false,
+      reason: 'not-declared',
+      message: `'${file}' is not declared patchable in the map for PolyTrack ${map.gameVersion}; serving it unmodified`,
+    };
+  }
+  if (liveHash !== undefined && normalizeHash(liveHash) !== normalizeHash(entry.hash)) {
+    return {
+      ok: false,
+      reason: 'stale-wasm',
+      message: `'${file}' hash (${entry.hash}) does not match the live binary (${liveHash}); refusing to patch it — every recorded fingerprint is unverified against these bytes`,
+    };
+  }
+  return { ok: true, wasm: entry };
+}
+
+/** WASM filenames this map declares patchable, sorted. Empty when none. */
+export function patchableWasmFiles(map: GameMap): string[] {
+  return Object.keys(map.wasm ?? {}).sort();
 }

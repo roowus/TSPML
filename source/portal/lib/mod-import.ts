@@ -10,9 +10,9 @@
  * GitHub/gist links and CDNs (jsDelivr, unpkg) do; most web pages don't.
  *
  * Two accepted shapes:
- *  - a `mod.json` URL — the manifest's `entrypoint` (and any `mixins` config
- *    files applicable to this web host, #21) are fetched RELATIVE to it, the
- *    same layout a mod repo already has;
+ *  - a `mod.json` URL — the manifest's `entrypoint` (plus any `mixins` config
+ *    files applicable to this web host, #21, and its `physics.json`, #43) are
+ *    fetched RELATIVE to it, the same layout a mod repo already has;
  *  - a single built `.js` file URL — a minimal manifest is synthesized from
  *    the filename so "the URL is just the file" works too.
  *
@@ -22,12 +22,16 @@
  */
 import { parseMixinsJson } from './user-mods';
 import { USER_PATCH_LIMITS } from './user-patches';
+import { parsePhysicsJson } from './physics-plan';
 import { mixinEnvironmentAppliesToHost } from './mixin-env';
 
 export interface ImportedMod {
   readonly manifest: Record<string, unknown>;
   readonly code: string;
   readonly mixins?: Record<string, unknown>[];
+  /** The mod's `physics.json`, fetched relative to the manifest URL when it
+   *  declares one (#43). Stored raw and re-validated on every use. */
+  readonly physics?: Record<string, unknown>;
   /** Human note about non-obvious handling (e.g. "manifest synthesized"). */
   readonly note?: string;
 }
@@ -42,6 +46,10 @@ export const IMPORT_LIMITS = {
   maxManifestChars: 65_536,
   maxCodeChars: 2_000_000,
   maxMixinsChars: USER_PATCH_LIMITS.maxBodyBytes,
+  /** A physics.json is a pin plus at most 16 numeric patches (#43), so this is
+   *  roomy by two orders of magnitude — it only exists to fail a mistyped URL
+   *  pointing at something large, fast and clearly. */
+  maxPhysicsChars: 65_536,
   timeoutMs: 20_000,
 } as const;
 
@@ -234,12 +242,43 @@ async function importFromManifest(
   const capError = checkMixinCaps(patches);
   if (capError) return fail(capError);
 
+  // #43: the mod's physics.json, if it declares one. Rides relative to the
+  // manifest like everything else, and is VALIDATED here rather than merely
+  // fetched — a physics patch is a write into a binary, so an import must not
+  // store a shape the plan builder will later reject with the author long gone.
+  let physics: Record<string, unknown> | undefined;
+  if (typeof m.physics === 'string' && m.physics.length > 0) {
+    let physicsUrl: URL;
+    try {
+      physicsUrl = new URL(m.physics, baseUrl);
+    } catch {
+      return fail(`physics '${m.physics}' does not resolve against the manifest URL`);
+    }
+    const physicsCheck = checkImportUrl(physicsUrl.href);
+    if (!physicsCheck.ok) return fail(`physics: ${physicsCheck.error}`);
+    const text = await fetchText(
+      physicsUrl.href,
+      IMPORT_LIMITS.maxPhysicsChars,
+      `physics (${m.physics})`,
+      fetchImpl,
+      bust,
+    );
+    if (!text.ok) return text;
+    const parsed = parsePhysicsJson(text.text);
+    if (!parsed.ok) return fail(`physics (${m.physics}): ${parsed.error}`);
+    // Store the RAW object, not `parsed.plan`: the record's contract is "the
+    // file as the author wrote it", re-parsed on every use. Keeping the parsed
+    // form would freeze this build's normalisation into storage.
+    physics = JSON.parse(text.text) as Record<string, unknown>;
+  }
+
   return {
     ok: true,
     mod: {
       manifest: m,
       code: code.text,
       ...(patches.length > 0 ? { mixins: patches } : {}),
+      ...(physics === undefined ? {} : { physics }),
     },
   };
 }

@@ -119,6 +119,27 @@ describe('loadDefaultMap (the bundled 0.6.2 map)', () => {
     });
   });
 
+  it('declares the physics binary with its own pin, not the bundle hash (#43)', async () => {
+    const map = await loadDefaultMap();
+    // A literal pin for the same reason the chunk pins are literal: a WRONG one fails
+    // silently. The portal hashes the live binary, sees a mismatch, and serves vanilla
+    // physics forever — no crash, no failing shape test, just a physics mod that never
+    // does anything. This is the sha256/byte-length of 0.6.2/polytrack_physics.wasm as
+    // actually fetched. (It is byte-identical across 0.6.0/0.6.1/0.6.2: the binary is
+    // built separately from the JS and does not move with every release.)
+    expect(map.wasm).toEqual({
+      'polytrack_physics.wasm': {
+        file: 'polytrack_physics.wasm',
+        hash: 'sha256:d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e',
+        bytes: 396005,
+        role: 'physics simulation (Bullet, compiled)',
+      },
+    });
+    // Gating physics on the JS bundle's hash would re-pin the binary on every main
+    // bundle change even though its bytes never moved.
+    expect(map.wasm?.['polytrack_physics.wasm']!.hash).not.toBe(map.bundleHash);
+  });
+
   it('pins each chunk with its own distinct hash', async () => {
     const map = await loadDefaultMap();
     const hashes = Object.values(map.chunks ?? {}).map((c) => c.hash);
@@ -239,6 +260,72 @@ describe('validateMap — chunks (#98)', () => {
 
   it('rejects a non-object chunks section', () => {
     expect(() => validateMap(baseMap({ chunks: [] }))).toThrowError(/chunks/);
+  });
+});
+
+describe('validateMap — wasm (#43)', () => {
+  const WASM_HASH = 'sha256:2222222222222222222222222222222222222222222222222222222222222222';
+  function withWasm(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return baseMap({
+      wasm: {
+        'polytrack_physics.wasm': {
+          file: 'polytrack_physics.wasm',
+          hash: WASM_HASH,
+          bytes: 396005,
+          role: 'physics simulation',
+          ...over,
+        },
+      },
+    });
+  }
+
+  it('accepts a well-formed wasm section', () => {
+    expect(validateMap(withWasm()).wasm?.['polytrack_physics.wasm']).toEqual({
+      file: 'polytrack_physics.wasm',
+      hash: WASM_HASH,
+      bytes: 396005,
+      role: 'physics simulation',
+    });
+  });
+
+  it('treats an absent wasm section as "declares no patchable binaries"', () => {
+    // Every pre-#43 map. Absent must stay absent rather than becoming `{}`: a host
+    // distinguishes "declares none" from "declares an allowlist", and every .wasm
+    // request under the former is proxied verbatim.
+    expect(validateMap(baseMap()).wasm).toBeUndefined();
+  });
+
+  it('rejects a filename that is not a plain <name>.wasm', () => {
+    // The filename becomes a request path, so a lenient rule here is a traversal
+    // primitive. Rejected at STORE time as well as at request time, so a bad name
+    // cannot sit in a committed map waiting for the request-side check to regress.
+    for (const file of ['../polytrack_physics.wasm', 'sub/physics.wasm', 'physics.wasm.js', '']) {
+      expect(() => validateMap(withWasm({ file }))).toThrowError(/file/);
+    }
+  });
+
+  it('rejects a file that disagrees with its key', () => {
+    // Lookup is by key; the pin and the fetched path would describe different files.
+    expect(() => validateMap(withWasm({ file: 'polytrack_audio.wasm' }))).toThrowError(
+      /must equal its key/,
+    );
+  });
+
+  it('rejects a malformed hash', () => {
+    // A pin that can never match makes the binary permanently, silently vanilla —
+    // which for physics reads to a player as "the mod does nothing", with no error.
+    expect(() => validateMap(withWasm({ hash: 'sha256:nope' }))).toThrowError(/hash/);
+    expect(() => validateMap(withWasm({ hash: 'd4ef' }))).toThrowError(/hash/);
+  });
+
+  it('rejects a non-positive bytes and an empty role', () => {
+    expect(() => validateMap(withWasm({ bytes: 0 }))).toThrowError(/bytes/);
+    expect(() => validateMap(withWasm({ role: '' }))).toThrowError(/role/);
+  });
+
+  it('rejects a non-object wasm section', () => {
+    expect(() => validateMap(baseMap({ wasm: [] }))).toThrowError(/wasm/);
+    expect(() => validateMap(baseMap({ wasm: 'polytrack_physics.wasm' }))).toThrowError(/wasm/);
   });
 });
 

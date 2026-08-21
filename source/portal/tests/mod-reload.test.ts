@@ -25,16 +25,28 @@ function record(overrides: Partial<UserModRecord> & { id?: string } = {}): UserM
   };
 }
 
-function okImport(id: string, version: string, mixins?: Record<string, unknown>[]): ImportResult {
+function okImport(
+  id: string,
+  version: string,
+  mixins?: Record<string, unknown>[],
+  physics?: Record<string, unknown>,
+): ImportResult {
   return {
     ok: true,
     mod: {
       manifest: { schemaVersion: 1, id, version, entrypoint: 'index.js', targets: [] },
       code: `// ${version}\nexport default () => {};`,
       ...(mixins === undefined ? {} : { mixins }),
+      ...(physics === undefined ? {} : { physics }),
     },
   };
 }
+
+const HASH = 'd4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e';
+const PHYSICS = {
+  wasmHash: HASH,
+  patches: [{ name: 'grip', signature: '1'.repeat(64), oldValue: 1.05, newValue: 1.4 }],
+};
 
 describe('refreshFromSources', () => {
   it('re-fetches only mods with a sourceUrl; pasted mods pass through untouched', async () => {
@@ -78,6 +90,36 @@ describe('refreshFromSources', () => {
       Promise.resolve(okImport('a', '1.1.0')),
     );
     expect(r.next[0]!.mixins).toBeUndefined();
+  });
+
+  it('replaces the stored physics.json with the re-fetched one (#43)', async () => {
+    const stale = { ...PHYSICS, patches: [{ ...PHYSICS.patches[0]!, newValue: 9.9 }] };
+    const mod = record({ id: 'a', sourceUrl: 'https://host.example/a.json', physics: stale });
+    const r = await refreshFromSources([mod], undefined, () =>
+      Promise.resolve(okImport('a', '1.1.0', undefined, PHYSICS)),
+    );
+    expect(r.next[0]!.physics).toEqual(PHYSICS);
+  });
+
+  it('drops the stored physics.json when the source no longer ships one (#43)', async () => {
+    // Absence upstream MEANS absence. Keeping the old copy would keep writing
+    // constants into the binary that the current build was never derived
+    // against — the one failure mode this whole path exists to refuse.
+    const mod = record({ id: 'a', sourceUrl: 'https://host.example/a.json', physics: PHYSICS });
+    const r = await refreshFromSources([mod], undefined, () => Promise.resolve(okImport('a', '1.1.0')));
+    expect(r.next[0]!.physics).toBeUndefined();
+  });
+
+  it('keeps the stored physics.json when the re-fetch FAILS (#43)', async () => {
+    // A host being down is not the author dropping the file — the distinction
+    // matters here more than anywhere else, since guessing wrong either way
+    // changes what the sim does.
+    const mod = record({ id: 'a', sourceUrl: 'https://host.example/a.json', physics: PHYSICS });
+    const r = await refreshFromSources([mod], undefined, () =>
+      Promise.resolve({ ok: false as const, error: 'HTTP 503 from host.example' }),
+    );
+    expect(r.next[0]).toBe(mod);
+    expect(r.next[0]!.physics).toEqual(PHYSICS);
   });
 
   it('keeps the stored copy and reports the failure when a re-fetch fails', async () => {

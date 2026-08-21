@@ -9,9 +9,12 @@
 // but a diff only counts bytes that actually differ, and f32 neighbours share most
 // of their encoding — 2.0 to 4.0 flips a single byte. Asserting "4 bytes changed"
 // would fail on a correct patch.
+//
+// The locator and writer live in @tspml/wasm, not here: the portal serves patched
+// physics bytes from the same code, and this package is dev-only tooling nothing at
+// runtime can depend on. One implementation, two callers.
 import fs from 'node:fs';
-import { f32ConstSites, fingerprintAll } from '../src/wasm-locate.mjs';
-import { applyF32Patches, wasmHash } from '../src/wasm-patch.mjs';
+import { applyF32Patches, f32ConstSites, fingerprintAll, wasmHash } from '@tspml/wasm';
 
 const buf = fs.readFileSync(new URL('../.cache/pt-0.6.2-polytrack_physics.wasm', import.meta.url));
 const hash = wasmHash(buf);
@@ -54,7 +57,11 @@ if (!contained || diffs.length === 0) {
   console.log('FAIL: a patch must change something, and only within its own field');
   process.exit(1);
 }
-console.log('new value read back:', r.bytes.readFloatLE(r.report.applied[0].payloadOffset), 'expected', Math.fround(chosen.site.value * 2));
+// r.bytes is a plain Uint8Array (the package avoids Buffer so it runs in a
+// lambda or worker unchanged), so read the float through a DataView.
+const readBack = new DataView(r.bytes.buffer, r.bytes.byteOffset, r.bytes.byteLength)
+  .getFloat32(r.report.applied[0].payloadOffset, true);
+console.log('new value read back:', readBack, 'expected', Math.fround(chosen.site.value * 2));
 console.log('risk:', r.report.leaderboardRisk);
 
 const stale = { ...plan, wasmHash: '0'.repeat(64) };
