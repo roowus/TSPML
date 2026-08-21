@@ -1853,3 +1853,69 @@ name-by-name — **245 unchanged, 6 newly resolvable, 0 re-pointed, 0 lost**; th
 Also fixed en route: `match.mjs`'s unmatched-sample `bestShared` had the same
 read-off-`chooseTarget` defect gen-map fixed earlier (null on decline -> "0
 shared anchors"); it now reads the lexical leader via `topCandidates`.
+
+## 2026-08-20 — production 500 on the chunk route, fixed at the header boundary (#106) ✅
+
+`/api/proxy/112.bundle.js` returned HTTP 500 with an empty body on merged
+`main`. The cause was one line whose only job was to explain the response:
+
+```
+TypeError: Cannot convert argument to a ByteString because the character
+at index 32 has a value of 8212
+```
+
+Index 32 of `no patches target 112.bundle.js — served unmodified` is an
+em-dash. An HTTP header value is a ByteString, so `Headers.set` (portal, Edge)
+and Node's `res.setHeader` (dev harness) both throw above U+00FF, and a throw
+inside a request handler is a bodyless 500 on a request that had otherwise
+fully succeeded.
+
+**#98 did not write the broken line. It made the line reachable.** The
+zero-patch detail is only produced by a surface with no base patches, and until
+chunks became surfaces every proxied surface was `main.bundle.js`, which always
+has patches. The code executed for the first time ever in production, with 690
+tests green and five passing smokes behind it. That is now a conventions entry:
+when a change widens what can reach existing code, enumerate the branches it
+newly makes reachable and drive each one.
+
+The fix is `headerDetail` in `@tspml/shared`: transliterate to printable ASCII
+(`—` to `-`, `≠` to `!=`, `…` to `...`, catch-all to `?`), then cap at 200. The
+order is load-bearing and mutation testing is what proved it. The comment
+originally justified transliterate-before-slice as protecting a split surrogate
+pair, which is wrong (the catch-all regex already handles lone surrogates); the
+real reason is that transliteration *expands*, so slicing first caps the input
+rather than the output and 200 ellipses become a 600-character header. The
+mutant that reordered them survived until the reasoning was corrected.
+
+Auditing every place a detail crosses into a header found a second live
+instance: the dev harness hash-mismatch path, `hash-mismatch: live <h> ≠
+expected <h> — serving vanilla`. Latent, and latent in the worst way, since it
+is the detail a new PolyTrack release produces. The harness would have answered
+a maintainer's first post-release request with a bodyless 500, failing exactly
+when its job was to explain why the transform stopped applying.
+
+Verified against real Kodub bytes in production: `112.bundle.js` 200 at 108037
+bytes and `535.bundle.js` 200 at 13182 bytes, both byte-identical to their map
+pins, `x-tspml-detail` present and ASCII; `main.bundle.js` still transforms at
+1793291 bytes. 712 unit tests, 11 killed mutants.
+
+Two verification lessons cost a CI round each and are worth recording:
+
+- **A partial clean-room check verifies your assumption, not the environment.**
+  CI runs `pnpm -r test` before `pnpm -r build`, so the harness's new test could
+  not resolve `@tspml/shared`. Aliasing shared to source and removing only
+  `source/shared/dist` locally looked like a fix; the next CI run failed one
+  package along, on `@tspml/transform`, whose dist had been sitting in the tree
+  masking it. The chain is shared to transform to mappings and all three need
+  aliasing. The check that actually held stashed every dist in the workspace,
+  all six, and ran the suite from that state.
+- **A green preview deploy was not evidence.** `TSPML_TRANSFORM` is scoped to
+  Production, so on preview nothing is a surface, no `x-tspml-*` header is set,
+  and a header that is never set cannot throw. The preview returned 200 whether
+  or not the fix existed. Tell: preview `main.bundle.js` came back at 1782239
+  bytes against production's transformed 1793291.
+
+Filed [#107](https://github.com/roowus/TSPML/issues/107): no smoke covers a
+chunk route. The smokes already run with `TSPML_TRANSFORM=1`, so a single chunk
+assertion would have caught this before merge. The gap is coverage, not
+configuration.
