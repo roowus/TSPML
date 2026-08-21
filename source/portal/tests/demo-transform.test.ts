@@ -53,6 +53,13 @@ const modules = {
 
 const LIVE_HASH = `sha256:${createHash('sha256').update(BUNDLE).digest('hex')}`;
 
+/** A chunk whose bytes genuinely DIFFER from main's — the realistic case, since a
+ *  chunk is a separate file that re-minifies on its own schedule. Chunk 112 below
+ *  deliberately shares main's bytes to isolate one variable; this one exists so the
+ *  suite is not blind to anything that only holds when the two hashes coincide. */
+const CHUNK_SRC = `${BUNDLE}\nconst chunkOnlyMarker = "535";\n`;
+const CHUNK_HASH = `sha256:${createHash('sha256').update(CHUNK_SRC).digest('hex')}`;
+
 const CAR_TARGET = {
   anchor: { literals: ['CarAnchorOne', 'CarAnchorTwo'] },
   selector: { kind: 'method', name: 'controlCar' },
@@ -69,7 +76,13 @@ const MAP = {
   generated: { from: 'test', matcher: 'test', granularity: 'test', note: 'test' },
   modules: {},
   unresolved: [],
-  targets: { Car: CAR_TARGET },
+  // `Car` is main-scoped by omission (every pre-#98 target is). `HudOnChunk` carries
+  // an explicit `surface`, so the pair exercises both sides of the surface match.
+  targets: {
+    Car: CAR_TARGET,
+    HudOnChunk: { ...HUD_TARGET, surface: '112.bundle.js' },
+    HudOnOwnChunk: { ...HUD_TARGET, surface: '535.bundle.js' },
+  },
   // #98: one declared chunk, so the chunk-surface tests below resolve through the
   // real allowlist rather than a hand-built surface literal. Its pin is the SAME
   // bytes as the main bundle here — the fixture reuses BUNDLE for both — which is
@@ -77,6 +90,9 @@ const MAP = {
   // were served".
   chunks: {
     '112': { id: '112', hash: LIVE_HASH, bytes: BUNDLE.length, role: 'test chunk' },
+    // Pinned to its OWN distinct bytes, so a symbol resolved while serving it cannot
+    // pass a gate that happens to be comparing against the main bundle's pin.
+    '535': { id: '535', hash: CHUNK_HASH, bytes: CHUNK_SRC.length, role: 'own-bytes chunk' },
   },
 } as unknown as GameMap;
 
@@ -89,6 +105,7 @@ function surface(file: string): TransformSurface {
 }
 const MAIN = surface('main.bundle.js');
 const CHUNK = surface('112.bundle.js');
+const OWN_CHUNK = surface('535.bundle.js');
 
 /** One base patch, inline-anchored at Car.controlCar (like the bridge patches). */
 const BASE = [{ op: 'before', target: CAR_TARGET, inject: 'globalThis.__base = 1;' }];
@@ -317,6 +334,80 @@ describe('composeTransform — chunk surfaces (#98)', () => {
     // "stale map" and point the author at entirely the wrong problem.
     expect(row?.failed[0]?.reason).toBe('symbol-not-on-this-surface');
     expect(row?.failed[0]?.detail).toContain('112.bundle.js');
+  });
+
+  it('RESOLVES a symbol the map scopes to THIS chunk (#98 pipeline slice)', () => {
+    // The other half of the refusal above. A target carrying `surface: '112.bundle.js'`
+    // was verified against the unpacked chunk, so it is the one kind of symbol that is
+    // meaningful here — refusing it too would make chunk targets unaddressable and the
+    // schema field decorative.
+    const r = composeTransform(
+      ENGINE,
+      BUNDLE,
+      CHUNK.basePatches,
+      [{ modId: 'editor-mod', patches: [{ op: 'before', symbol: 'HudOnChunk', inject: 'globalThis.__onChunk = 1;' }] }],
+      MAP,
+      LIVE_HASH,
+      CHUNK,
+    );
+    expect(r.code).toContain('__onChunk');
+    expect(r.userReport?.mods[0]?.applied).toBe(1);
+  });
+
+  it('resolves a chunk symbol when the chunk has its OWN bytes and pin', () => {
+    // Chunk 112 shares main's bytes, so a staleness gate accidentally comparing the
+    // live hash against the MAIN pin still passes there — the coincidence hides the
+    // bug. Chunk 535 has its own bytes, so that same wrong comparison reports every
+    // symbol here as 'stale map' and this test fails. The realistic case is this one:
+    // a chunk never has the main bundle's hash.
+    const r = composeTransform(
+      ENGINE,
+      CHUNK_SRC,
+      OWN_CHUNK.basePatches,
+      [{ modId: 'editor-mod', patches: [{ op: 'before', symbol: 'HudOnOwnChunk', inject: 'globalThis.__ownChunk = 1;' }] }],
+      MAP,
+      CHUNK_HASH,
+      OWN_CHUNK,
+    );
+    expect(r.transformed).toBe(true);
+    expect(r.code).toContain('__ownChunk');
+    expect(r.userReport?.mods[0]?.applied).toBe(1);
+  });
+
+  it('refuses that same chunk-scoped symbol when the surface is MAIN', () => {
+    // Symmetry check: the rule is "surface must match", not "chunks are second-class".
+    // Without this, scoping a target to a chunk would silently still fire on main —
+    // hunting the chunk's literals through a file nobody verified them against.
+    const r = composeTransform(
+      ENGINE,
+      BUNDLE,
+      [],
+      [{ modId: 'confused-mod', patches: [{ op: 'before', symbol: 'HudOnChunk', inject: 'globalThis.__wrongFile = 1;' }] }],
+      MAP,
+      LIVE_HASH,
+      MAIN,
+    );
+    expect(r.code).not.toContain('__wrongFile');
+    const row = r.userReport?.mods[0];
+    expect(row?.failed[0]?.reason).toBe('symbol-not-on-this-surface');
+    // The message names the file the target IS on, not just the one it is not.
+    expect(row?.failed[0]?.detail).toContain('112.bundle.js');
+  });
+
+  it('still calls an UNKNOWN symbol unresolved on a chunk, not a surface mismatch', () => {
+    // Ordering guard: checking the surface before resolving would relabel every
+    // unknown name on a chunk as "wrong file", sending the author to hunt a
+    // surface problem that does not exist.
+    const r = composeTransform(
+      ENGINE,
+      BUNDLE,
+      CHUNK.basePatches,
+      [{ modId: 'stale-mod', patches: [{ op: 'before', symbol: 'NotInTheMap', inject: 'globalThis.__x = 1;' }] }],
+      MAP,
+      LIVE_HASH,
+      CHUNK,
+    );
+    expect(r.userReport?.mods[0]?.failed[0]?.reason).toBe('symbol-unresolved');
   });
 
   it('applies the SAME symbol patch when the surface is main', () => {

@@ -23,11 +23,12 @@ export type {
   ModuleLocator,
   ResolveContext,
   ResolveResult,
+  SurfaceFile,
   TargetSelector,
   TargetSpec,
   UnresolvedEntry,
 } from './types.js';
-export { MAP_FORMAT_VERSION } from './types.js';
+export { MAIN_SURFACE_FILE, MAP_FORMAT_VERSION, targetSurface } from './types.js';
 
 // Map loader + validator
 export {

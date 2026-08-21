@@ -45,7 +45,7 @@
  */
 import type { Patch, PatchResult } from "@tspml/transform";
 import { createHash } from "node:crypto";
-import { resolveTarget, validateMap } from "@tspml/mappings";
+import { resolveTarget, targetSurface, validateMap } from "@tspml/mappings";
 import type { GameMap } from "@tspml/mappings";
 // Imported directly (not loadDefaultMap, which uses import.meta.url and breaks
 // under Next's bundler) + validated once at module load.
@@ -68,19 +68,56 @@ const FAILED_ENTRIES_CAP = 8;
 type ResolveFailure = "symbol-unresolved" | "symbol-not-on-this-surface";
 
 /**
+ * The hash to hand `resolveTarget`'s staleness gate for THIS surface (#98).
+ *
+ * `resolveTarget` asks one question: "is this map current for the bytes the target
+ * lives in?". On main that is `liveHash` vs `map.bundleHash`, unchanged.
+ *
+ * On a chunk it cannot be: `liveHash` is the CHUNK's hash, which never equals the
+ * main bundle's pin, so passing it through would report every chunk target as
+ * 'stale map' — a permanent false negative dressed up as a safety check. Nor can we
+ * check main's bytes: this request is for a chunk and main's bytes are not in hand.
+ *
+ * What makes that safe rather than a hole is where the real gate sits. A chunk-scoped
+ * target's anchor was verified against the bytes pinned by `chunks[id].hash`, and the
+ * engine refuses to transform unless the live chunk matches that same pin
+ * (`expectedBundleHash: surface.expectedHash` below). So the integrity question for a
+ * chunk target is answered by the chunk's own pin, checked one call later, and
+ * answering it a second time with the wrong operand buys nothing. A MAIN-scoped
+ * symbol aimed at a chunk is still refused — by the surface check, on the correct
+ * grounds, rather than by a hash comparison that is meaningless here.
+ */
+function resolveGateHash(map: GameMap, liveHash: string, surface: TransformSurface): string {
+  return surface.kind === "main" ? liveHash : map.bundleHash;
+}
+
+/** The surface a named target IS scoped to, for the mismatch message. Naming the
+ *  right file turns "your mixin failed" into "your mixin is on the wrong file". */
+function symbolSurface(map: GameMap, symbol: unknown): string {
+  const targets = map.targets ?? {};
+  const key = Object.keys(targets).find((k) => k.toLowerCase() === String(symbol).toLowerCase());
+  const spec = key === undefined ? undefined : targets[key];
+  return spec ? targetSurface(spec) : "another file";
+}
+
+/**
  * Resolve a declared patch to a concrete `Patch`. An inline-anchor patch passes
  * through unchanged; a `{ symbol }` patch (M5-C) is resolved fail-closed via the
  * map — returns a failure on stale-map/not-found (the patch is dropped, never
  * applied against a mismatched/wrong target).
  *
- * `{ symbol }` is refused OUTRIGHT on a chunk surface (#98). The map's `targets`
- * anchors were verified against the unpacked MAIN bundle (verify-targets.mjs reads
- * that dir), so a target name says nothing about a chunk's contents — resolving one
- * there and letting the locator hunt for its literals is precisely the silent
- * mis-target the mappings system exists to prevent. Refusing with its own reason also
- * keeps the report honest: gating on the chunk's pin would make every symbol patch
- * read as "stale map", which points a mod author at the wrong problem entirely.
- * Inline-anchor patches still work on a chunk — the author supplied the anchor.
+ * `{ symbol }` is refused when the target's SURFACE is not the file being served
+ * (#98). Every target's anchor is verified against exactly one unpacked bundle
+ * (verify-targets.mjs), so a target says nothing about any other file — resolving
+ * one against a different file and letting the locator hunt for its literals is
+ * precisely the silent mis-target the mappings system exists to prevent. Refusing
+ * with its own reason also keeps the report honest: gating on the chunk's pin would
+ * make every such patch read as "stale map", pointing a mod author at the wrong
+ * problem entirely.
+ *
+ * Note this is a match, not a main-bundle rule: a target the map scopes to
+ * `112.bundle.js` resolves when 112 is what is being served, and is refused on main.
+ * Inline-anchor patches are unaffected — the author supplied the anchor.
  */
 function resolveDeclaredPatch(
   p: Record<string, unknown>,
@@ -89,9 +126,17 @@ function resolveDeclaredPatch(
   surface: TransformSurface,
 ): { ok: true; patch: Patch } | { ok: false; reason: ResolveFailure } {
   if (typeof p.symbol === "string") {
-    if (surface.kind === "chunk") return { ok: false, reason: "symbol-not-on-this-surface" };
-    const res = resolveTarget(map, p.symbol, { bundleHash: liveHash });
+    // Resolve FIRST, then check the surface: an unknown name is 'symbol-unresolved'
+    // whatever file it was aimed at, and reporting it as a surface mismatch would
+    // send the author looking for a chunk problem that does not exist.
+    //
+    // See resolveGateHash: on a chunk the staleness gate is the chunk's own pin,
+    // checked by the engine, not a main-bundle hash comparison that cannot hold.
+    const res = resolveTarget(map, p.symbol, { bundleHash: resolveGateHash(map, liveHash, surface) });
     if (!res.ok) return { ok: false, reason: "symbol-unresolved" }; // fail-closed
+    if (targetSurface(res.target) !== surface.file) {
+      return { ok: false, reason: "symbol-not-on-this-surface" };
+    }
     const rest = { ...p };
     delete rest.symbol;
     return { ok: true, patch: { ...rest, target: res.target } as unknown as Patch };
@@ -244,7 +289,7 @@ export function composeTransform(
           reason: r.reason,
           detail:
             r.reason === "symbol-not-on-this-surface"
-              ? `symbol '${String(raw.symbol)}' names a target verified against the main bundle; ${surface.file} is a separate chunk, so the symbol cannot address anything in it — use an inline anchor`
+              ? `symbol '${String(raw.symbol)}' names a target verified against ${symbolSurface(map, raw.symbol)}, not ${surface.file}; its anchor says nothing about this file — use an inline anchor here`
               : `symbol '${String(raw.symbol)}' did not resolve against the pinned map (stale map or unknown name)`,
         });
         continue;

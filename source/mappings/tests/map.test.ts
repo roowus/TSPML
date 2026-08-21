@@ -4,6 +4,7 @@ import {
   loadDefaultMap,
   MAP_FORMAT_VERSION,
   MapParseError,
+  targetSurface,
   transformableChunkIds,
   validateMap,
 } from '../src/index.js';
@@ -238,5 +239,61 @@ describe('validateMap — chunks (#98)', () => {
 
   it('rejects a non-object chunks section', () => {
     expect(() => validateMap(baseMap({ chunks: [] }))).toThrowError(/chunks/);
+  });
+});
+
+describe('validateMap — target surfaces (#98)', () => {
+  const CHUNK_HASH =
+    'sha256:1111111111111111111111111111111111111111111111111111111111111111';
+  const TARGET = {
+    anchor: { literals: ['Part index out of bounds'] },
+    selector: { kind: 'method', name: 'draw' },
+  };
+  /** A map with one declared chunk and one target, both overridable. */
+  function withTarget(surface?: string, chunkId = '112'): Record<string, unknown> {
+    return baseMap({
+      chunks: { [chunkId]: { id: chunkId, hash: CHUNK_HASH, bytes: 108037, role: 'track editor' } },
+      targets: { Editor: { ...TARGET, ...(surface === undefined ? {} : { surface }) } },
+    });
+  }
+
+  it('defaults a surface-less target to the main bundle', () => {
+    // Every pre-#98 target omits `surface`. If absent ever meant "any file", those
+    // targets would silently widen from one verified bundle to all of them.
+    const map = validateMap(withTarget());
+    expect(map.targets?.Editor?.surface).toBeUndefined();
+    expect(targetSurface(map.targets!.Editor!)).toBe('main.bundle.js');
+  });
+
+  it('preserves an explicit chunk surface', () => {
+    const map = validateMap(withTarget('112.bundle.js'));
+    expect(targetSurface(map.targets!.Editor!)).toBe('112.bundle.js');
+  });
+
+  it('accepts an explicit main surface', () => {
+    expect(targetSurface(validateMap(withTarget('main.bundle.js')).targets!.Editor!)).toBe(
+      'main.bundle.js',
+    );
+  });
+
+  it('rejects a target scoped to an UNDECLARED chunk', () => {
+    // Doubly silent otherwise: the host never transforms an undeclared chunk, so the
+    // target can never resolve; and the pipeline has no unpacked dir for it, so
+    // verification never checks. A map whose two sections disagree is malformed.
+    expect(() => validateMap(withTarget('999.bundle.js'))).toThrowError(/does not declare/);
+  });
+
+  it('rejects a chunk-scoped target when the map declares NO chunks at all', () => {
+    const raw = baseMap({ targets: { Editor: { ...TARGET, surface: '112.bundle.js' } } });
+    expect(() => validateMap(raw)).toThrowError(/does not declare/);
+  });
+
+  it('rejects a surface that is not a bundle filename', () => {
+    // A bare id ('112') or a path is not a served file. Accepting either would make
+    // the surface comparison — a string equality against the request filename —
+    // quietly never match.
+    expect(() => validateMap(withTarget('112'))).toThrowError(/surface/);
+    expect(() => validateMap(withTarget('../main.bundle.js'))).toThrowError(/surface/);
+    expect(() => validateMap(withTarget(''))).toThrowError(/surface/);
   });
 });

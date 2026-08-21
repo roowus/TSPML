@@ -83,10 +83,33 @@ export type TargetSelector =
   | { readonly kind: 'property'; readonly key: string }
   | { readonly kind: 'factory' };
 
+/** The file a target's anchor lives in: `'main.bundle.js'` or `'<id>.bundle.js'`. */
+export type SurfaceFile = string;
+
+/** The surface a target defaults to when it does not name one. */
+export const MAIN_SURFACE_FILE = 'main.bundle.js';
+
 /** A stable target: module anchor + within-module selector. */
 export interface TargetSpec {
   readonly anchor: ModuleAnchor;
   readonly selector: TargetSelector;
+  /**
+   * Which served file this target's anchor was verified against (#98).
+   * Absent means the main bundle, so every pre-#98 target keeps its meaning.
+   *
+   * This is not a hint — it is a scope. The same literal can occur in more than one
+   * file, and an anchor is only ever verified against ONE unpacked bundle, so a
+   * target resolved against a different file than the one it was checked in is a
+   * silent mis-target: the locator finds *something*, the patch applies, and the
+   * mod edits code nobody looked at. Chunk anchors in particular are only meaningful
+   * inside their own chunk. {@link targetSurface} is the one place the default lives.
+   */
+  readonly surface?: SurfaceFile;
+}
+
+/** The surface a target belongs to, applying the main-bundle default (#98). */
+export function targetSurface(spec: TargetSpec): SurfaceFile {
+  return spec.surface ?? MAIN_SURFACE_FILE;
 }
 
 /** A module-level mapping entry: one stable concept -> one 0.6.2 module. */

@@ -132,8 +132,10 @@ export async function fetchVersion(version, outDir, opts = {}) {
     }
     const source = await readFile(mainResult.outFile, "utf8");
     const ids = parseChunkIds(source);
-    // `--expect-hash` pins one specific bundle; passing it to every chunk as well
-    // would fail all of them. Chunks are unpinned by design.
+    // `--expect-hash` pins ONE specific bundle (the main one, by the caller's
+    // intent); passing that same value to every chunk would fail all of them.
+    // Chunks ARE pinned since #98 — each by its own `chunks[id].hash` in the map,
+    // which regen writes from the per-result `sha256` below, not from this flag.
     for (const id of ids) results.push(await fetchBundle(version, chunkBundle(id), outDir));
   }
   return results;
