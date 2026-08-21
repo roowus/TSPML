@@ -26,7 +26,7 @@ export interface GameTrack {
     rotationAxis: number,
     color: number,
     checkpointOrder: number | null,
-    startOrder: number,
+    startOrder: number | null,
   ): void;
   deleteSpecificPart(
     partId: number,
@@ -36,6 +36,22 @@ export interface GameTrack {
     rotation: number,
     rotationAxis: number,
   ): void;
+  /**
+   * Snapshot of the placed parts.
+   *
+   * The read path is deliberately two calls. `forEachPart` is **not** a method of
+   * the game's Track — it belongs to the separate track-data object, and the Track
+   * only builds one on demand. Calling `track.forEachPart` directly throws
+   * "not a function", which `getParts` catches and turns into an empty array, so
+   * the mistake reads as an empty track rather than as an error. Verified against
+   * the live game.
+   */
+  getTrackData(): GameTrackData;
+  refreshMeshes(): void;
+}
+
+/** The game's track-data object, as returned by {@link GameTrack.getTrackData}. */
+export interface GameTrackData {
   forEachPart(
     cb: (
       x: number,
@@ -46,10 +62,9 @@ export interface GameTrack {
       rotationAxis: number,
       color: number,
       checkpointOrder: number | null,
-      startOrder: number,
+      startOrder: number | null,
     ) => void,
   ): void;
-  refreshMeshes(): void;
 }
 
 /**
@@ -91,16 +106,24 @@ export interface EditorOptions {
 function validatePart(p: unknown): string | null {
   if (typeof p !== 'object' || p === null) return 'part is not an object';
   const r = p as Record<string, unknown>;
-  for (const k of ['x', 'y', 'z', 'partId', 'rotation', 'rotationAxis', 'color', 'startOrder']) {
+  for (const k of ['x', 'y', 'z', 'partId', 'rotation', 'rotationAxis', 'color']) {
     const v = r[k];
     // Non-finite is the one that matters: NaN sails through `typeof === 'number'`
     // and the game turns it into a part at an unreachable position that the
     // player can see but never select.
     if (typeof v !== 'number' || !Number.isFinite(v)) return `${k} must be a finite number`;
   }
-  const co = r['checkpointOrder'];
-  if (co !== null && (typeof co !== 'number' || !Number.isFinite(co))) {
-    return 'checkpointOrder must be a finite number or null';
+  // Both order fields are nullable, and null is the COMMON case: the game reads
+  // each one against the part's own catalog entry and throws if it is present on
+  // a part that does not take one ("Non-start part has start order"). Requiring a
+  // number here rejected `null` locally and made the only value that passed —
+  // `startOrder: 0` — the one value the game itself refuses for an ordinary part,
+  // so no plain road piece could be placed at all. Verified against the live game.
+  for (const k of ['checkpointOrder', 'startOrder']) {
+    const v = r[k];
+    if (v !== null && (typeof v !== 'number' || !Number.isFinite(v))) {
+      return `${k} must be a finite number or null`;
+    }
   }
   return null;
 }
@@ -177,9 +200,13 @@ export class Editor implements EditorRegistry {
     if (!track) return [];
     const out: EditorPart[] = [];
     try {
-      track.forEachPart((x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder) => {
-        out.push({ x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder });
-      });
+      // Two calls, not one: the iterator lives on the track-data object the Track
+      // builds on demand, not on the Track itself. See `GameTrack.getTrackData`.
+      track.getTrackData().forEachPart(
+        (x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder) => {
+          out.push({ x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder });
+        },
+      );
     } catch (err) {
       this.onError(err, 'forEachPart');
       // Partial reads are worse than none: a mod diffing against this would see

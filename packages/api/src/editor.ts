@@ -38,8 +38,17 @@ export interface EditorPart {
   readonly color: number;
   /** Checkpoint ordering for checkpoint parts; null for everything else. */
   readonly checkpointOrder: number | null;
-  /** Start-pad ordering. 0 for a part that is not a start pad. */
-  readonly startOrder: number;
+  /**
+   * Start-pad ordering for start parts; **null** for everything else — the same
+   * shape as {@link EditorPart.checkpointOrder}, and for the same reason.
+   *
+   * Not `0`. The game validates the two order fields against the part's own
+   * catalog entry and throws if either is present on a part that does not take
+   * one, so `startOrder: 0` on an ordinary road piece is refused with
+   * `reason: 'rejected'`. Most parts are neither a start pad nor a checkpoint,
+   * so most parts carry `null` in both.
+   */
+  readonly startOrder: number | null;
 }
 
 /**
@@ -91,7 +100,7 @@ export type EditorInsertResult = EditorInsertSuccess | EditorFailure;
  * api.events.on('editor.opened', async () => {
  *   const r = await api.editor.insertParts([
  *     { x: 4, y: 0, z: 4, partId: 1, rotation: 0, rotationAxis: 0,
- *       color: 0, checkpointOrder: null, startOrder: 0 },
+ *       color: 0, checkpointOrder: null, startOrder: null },
  *   ]);
  *   if (!r.ok) api.logger.warn('insert refused:', r.reason);
  * });

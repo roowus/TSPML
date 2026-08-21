@@ -19,7 +19,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Editor, EditorLifecycle } from '../src/editor.js';
-import type { EditorAccessor, GameTrack } from '../src/editor.js';
+import type { EditorAccessor, GameTrack, GameTrackData } from '../src/editor.js';
 import type { EditorPart } from '@tspml/api';
 
 const PART: EditorPart = {
@@ -31,7 +31,7 @@ const PART: EditorPart = {
   rotationAxis: 1,
   color: 7,
   checkpointOrder: null,
-  startOrder: 0,
+  startOrder: null,
 };
 
 const part = (over: Partial<EditorPart> = {}): EditorPart => ({ ...PART, ...over });
@@ -42,7 +42,7 @@ interface FakeOptions {
   readonly isOpen?: boolean | null;
   readonly trackNull?: boolean;
   readonly commitReturns?: boolean;
-  readonly throwOn?: 'getTrack' | 'isOpen' | 'commitBatch' | 'forEachPart' | 'refreshMeshes';
+  readonly throwOn?: 'getTrack' | 'isOpen' | 'commitBatch' | 'getTrackData' | 'forEachPart' | 'refreshMeshes';
   /** Parts the fake track already contains, for getParts. */
   readonly existing?: readonly EditorPart[];
 }
@@ -77,10 +77,20 @@ function fakeHost(options: FakeOptions = {}) {
     }
   });
 
+  // Shaped like the REAL game: `forEachPart` is a method of the track-data object
+  // the Track builds on demand, NOT of the Track. A fake that flattened the two
+  // into one object let `getParts` pass here while throwing "not a function"
+  // against the live game, and the empty-array catch made that look like an empty
+  // track. `getTrackData` throwing models the same failure the catch handles.
+  const getTrackData = vi.fn(() => {
+    if (options.throwOn === 'getTrackData') throw new Error('no track data');
+    return { forEachPart: forEachPart as unknown as GameTrackData['forEachPart'] };
+  });
+
   const track: GameTrack = {
     setPart: setPart as unknown as GameTrack['setPart'],
     deleteSpecificPart: deleteSpecificPart as unknown as GameTrack['deleteSpecificPart'],
-    forEachPart: forEachPart as unknown as GameTrack['forEachPart'],
+    getTrackData: getTrackData as unknown as GameTrack['getTrackData'],
     refreshMeshes,
   };
 
@@ -197,10 +207,16 @@ describe('Editor.insertParts — validation, before anything is touched', () => 
     ['a non-finite number', part({ x: Number.NaN }), 'x must be a finite number'],
     ['Infinity', part({ z: Number.POSITIVE_INFINITY }), 'z must be a finite number'],
     ['a string where a number belongs', { ...PART, partId: '44' }, 'partId must be a finite number'],
-    ['a missing field', (() => { const p = { ...PART } as Record<string, unknown>; delete p['startOrder']; return p; })(), 'startOrder must be a finite number'],
+    ['a missing field', (() => { const p = { ...PART } as Record<string, unknown>; delete p['color']; return p; })(), 'color must be a finite number'],
     ['a non-object', 7, 'part is not an object'],
     ['null', null, 'part is not an object'],
     ['a non-number checkpointOrder', { ...PART, checkpointOrder: 'first' }, 'checkpointOrder must be a finite number or null'],
+    // Both order fields are nullable and both still have to be a NUMBER when set.
+    // `undefined` is the one that matters: a mod that spreads a part it built by
+    // hand and forgets the field gets undefined, not null, and the game would
+    // throw on it deep inside setPart rather than here.
+    ['an undefined startOrder', { ...PART, startOrder: undefined }, 'startOrder must be a finite number or null'],
+    ['a non-finite startOrder', { ...PART, startOrder: Number.NaN }, 'startOrder must be a finite number or null'],
   ])('rejects %s without calling the game', async (_label, bad, detail) => {
     const { editor, setPart } = attached();
     const res = await editor.insertParts([bad as unknown as EditorPart]);
@@ -271,6 +287,19 @@ describe('Editor.insertParts — placing parts', () => {
     const { editor, setPart } = attached();
     await editor.insertParts([part({ x: 5, y: 6, z: 7, partId: 12, rotation: 2, rotationAxis: 1, color: 3, checkpointOrder: 4, startOrder: 9 })]);
     expect(setPart).toHaveBeenCalledWith(5, 6, 7, 12, 2, 1, 3, 4, 9);
+  });
+
+  it('passes a null startOrder THROUGH — the ordinary-part case', async () => {
+    // The game reads both order fields against the part's own catalog entry and
+    // throws "Non-start part has start order" if one is present on a part that
+    // takes none. Most parts are neither a start pad nor a checkpoint, so the
+    // common call carries null in both — and a registry that coerced either to 0
+    // would make the ordinary case the one that cannot be placed. Verified
+    // against the live game, where startOrder: 0 was refused.
+    const { editor, setPart } = attached();
+    const res = await editor.insertParts([part({ checkpointOrder: null, startOrder: null })]);
+    expect(res).toMatchObject({ ok: true, inserted: 1 });
+    expect(setPart.mock.calls[0]?.slice(7)).toEqual([null, null]);
   });
 
   it('places every part, in order, and reports the count', async () => {
@@ -412,6 +441,23 @@ describe('Editor.getParts', () => {
     const viaThrow = attached({ throwOn: 'getTrack' });
     expect(viaThrow.editor.getParts()).toEqual([]);
     expect(viaThrow.errors.map((e) => e.phase)).toContain('getTrack');
+  });
+
+  it('goes through getTrackData() — the iterator is not the Track’s', () => {
+    // The bug this pins: `forEachPart` was called straight on the Track, which
+    // throws "not a function" against the real game. The catch turned that into
+    // `[]`, so a live editor full of parts read as an empty track and nothing
+    // anywhere reported a problem.
+    const { editor, track } = attached({ existing: [part({ x: 1 })] });
+    expect(editor.getParts()).toHaveLength(1);
+    expect(track.getTrackData).toHaveBeenCalledTimes(1);
+    expect((track as unknown as Record<string, unknown>)['forEachPart']).toBeUndefined();
+  });
+
+  it('returns nothing when the track data itself is unreachable', () => {
+    const { editor, errors } = attached({ existing: [part({ x: 1 })], throwOn: 'getTrackData' });
+    expect(editor.getParts()).toEqual([]);
+    expect(errors.map((e) => e.phase)).toContain('forEachPart');
   });
 });
 

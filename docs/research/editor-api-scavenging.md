@@ -96,7 +96,7 @@ read off the minified source:
 
 | Method | Signature (semantic) | Notes |
 |---|---|---|
-| `setPart` | `(x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder)` | throws `"Track part color does not exist"` on a bad color; coordinates are in tiles (`* partSize` internally) |
+| `setPart` | `(x, y, z, partId, rotation, rotationAxis, color, checkpointOrder, startOrder)` | throws `"Track part color does not exist"` on a bad color; coordinates are in tiles (`* partSize` internally). **Both order arguments are nullable and `null` is the normal value** — the constructor validates each against the part's catalog entry and throws `"Non-start part has start order"` / `"Non-checkpoint has checkpoint order"` when one is supplied to a part that takes none, and the matching `"…has no…"` when one is missing from a part that requires it |
 | `deleteSpecificPart` | `(partId, x, y, z, rotation, rotationAxis)` | what undo uses to remove |
 | `getPart` | `(partId)` | part-catalog lookup (colors set, checkpoint flag) |
 | `forEachPart` | `(cb(x, y, z, id, rotation, rotationAxis, color, checkpointOrder, startOrder))` | the read counterpart |

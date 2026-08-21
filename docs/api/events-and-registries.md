@@ -304,7 +304,7 @@ if (api.editor.isOpen() === true) {
   const existing = api.editor.getParts();       // EditorPart[] — what is on the track now
   const res = await api.editor.insertParts([
     { x: 0, y: 0, z: 0, partId: 12, rotation: 0, rotationAxis: 1,
-      color: 0, checkpointOrder: null, startOrder: 0 },
+      color: 0, checkpointOrder: null, startOrder: null },
   ]);
   if (!res.ok) console.warn(res.reason);        // 'not-available' | 'not-in-editor'
                                                 // | 'invalid-part' | 'rejected' | 'internal'
@@ -330,6 +330,11 @@ Five behaviors worth knowing:
 - **One Ctrl+Z undoes the whole insert.** `undoable: false` in a successful result means
   the parts are placed but the undo entry did not land — the insert worked; the player's
   Ctrl+Z will reach past it to their own previous edit.
+- **Both order fields are `null` for an ordinary part, and `null` is the common case.**
+  The game checks `checkpointOrder` and `startOrder` against the part's own catalog
+  entry and refuses a part carrying one it does not take, so `startOrder: 0` on a plain
+  road piece comes back as `reason: 'rejected'` with the game's own message in `detail`.
+  Set a number only on a checkpoint or a start pad; leave both `null` otherwise.
 - **`getParts()` returns nothing rather than a partial read** if iteration fails partway.
   A truncated read is worse than none: a mod diffing against it sees the missing tail as
   free space and builds into occupied ground.
