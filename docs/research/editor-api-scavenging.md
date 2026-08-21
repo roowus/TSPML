@@ -174,22 +174,48 @@ now; see the note under Finding 1.
 
 One correction to this section as originally written, because Phase C depends on
 it. The four anchor candidates listed here were a **reading suggestion, not a
-measurement**, and checking them against the cached chunk did not confirm them
-as written:
+measurement**, and half of them do not survive contact with the chunk.
 
-| candidate | as measured |
-|---|---|
-| `"Part index out of bounds"` | present, module **7112** |
-| `"How to use the editor"` | present, module **7112** |
-| `"editor-ui"` | **ambiguous** — not a usable anchor on its own |
-| `Editor*` keybind names | **absent** from the chunk |
+Measured 2026-08-20 against a re-fetched `.cache/pt-0.6.2-raw-chunk-112.js`
+(108,037 bytes, `sha256:1094551b…`, byte-exact to the map's pin for chunk 112):
 
-Two of four are usable and both land in the same module, so an anchor for 7112
-is available; the other two are not. Anyone picking this up should re-run the
-check rather than trust the table: it was measured against a locally cached
-0.6.2 chunk that is **not currently present on this machine**, and the anchors
-are hash-gate-protected 0.6.2 specifics either way. Re-fetch with
-`pnpm run fetch 0.6.2 --chunks`.
+| candidate | occurrences | verdict |
+|---|---|---|
+| `"Part index out of bounds"` | 1 | **usable**, module 7112 |
+| `"How to use the editor"` | 1 | **usable**, module 7112 |
+| `"editor-ui"` | 45 | **not usable alone**: a CSS class prefix, not a landmark |
+| `Editor*` keybind names | 0 | **absent**, no such literal in the chunk |
+
+Two of four hold up, both unique, and both land in **module 7112**, which is the
+module Phase C has to reach. So a two-literal anchor for it is available, which
+is the same discipline the main-bundle targets already use.
+
+The module attribution is confirmed twice, by two methods that can fail
+independently: a webpack-id scan, and the raw byte offsets of the literals
+against module spans. The chunk holds **7 modules**, and 7112 owns 83% of it:
+
+| module | span | bytes |
+|---|---|---|
+| 2346 | 67 | 2,687 |
+| 4512 | 2,754 | 4,782 |
+| 5298 | 7,536 | 1,549 |
+| 6057 | 9,085 | 5,457 |
+| **7112** | **14,542** | **89,808** |
+| 7296 | 104,350 | 1,489 |
+| 9242 | 105,839 | 2,195 |
+
+`"How to use the editor"` sits at offset 28,396 and `"Part index out of bounds"`
+at 59,961, both inside 7112's span of `[14,542 .. 104,350)`.
+
+That 83% is the fact to carry into Phase C. Chunk 112 is essentially one module
+with a small support cast, so "anchor the chunk" and "anchor the editor class"
+are close to the same problem, and there is no sibling module for a locator to
+mis-select into. The flip side is that uniqueness within a 7-module space is
+cheap to establish and correspondingly cheap to lose: a re-minify that merges or
+reorders modules moves everything here at once. These are hash-gate-protected
+0.6.2 specifics like every other minified reading in this doc, so re-fetch with
+`pnpm run fetch 0.6.2 --chunks` and re-measure against a new build rather than
+trusting the table across a release.
 
 **Phase C — full #87 on top of B:** capture the `fi` instance, push a proper
 `{added, removed}` batch per `insertParts` call so Ctrl+Z works, emit
