@@ -174,22 +174,28 @@ now; see the note under Finding 1.
 
 One correction to this section as originally written, because Phase C depends on
 it. The four anchor candidates listed here were a **reading suggestion, not a
-measurement**, and checking them against the cached chunk did not confirm them
-as written:
+measurement**, and half of them do not survive contact with the chunk.
 
-| candidate | as measured |
-|---|---|
-| `"Part index out of bounds"` | present, module **7112** |
-| `"How to use the editor"` | present, module **7112** |
-| `"editor-ui"` | **ambiguous** — not a usable anchor on its own |
-| `Editor*` keybind names | **absent** from the chunk |
+Measured 2026-08-20 against a re-fetched `.cache/pt-0.6.2-raw-chunk-112.js`
+(108,037 bytes, `sha256:1094551b…`, byte-exact to the map's pin for chunk 112):
 
-Two of four are usable and both land in the same module, so an anchor for 7112
-is available; the other two are not. Anyone picking this up should re-run the
-check rather than trust the table: it was measured against a locally cached
-0.6.2 chunk that is **not currently present on this machine**, and the anchors
-are hash-gate-protected 0.6.2 specifics either way. Re-fetch with
-`pnpm run fetch 0.6.2 --chunks`.
+| candidate | occurrences | verdict |
+|---|---|---|
+| `"Part index out of bounds"` | 1 | **usable**, module 7112 |
+| `"How to use the editor"` | 1 | **usable**, module 7112 |
+| `"editor-ui"` | 45 | **not usable alone**: a CSS class prefix, not a landmark |
+| `Editor*` keybind names | 0 | **absent**, no such literal in the chunk |
+
+Two of four hold up, both unique, and both land in **module 7112**, which is the
+module Phase C has to reach. So a two-literal anchor for it is available, which
+is the same discipline the main-bundle targets already use.
+
+Worth knowing before picking anchors: the chunk contains only **7 webpack
+modules**. Uniqueness is easy to establish in a search space that small and
+correspondingly easy to lose on a re-minify. These are hash-gate-protected 0.6.2
+specifics like every other minified reading in this doc, so re-fetch with
+`pnpm run fetch 0.6.2 --chunks` and re-check against a new build rather than
+trusting the table across a release.
 
 **Phase C — full #87 on top of B:** capture the `fi` instance, push a proper
 `{added, removed}` batch per `insertParts` call so Ctrl+Z works, emit
