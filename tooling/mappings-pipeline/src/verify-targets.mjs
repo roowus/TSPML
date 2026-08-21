@@ -93,45 +93,115 @@ export function modulesContaining(sources, literals, minHits) {
 /**
  * @typedef {Object} TargetVerification
  * @property {string} target           stable name
- * @property {"pass" | "fail" | "ambiguous"} status
+ * @property {"pass" | "fail" | "ambiguous" | "skipped"} status
+ * @property {string} surface          the served file this target was checked against
  * @property {string[]} modules        moduleIds containing the anchor (>= minHits)
  * @property {number} literals
  * @property {number} minHits
  * @property {string} note
  */
 
+/** The surface a target belongs to when it does not name one. Mirrors
+ *  `MAIN_SURFACE_FILE` / `targetSurface()` in @tspml/mappings — duplicated rather
+ *  than imported because the pipeline is plain .mjs and does not build the TS package. */
+const MAIN_SURFACE = "main.bundle.js";
+const surfaceOf = (spec) => spec.surface ?? MAIN_SURFACE;
+
 /**
- * Verify every target in `map.targets` against the unpacked new-build modules.
+ * Normalise the second argument of {@link verifyTargets} to surface -> sources (#98).
+ *
+ * Accepts either shape, because both are meaningful:
+ *  - `Map<moduleId, string>` — one unpacked dir, the pre-#98 call. Every target in
+ *    such a map is main-scoped by definition, so it maps to `{main: sources}`.
+ *  - `Map<surfaceFile, Map<moduleId, string>>` (or a plain object of the same) — one
+ *    entry per unpacked surface.
+ *
+ * The two are told apart by their VALUES (a nested Map vs. source text), not by a
+ * flag, and a mixture throws rather than being guessed at: routing a target to the
+ * wrong dir would report a confident pass against a file the anchor was never in.
+ * @param {Map<string, unknown> | Record<string, unknown>} surfaces
+ * @returns {Map<string, Map<string, string>>}
+ */
+function normalizeSurfaces(surfaces) {
+  const entries = surfaces instanceof Map ? [...surfaces.entries()] : Object.entries(surfaces ?? {});
+  /** @type {Map<string, Map<string, string>>} */
+  const out = new Map();
+  if (entries.length === 0) return out.set(MAIN_SURFACE, new Map());
+  const nested = entries.filter(([, v]) => v instanceof Map).length;
+  if (nested === entries.length) {
+    for (const [file, mods] of entries) out.set(String(file), /** @type {Map<string,string>} */ (mods));
+    return out;
+  }
+  if (nested === 0) {
+    /** @type {Map<string, string>} */
+    const flat = new Map();
+    for (const [id, code] of entries) flat.set(String(id), String(code));
+    return out.set(MAIN_SURFACE, flat);
+  }
+  throw new TypeError(
+    "verifyTargets: `sources` mixes module text with per-surface maps; pass either one moduleId->source Map " +
+      "(all targets main-scoped) or a surfaceFile->Map for every unpacked surface",
+  );
+}
+
+/**
+ * Verify every target in `map.targets` against the unpacked modules of ITS OWN
+ * surface (#98).
+ *
+ * The routing is the point. An anchor is only evidence about the file it was found
+ * in, so checking a chunk-scoped target against the main bundle's modules answers a
+ * different question than the one asked — and it answers it wrongly in both
+ * directions: a literal that happens to occur in main reports a pass for a target
+ * that will never resolve there, and one that does not reports a fail for a target
+ * that is perfectly fine inside its chunk.
+ *
+ * A target whose surface was not supplied is `skipped`, never `pass`. Skipping is
+ * itself a reportable state: it means the pipeline verified less than the map claims,
+ * which is exactly the vacuous-green that `assertTargetsCarried` guards in the other
+ * direction.
  * @param {GameMap} map
- * @param {Map<string, string>} sources  moduleId -> source text (from loadModuleSources)
+ * @param {Map<string, string> | Map<string, Map<string, string>> | Record<string, Map<string, string>>} sources
+ *   one moduleId->source Map (all targets main-scoped), or surfaceFile -> that Map
  * @returns {TargetVerification[]}
  */
 export function verifyTargets(map, sources) {
+  const bySurface = normalizeSurfaces(sources);
   const targets = map.targets ?? {};
   /** @type {TargetVerification[]} */
   const out = [];
   for (const [name, spec] of Object.entries(targets)) {
     const literals = spec.anchor.literals ?? [];
     const minHits = spec.anchor.minHits ?? literals.length;
-    const modules = modulesContaining(sources, literals, minHits);
+    const surface = surfaceOf(spec);
+    const surfaceSources = bySurface.get(surface);
     /** @type {TargetVerification["status"]} */
     let status;
     let note;
-    if (modules.length === 1) {
-      status = "pass";
-      note = `anchor resolves to module ${modules[0]}`;
-    } else if (modules.length > 1) {
-      // The runtime locator picks the FIRST module in source order with hits >= minHits
-      // (the selector disambiguates WITHIN a module, not BETWEEN modules). So >1 hit at
-      // review time means the anchor is no longer unique and the locator may bind the
-      // wrong one — flag it so a human can tighten the anchor.
-      status = "ambiguous";
-      note = `anchor present in ${modules.length} modules (${modules.join(", ")}); the locator picks the first in source order — confirm it is the intended one, or tighten the anchor`;
+    let modules = [];
+    if (surfaceSources === undefined) {
+      // Not a pass and not a fail: nothing was checked. Reported so the reviewer can
+      // supply the dir (regen: --chunks) rather than reading a short green list as
+      // full coverage.
+      status = "skipped";
+      note = `no unpacked sources supplied for ${surface} — NOT verified; unpack that surface (regen --chunks) before trusting this target`;
     } else {
-      status = "fail";
-      note = `anchor NOT found in any module (${minHits}/${literals.length} literals required) — target will fail-closed at runtime`;
+      modules = modulesContaining(surfaceSources, literals, minHits);
+      if (modules.length === 1) {
+        status = "pass";
+        note = `anchor resolves to module ${modules[0]} in ${surface}`;
+      } else if (modules.length > 1) {
+        // The runtime locator picks the FIRST module in source order with hits >= minHits
+        // (the selector disambiguates WITHIN a module, not BETWEEN modules). So >1 hit at
+        // review time means the anchor is no longer unique and the locator may bind the
+        // wrong one — flag it so a human can tighten the anchor.
+        status = "ambiguous";
+        note = `anchor present in ${modules.length} modules of ${surface} (${modules.join(", ")}); the locator picks the first in source order — confirm it is the intended one, or tighten the anchor`;
+      } else {
+        status = "fail";
+        note = `anchor NOT found in any module of ${surface} (${minHits}/${literals.length} literals required) — target will fail-closed at runtime`;
+      }
     }
-    out.push({ target: name, status, modules, literals: literals.length, minHits, note });
+    out.push({ target: name, status, surface, modules, literals: literals.length, minHits, note });
   }
   return out;
 }
@@ -145,14 +215,29 @@ export function formatVerifications(verifications) {
   const pass = verifications.filter((v) => v.status === "pass");
   const amb = verifications.filter((v) => v.status === "ambiguous");
   const fail = verifications.filter((v) => v.status === "fail");
-  out.push(`target verification: ${pass.length} pass, ${amb.length} ambiguous, ${fail.length} fail (of ${verifications.length})`);
+  const skipped = verifications.filter((v) => v.status === "skipped");
+  out.push(
+    `target verification: ${pass.length} pass, ${amb.length} ambiguous, ${fail.length} fail` +
+      (skipped.length ? `, ${skipped.length} SKIPPED` : "") +
+      ` (of ${verifications.length})`,
+  );
   for (const v of verifications) {
-    const tag = v.status === "pass" ? "OK " : v.status === "ambiguous" ? "?? " : "XX ";
-    out.push(`  ${tag}${v.target} -> ${v.modules.length ? v.modules.join(",") : "(none)"}  ${v.note}`);
+    const tag = v.status === "pass" ? "OK " : v.status === "ambiguous" ? "?? " : v.status === "skipped" ? "-- " : "XX ";
+    // The surface is on every line, not just the failures: a reviewer scanning a green
+    // list needs to see WHICH file each target was checked in, or the routing is
+    // invisible and a wholesale mis-route reads as a clean run.
+    out.push(`  ${tag}${v.target} [${v.surface}] -> ${v.modules.length ? v.modules.join(",") : "(none)"}  ${v.note}`);
   }
   if (fail.length) out.push("\n==> FAIL: one or more carried-forward targets no longer resolve. Re-curate");
   else if (amb.length) out.push("\n==> AMBIGUOUS: tighten the affected anchors (add a more distinctive literal) before promoting.");
   else if (verifications.length === 0) out.push("\n==> 0 targets checked (map has no targets section). If this is a regen, the carry-forward FAILED — do NOT treat this as green.");
-  else out.push("\n==> ALL TARGETS RESOLVE. Safe to carry the targets section forward.");
+  else if (skipped.length) {
+    // Deliberately NOT green. Everything checked did resolve, but some targets were
+    // never checked at all, and "all the ones I looked at passed" is the exact shape
+    // of a false all-clear.
+    const files = [...new Set(skipped.map((v) => v.surface))].join(", ");
+    out.push(`\n==> INCOMPLETE: ${pass.length} verified, but ${skipped.length} target(s) were NOT checked — no unpacked sources for ${files}.`);
+    out.push("    Re-run with those surfaces unpacked (regen --chunks) before promoting; this is not a green run.");
+  } else out.push("\n==> ALL TARGETS RESOLVE. Safe to carry the targets section forward.");
   return out.join("\n");
 }

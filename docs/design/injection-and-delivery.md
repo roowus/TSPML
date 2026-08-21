@@ -46,7 +46,13 @@ So the portal works **only** via a **service worker + server-side proxy** that f
 A cold-start Babel AST parse+transform of ~5 MB of JS on the main thread is multi-second blocking work. Mitigations:
 
 - Run the **entire AST pipeline inside a helper Web Worker** (`source/transform`).
-- **Lazy-transform** numbered chunks — only when a loaded mod declares a hook resolved into them.
+- **Transform numbered chunks on demand** — the game requests a chunk only when it needs
+  that screen, and the proxy transforms it at that moment. Implemented in
+  [#98](https://github.com/roowus/TSPML/issues/98): the proxy and the service worker match
+  `<id>.bundle.js` for the chunk ids the map declares, each chunk gates on its own pin,
+  and a chunk the map does not declare is passed through untouched. Nothing is
+  eagerly fetched — a chunk the game never loads is never transformed. See
+  [mappings-system.md](./mappings-system.md#surfaces-the-main-bundle-is-not-the-only-served-file-98).
 - **Cache transformed bundles in IndexedDB keyed by `bundleHash`**, so the pipeline runs once per game update, not per page load.
 - Publish cold-start + per-tick input-latency budgets as release acceptance criteria ("no worse than +X ms vs vanilla").
 

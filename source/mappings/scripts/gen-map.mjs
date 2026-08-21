@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chooseTarget, makeFpCache, topCandidates } from "../../../tooling/mappings-pipeline/src/select.mjs";
 import { buildGraphs, resolveByEdges } from "../../../tooling/mappings-pipeline/src/edges.mjs";
+import { parseGenChunks, resolveChunkPins } from "../../../tooling/mappings-pipeline/src/chunk-pins.mjs";
 
 const PKG_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CACHE = join(PKG_DIR, "../../../tooling/mappings-pipeline/.cache");
@@ -434,20 +435,42 @@ const map = {
   unresolved: unresolvedOut,
 };
 
-// Carry forward the hand-curated `targets` section from the baseline map (M5-C).
-// Read from PREV_MAP (the committed baseline under regen), NOT OUT — OUT is the
+// Carry forward the hand-curated `targets` and `chunks` sections from the baseline
+// map. Read from PREV_MAP (the committed baseline under regen), NOT OUT — OUT is the
 // candidate being written and does not exist yet on a first regen, so reading it
 // would ENOENT and silently drop every target. On a new version the human verifies
 // each carried target's anchor still resolves (verify-targets.mjs).
+//
+// `chunks` (#98) carries forward for a different reason than `targets` does, and the
+// difference matters. A carried TARGET is a guess to be re-verified. A carried CHUNK
+// PIN is a hash of bytes from the OLD build, so on a new version it is not merely
+// unverified — it is known-wrong, and a wrong pin fails silently: it can never match
+// the live chunk, so that chunk is permanently stale and simply never transforms.
+// Nothing crashes. Hence GEN_CHUNKS: regen re-fetches each chunk and passes the fresh
+// {id, hash, bytes} in, and the carried `role` labels are merged onto them. Only when
+// no fresh pins are supplied do the old ones ride along — and then the stamped note
+// says so, because an unreviewed carry is the case a human must catch.
+let carriedChunks;
 try {
   const prev = JSON.parse(await readFile(PREV_MAP, "utf8"));
   if (prev.targets && typeof prev.targets === "object") {
     map.targets = prev.targets;
     console.error(`targets carried forward: ${Object.keys(prev.targets).length} entries from ${PREV_MAP} (verify against the new build)`);
   }
+  if (prev.chunks && typeof prev.chunks === "object") carriedChunks = prev.chunks;
 } catch {
   // No baseline map / baseline has no targets — none to carry (human adds them later).
 }
+
+// Fresh per-chunk pins from this run's fetch, as JSON: [{id, hash, bytes}, ...].
+// regen.mjs sets GEN_CHUNKS; a standalone gen-map run has none and falls back to carry.
+// The decision lives in chunk-pins.mjs because everything above this line needs the
+// webcrack cache to run, and that cache is gitignored — an untestable branch is exactly
+// what a silent no-transform needs to survive.
+const chunkPins = resolveChunkPins(carriedChunks, parseGenChunks(process.env.GEN_CHUNKS), PREV_MAP);
+if (chunkPins.chunks) map.chunks = chunkPins.chunks;
+map.generated.note += chunkPins.noteSuffix;
+console.error(chunkPins.log);
 
 await writeFile(OUT, JSON.stringify(map, null, 2) + "\n", "utf8");
 

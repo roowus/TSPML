@@ -11,6 +11,7 @@ import {
   getBaseTransformedBundle,
 } from '@/lib/bundle-cache';
 import type { BundleCacheDeps } from '@/lib/bundle-cache';
+import { MAIN_SURFACE } from '@/lib/demo-transform';
 
 const URL_A = 'https://app-polytrack.kodub.com/0.6.2/main.bundle.js';
 
@@ -49,13 +50,13 @@ beforeEach(() => {
 describe('getBaseTransformedBundle', () => {
   it('computes on miss, serves the memo on the next call', async () => {
     const { deps, counts } = makeDeps();
-    const first = await getBaseTransformedBundle(URL_A, new Headers(), deps);
+    const first = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
     expect(first).toMatchObject({
       ok: true,
       cacheHit: false,
       bundle: { body: 'transformed(vanilla-src)#1', transformed: true, status: 200 },
     });
-    const second = await getBaseTransformedBundle(URL_A, new Headers(), deps);
+    const second = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
     expect(second).toMatchObject({
       ok: true,
       cacheHit: true,
@@ -71,8 +72,8 @@ describe('getBaseTransformedBundle', () => {
       open = resolve;
     });
     const { deps, counts } = makeDeps({ gate });
-    const a = getBaseTransformedBundle(URL_A, new Headers(), deps);
-    const b = getBaseTransformedBundle(URL_A, new Headers(), deps);
+    const a = getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
+    const b = getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
     open();
     const [ra, rb] = await Promise.all([a, b]);
     expect(counts.fetch).toBe(1);
@@ -90,19 +91,20 @@ describe('getBaseTransformedBundle', () => {
     const { deps, counts } = makeDeps();
     let t = 1_000_000;
     const timed = { ...deps, now: () => t };
-    await getBaseTransformedBundle(URL_A, new Headers(), timed);
+    await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, timed);
     t += BUNDLE_CACHE_TTL_MS + 1;
-    const r = await getBaseTransformedBundle(URL_A, new Headers(), timed);
+    const r = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, timed);
     expect(r).toMatchObject({ ok: true, cacheHit: false });
     expect(counts.transform).toBe(2);
   });
 
   it('keys by upstream URL — different versions do not collide', async () => {
     const { deps, counts } = makeDeps();
-    await getBaseTransformedBundle(URL_A, new Headers(), deps);
+    await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
     const other = await getBaseTransformedBundle(
       'https://app-polytrack.kodub.com/0.7.0/main.bundle.js',
       new Headers(),
+      MAIN_SURFACE,
       deps,
     );
     expect(other).toMatchObject({ ok: true, cacheHit: false });
@@ -111,28 +113,28 @@ describe('getBaseTransformedBundle', () => {
 
   it('does NOT cache a non-OK upstream: the next call retries', async () => {
     const bad = makeDeps({ status: 503 });
-    const r1 = await getBaseTransformedBundle(URL_A, new Headers(), bad.deps);
+    const r1 = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, bad.deps);
     expect(r1).toMatchObject({ ok: false, failure: { status: 503 } });
     const good = makeDeps();
-    const r2 = await getBaseTransformedBundle(URL_A, new Headers(), good.deps);
+    const r2 = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, good.deps);
     expect(r2).toMatchObject({ ok: true, cacheHit: false });
     expect(good.counts.fetch).toBe(1);
   });
 
   it('does NOT cache a thrown fetch: the next call retries', async () => {
     const bad = makeDeps({ throwFetch: true });
-    const r1 = await getBaseTransformedBundle(URL_A, new Headers(), bad.deps);
+    const r1 = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, bad.deps);
     expect(r1).toMatchObject({ ok: false, failure: { status: null } });
     const good = makeDeps();
-    const r2 = await getBaseTransformedBundle(URL_A, new Headers(), good.deps);
+    const r2 = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, good.deps);
     expect(r2).toMatchObject({ ok: true, cacheHit: false });
   });
 
   it('clearBundleCache drops the memo', async () => {
     const { deps, counts } = makeDeps();
-    await getBaseTransformedBundle(URL_A, new Headers(), deps);
+    await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
     clearBundleCache();
-    const r = await getBaseTransformedBundle(URL_A, new Headers(), deps);
+    const r = await getBaseTransformedBundle(URL_A, new Headers(), MAIN_SURFACE, deps);
     expect(r).toMatchObject({ ok: true, cacheHit: false });
     expect(counts.transform).toBe(2);
   });

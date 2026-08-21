@@ -1,11 +1,17 @@
 /**
  * @tspml/portal — the portal's bundle transform.
  *
- * Rewrites the PolyTrack main bundle with the loader-owned bridge patches (the LIVE
+ * Rewrites a PolyTrack bundle with the loader-owned bridge patches (the LIVE
  * badge, the six Tier-1 event emits, and the custom-track capture patches) plus
  * whatever Tier-2 mixins the loaded mods declare. Emitted events flow to the Tier-1
  * `EventBus` the portal exposes on the iframe as `window.__tspml` (see app/page.tsx),
  * which mods subscribe to.
+ *
+ * #98 generalizes "the bundle" to a {@link TransformSurface}: the main bundle OR an
+ * allowlisted lazily-loaded chunk. The surface — not this module — owns which pin the
+ * bytes are gated against and which base patches apply, because a chunk re-minifies
+ * independently of the main bundle and the bridge patches anchor only in main. See
+ * lib/transform-surface.ts.
  *
  * The patches themselves now live in **@tspml/shared** — this file is only the
  * portal-specific half: mappings `{symbol}` resolution and the fail-closed sha256
@@ -39,7 +45,7 @@
  */
 import type { Patch, PatchResult } from "@tspml/transform";
 import { createHash } from "node:crypto";
-import { resolveTarget, validateMap } from "@tspml/mappings";
+import { resolveTarget, targetSurface, validateMap } from "@tspml/mappings";
 import type { GameMap } from "@tspml/mappings";
 // Imported directly (not loadDefaultMap, which uses import.meta.url and breaks
 // under Next's bundler) + validated once at module load.
@@ -48,6 +54,8 @@ import mapJson from "@tspml/mappings/maps/polytrack-0.6.2.json";
 // The proxy route must ALSO inject @tspml/shared's EARLY_CAPTURE_SCRIPT_TAG, or the
 // codec capture below fires before the bridge exists and is silently dropped.
 import { BRIDGE_PATCHES } from "@tspml/shared";
+import { transformSurfaceFor } from "./transform-surface";
+import type { TransformSurface } from "./transform-surface";
 import type { UserMixinModReport, UserMixinReport, UserPatchSet } from "./user-patches";
 
 const MAP: GameMap = validateMap(mapJson);
@@ -56,32 +64,94 @@ const MAP: GameMap = validateMap(mapJson);
 const DETAIL_CAP = 160;
 const FAILED_ENTRIES_CAP = 8;
 
+/** Why a declared patch could not be turned into a concrete `Patch`. */
+type ResolveFailure = "symbol-unresolved" | "symbol-not-on-this-surface";
+
+/**
+ * The hash to hand `resolveTarget`'s staleness gate for THIS surface (#98).
+ *
+ * `resolveTarget` asks one question: "is this map current for the bytes the target
+ * lives in?". On main that is `liveHash` vs `map.bundleHash`, unchanged.
+ *
+ * On a chunk it cannot be: `liveHash` is the CHUNK's hash, which never equals the
+ * main bundle's pin, so passing it through would report every chunk target as
+ * 'stale map' — a permanent false negative dressed up as a safety check. Nor can we
+ * check main's bytes: this request is for a chunk and main's bytes are not in hand.
+ *
+ * What makes that safe rather than a hole is where the real gate sits. A chunk-scoped
+ * target's anchor was verified against the bytes pinned by `chunks[id].hash`, and the
+ * engine refuses to transform unless the live chunk matches that same pin
+ * (`expectedBundleHash: surface.expectedHash` below). So the integrity question for a
+ * chunk target is answered by the chunk's own pin, checked one call later, and
+ * answering it a second time with the wrong operand buys nothing. A MAIN-scoped
+ * symbol aimed at a chunk is still refused — by the surface check, on the correct
+ * grounds, rather than by a hash comparison that is meaningless here.
+ */
+function resolveGateHash(map: GameMap, liveHash: string, surface: TransformSurface): string {
+  return surface.kind === "main" ? liveHash : map.bundleHash;
+}
+
+/** The surface a named target IS scoped to, for the mismatch message. Naming the
+ *  right file turns "your mixin failed" into "your mixin is on the wrong file". */
+function symbolSurface(map: GameMap, symbol: unknown): string {
+  const targets = map.targets ?? {};
+  const key = Object.keys(targets).find((k) => k.toLowerCase() === String(symbol).toLowerCase());
+  const spec = key === undefined ? undefined : targets[key];
+  return spec ? targetSurface(spec) : "another file";
+}
+
 /**
  * Resolve a declared patch to a concrete `Patch`. An inline-anchor patch passes
  * through unchanged; a `{ symbol }` patch (M5-C) is resolved fail-closed via the
- * map — returns `null` on stale-map/not-found (the patch is dropped, never
+ * map — returns a failure on stale-map/not-found (the patch is dropped, never
  * applied against a mismatched/wrong target).
+ *
+ * `{ symbol }` is refused when the target's SURFACE is not the file being served
+ * (#98). Every target's anchor is verified against exactly one unpacked bundle
+ * (verify-targets.mjs), so a target says nothing about any other file — resolving
+ * one against a different file and letting the locator hunt for its literals is
+ * precisely the silent mis-target the mappings system exists to prevent. Refusing
+ * with its own reason also keeps the report honest: gating on the chunk's pin would
+ * make every such patch read as "stale map", pointing a mod author at the wrong
+ * problem entirely.
+ *
+ * Note this is a match, not a main-bundle rule: a target the map scopes to
+ * `112.bundle.js` resolves when 112 is what is being served, and is refused on main.
+ * Inline-anchor patches are unaffected — the author supplied the anchor.
  */
 function resolveDeclaredPatch(
   p: Record<string, unknown>,
   map: GameMap,
   liveHash: string,
-): Patch | null {
+  surface: TransformSurface,
+): { ok: true; patch: Patch } | { ok: false; reason: ResolveFailure } {
   if (typeof p.symbol === "string") {
-    const res = resolveTarget(map, p.symbol, { bundleHash: liveHash });
-    if (!res.ok) return null; // fail-closed
+    // Resolve FIRST, then check the surface: an unknown name is 'symbol-unresolved'
+    // whatever file it was aimed at, and reporting it as a surface mismatch would
+    // send the author looking for a chunk problem that does not exist.
+    //
+    // See resolveGateHash: on a chunk the staleness gate is the chunk's own pin,
+    // checked by the engine, not a main-bundle hash comparison that cannot hold.
+    const res = resolveTarget(map, p.symbol, { bundleHash: resolveGateHash(map, liveHash, surface) });
+    if (!res.ok) return { ok: false, reason: "symbol-unresolved" }; // fail-closed
+    if (targetSurface(res.target) !== surface.file) {
+      return { ok: false, reason: "symbol-not-on-this-surface" };
+    }
     const rest = { ...p };
     delete rest.symbol;
-    return { ...rest, target: res.target } as unknown as Patch;
+    return { ok: true, patch: { ...rest, target: res.target } as unknown as Patch };
   }
-  return p as unknown as Patch;
+  return { ok: true, patch: p as unknown as Patch };
 }
 
-/** All base patches: the loader-owned bridge patches (badge + Tier-1 emits +
- *  captures). Mod-declared mixins ride the request-carried user patch plan
- *  (#62) — since the bundled demo mods left the portal, nothing else
+/** All base patches for the MAIN bundle: the loader-owned bridge patches (badge +
+ *  Tier-1 emits + captures). Mod-declared mixins ride the request-carried user patch
+ *  plan (#62) — since the bundled demo mods left the portal, nothing else
  *  contributes to the base transform. Loosely typed — patches may use
- *  `{symbol}` (M5-C) resolved in applyDemoTransform, or inline anchors. */
+ *  `{symbol}` (M5-C) resolved in applyDemoTransform, or inline anchors.
+ *
+ *  Chunk surfaces get their own (currently empty) base set from
+ *  lib/transform-surface.ts — these anchor in main and would all miss. */
 const ALL_PATCHES: readonly Record<string, unknown>[] = [
   ...BRIDGE_PATCHES,
 ] as unknown as readonly Record<string, unknown>[];
@@ -191,18 +261,20 @@ export function composeTransform(
   userSets: readonly UserPatchSet[],
   map: GameMap,
   liveHash: string,
+  surface: TransformSurface,
 ): Omit<DemoTransformResult, "vanillaHash"> {
   const { transform, targetSignature } = engine;
   const wantReport = userSets.length > 0;
-  // FAIL-CLOSED: hash-gate the transform to the map's pinned bundle. On any
-  // mismatch the engine applies nothing and returns the original source
-  // (failedReason 'hash-mismatch'), so the minified-param injects can never
-  // run against a bundle they weren't authored for.
+  // FAIL-CLOSED: hash-gate the transform to THIS SURFACE's pin — the main bundle's
+  // for main, the chunk's own for a chunk (#98). On any mismatch the engine applies
+  // nothing and returns the original source (failedReason 'hash-mismatch'), so the
+  // minified-param injects can never run against bytes they weren't authored for.
   // Resolve mod-declared `{symbol}` patches via the map (fail-closed); inline
   // patches pass through. Dropped (unresolvable) patches are filtered out.
-  const patches = declaredBase.map((p) => resolveDeclaredPatch(p, map, liveHash)).filter(
-    (p): p is Patch => p !== null,
-  );
+  const patches = declaredBase
+    .map((p) => resolveDeclaredPatch(p, map, liveHash, surface))
+    .filter((r): r is { ok: true; patch: Patch } => r.ok)
+    .map((r) => r.patch);
 
   // ── #62: prepare user sets ──────────────────────────────────────────────
   // Base target signatures, for the replace pre-screen (see file header).
@@ -211,14 +283,18 @@ export function composeTransform(
     const ready: Patch[] = [];
     const preFailed: PreFailed[] = [];
     for (const raw of set.patches) {
-      const resolved = resolveDeclaredPatch(raw, map, liveHash);
-      if (resolved === null) {
+      const r = resolveDeclaredPatch(raw, map, liveHash, surface);
+      if (!r.ok) {
         preFailed.push({
-          reason: "symbol-unresolved",
-          detail: `symbol '${String(raw.symbol)}' did not resolve against the pinned map (stale map or unknown name)`,
+          reason: r.reason,
+          detail:
+            r.reason === "symbol-not-on-this-surface"
+              ? `symbol '${String(raw.symbol)}' names a target verified against ${symbolSurface(map, raw.symbol)}, not ${surface.file}; its anchor says nothing about this file — use an inline anchor here`
+              : `symbol '${String(raw.symbol)}' did not resolve against the pinned map (stale map or unknown name)`,
         });
         continue;
       }
+      const resolved = r.patch;
       if (resolved.op === "replace" && baseSignatures.has(targetSignature(resolved.target))) {
         preFailed.push({
           reason: "conflicts-with-loader-patch",
@@ -239,17 +315,22 @@ export function composeTransform(
 
   const r = transform(bundleSource, combined, {
     bundleHash: liveHash,
-    expectedBundleHash: map.bundleHash,
+    expectedBundleHash: surface.expectedHash,
     compact: true,
-    filename: "main.bundle.js",
+    filename: surface.file,
   });
   if (r.failedReason === "hash-mismatch") {
     return {
       code: bundleSource,
       transformed: false,
-      detail: `hash-mismatch: live ${liveHash} ≠ expected ${map.bundleHash} — serving vanilla`,
+      detail: `hash-mismatch: live ${liveHash} ≠ expected ${surface.expectedHash} — serving ${surface.file} vanilla`,
       userReport: wantReport
-        ? allFailed(userSets, "base-failed", "hash-mismatch", "live bundle is not the pinned 0.6.2 — nothing was applied")
+        ? allFailed(
+            userSets,
+            "base-failed",
+            "hash-mismatch",
+            `live ${surface.file} is not the pinned 0.6.2 build — nothing was applied to it`,
+          )
         : null,
     };
   }
@@ -279,9 +360,9 @@ export function composeTransform(
   if (baseAllApplied && !r.outputValid && wantReport && combined.length > patches.length) {
     const retry = transform(bundleSource, patches, {
       bundleHash: liveHash,
-      expectedBundleHash: map.bundleHash,
+      expectedBundleHash: surface.expectedHash,
       compact: true,
-      filename: "main.bundle.js",
+      filename: surface.file,
     });
     if (retry.outputValid && retry.applied.length === patches.length) {
       return {
@@ -308,9 +389,30 @@ export function composeTransform(
   };
 }
 
+/** The MAIN-bundle surface, resolved once off the pinned map. */
+export const MAIN_SURFACE: TransformSurface = (() => {
+  const s = transformSurfaceFor(MAP, true, ["main.bundle.js"]);
+  /* c8 ignore next */
+  if (!s) throw new Error("main.bundle.js is not a transform surface — impossible");
+  return s;
+})();
+
 /**
- * Apply the demo transform. NEVER throws: on any failure it returns the original
- * bundle unchanged (transformed=false) so the game still loads vanilla.
+ * The surface for a proxied path against the pinned map, or null when the request
+ * must be proxied verbatim (#98). Thin wrapper binding the real MAP so callers that
+ * do not hold one (the route) need not import it.
+ */
+export function surfaceForPath(
+  isDefaultHost: boolean,
+  segments: readonly string[],
+): TransformSurface | null {
+  return transformSurfaceFor(MAP, isDefaultHost, segments);
+}
+
+/**
+ * Apply the demo transform to one surface's bytes. NEVER throws: on any failure it
+ * returns the original source unchanged (transformed=false) so the game still loads
+ * vanilla.
  *
  * @tspml/transform is imported dynamically so @babel/* stays out of the route's
  * bundle unless transform mode is actually on.
@@ -318,11 +420,27 @@ export function composeTransform(
 export async function applyDemoTransform(
   bundleSource: string,
   userSets: readonly UserPatchSet[] = [],
+  surface: TransformSurface = MAIN_SURFACE,
 ): Promise<DemoTransformResult> {
   const vanillaHash = `sha256:${createHash("sha256").update(bundleSource).digest("hex")}`;
+  const base = surface.kind === "main" ? ALL_PATCHES : surface.basePatches;
+  // Nothing to do: a chunk with no base patches (the state until #87 Phase B) and no
+  // user sets. Skipping the pass is not just an optimization — parsing and
+  // regenerating ~100 KB of minified code to emit identical semantics is a round-trip
+  // whose only possible outcomes are "unchanged" and "broken". Report it honestly as
+  // untransformed rather than claiming a transform that applied nothing.
+  if (base.length === 0 && userSets.length === 0) {
+    return {
+      code: bundleSource,
+      transformed: false,
+      detail: `no patches target ${surface.file} — served unmodified`,
+      vanillaHash,
+      userReport: null,
+    };
+  }
   try {
     const engine = await import("@tspml/transform");
-    const r = composeTransform(engine, bundleSource, ALL_PATCHES, userSets, MAP, vanillaHash);
+    const r = composeTransform(engine, bundleSource, base, userSets, MAP, vanillaHash, surface);
     return { ...r, vanillaHash };
   } catch (err) {
     return {

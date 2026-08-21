@@ -79,6 +79,76 @@ Two outcomes are ruled out by construction: a hook that silently does nothing be
 
 On `bundleHash` **mismatch**, **never** apply AST/physics/ranked locators from a non-matching map — a "nearest" map would resolve stable names to *wrong* concrete locators, patching whatever now happens to sit at that address. That silent mis-target is the single worst outcome available to a mod loader, which is why the hash gate exists. Permit **only** runtime-fallback event hooks whose target shape verifies at bind time. Treat "nearest map" as cosmetic-only. Physics/ranked paths stay disabled until an exact-match map is fetched.
 
+## Surfaces: the main bundle is not the only served file (#98)
+
+PolyTrack does not ship as one file. The main bundle loads numbered chunks lazily
+(`112.bundle.js` is the track editor, `535.bundle.js` the track verifier UI,
+`604.bundle.js` profile selection, `657.bundle.js` settings), and a symbol living in a
+chunk is not reachable by anything that only ever looks at `main.bundle.js`. A
+**surface** is one served filename, and it is the unit that owns its own hash pin and
+its own transform.
+
+The map therefore carries a `chunks` allowlist alongside the main `bundleHash`:
+
+```jsonc
+"chunks": {
+  "112": { "id": "112", "hash": "sha256:...", "bytes": 108037, "role": "track editor" }
+}
+```
+
+and a target may name the surface it was found in:
+
+```jsonc
+"Editor.draw": {
+  "anchor": { "literals": ["How to use the editor"], "minHits": 1 },
+  "selector": { "kind": "method", "name": "draw" },
+  "surface": "112.bundle.js"        // absent means main.bundle.js
+}
+```
+
+Three properties follow, and each exists because its absence fails quietly:
+
+- **The allowlist is data, not code.** A chunk that the map does not declare is never
+  transformed. Adding editor support is a map change, not a proxy change.
+- **Each surface gates independently.** A chunk whose bytes no longer match its pin
+  serves that chunk vanilla and says so; it does not block the main transform. The
+  alternative — one pin for everything — would turn any chunk rebuild into a total
+  loss of modding.
+- **An anchor is only evidence about the file it was found in.** Verification routes
+  each target to its own surface's unpacked modules. Checking a chunk-scoped target
+  against main answers a different question, and answers it wrongly in both
+  directions: a literal that happens to occur in main reports a pass for a target that
+  will never resolve there, and one that does not reports a fail for a target that is
+  fine inside its chunk.
+
+### What the pipeline does about it
+
+Chunks are opt-in per regen, because fetching and webcracking four extra files on every
+run buys nothing while the chunks are UI-only — but a release that moves game logic into
+one becomes visible here rather than as an unexplained drop in match rate.
+
+```
+node scripts/regen.mjs 0.7.0 --chunks    # fetch, re-pin, unpack and verify every chunk
+node scripts/regen.mjs --verify map.json <main-dir> 112=<chunk-112-dir>
+```
+
+Three guards make the quiet failures loud:
+
+- A target whose surface was not unpacked is reported **SKIPPED**, never `pass`, and
+  exits non-zero. "Everything I looked at passed" is the exact shape of a false
+  all-clear.
+- `--chunks` without a fetch is refused outright: a pin is a hash of bytes, and
+  carrying the previous build's hashes forward while the caller asked for a re-pin
+  would ship stale pins that look freshly verified.
+- A candidate that declares fewer chunks than the baseline is rejected. A chunk can
+  legitimately disappear from a build, but that is indistinguishable from the
+  carry-forward bug, so it takes an explicit `--allow-chunk-drop` from a reviewer who
+  checked the new runtime.
+
+A chunk pin that did **not** move while the main bundle did is called out in the diff
+for the same reason: it is either a genuinely byte-identical chunk or a regen run
+without `--chunks`, and in the second case that chunk silently never transforms again.
+
 ## Legal posture
 
 Ship **only the map** (metadata) — never the deobfuscated source or the game bundle — applied against the user's own live game copy. Distributing mapping data rather than game code is the established shape for this kind of project in other modding ecosystems, but do **not** treat that as legal cover: those precedents involve different rightsholders who took their own positions, and Kodub has stated none. Keep a takedown-compliance plan (registry pull, map withdrawal). Produce the first map from an auto-pipeline run against the live bundle (not the no-license `cwcinc` dump) once the pipeline lands.

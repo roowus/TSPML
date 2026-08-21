@@ -37,6 +37,28 @@ export function isGameHost(hostname: string): boolean {
 const VERSION_RE = /^\d+\.\d+\.\d+/;
 
 /**
+ * Proxy paths whose GET the service worker replays as a POST carrying the user
+ * patch plan: `main.bundle.js` and the lazily-loaded `<id>.bundle.js` chunks (#98).
+ *
+ * SHAPE ONLY, on purpose. The real allowlist — which chunk ids are transformable —
+ * is per-build map data owned by the route (lib/transform-surface.ts). A copy here
+ * would be a second source of truth that goes stale silently at exactly the moment
+ * a game update makes it wrong. A POST for an undeclared id is answered 405 and the
+ * SW falls back to the plain GET, which is the right behaviour for that chunk anyway.
+ * Over-matching costs one extra request on a path nobody transforms; under-matching
+ * would silently drop a user's mixins.
+ *
+ * The service worker carries an inline copy (see the file header) — `sw-sync.test.ts`
+ * asserts the two literals are identical rather than trusting the comment.
+ */
+export const BUNDLE_PATH_RE = /^\/api\/proxy\/(?:main|\d{1,6})\.bundle\.js$/;
+
+/** True when `pathname` is a proxied bundle the SW must replay with the plan. */
+export function isBundleProxyPath(pathname: string): boolean {
+  return BUNDLE_PATH_RE.test(pathname);
+}
+
+/**
  * Rewrite a Kodub game URL to a `/api/proxy/...` URL, or `null` if `inputUrl`
  * is not an http(s) Kodub URL we should intercept.
  *

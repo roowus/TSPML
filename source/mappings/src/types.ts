@@ -83,10 +83,33 @@ export type TargetSelector =
   | { readonly kind: 'property'; readonly key: string }
   | { readonly kind: 'factory' };
 
+/** The file a target's anchor lives in: `'main.bundle.js'` or `'<id>.bundle.js'`. */
+export type SurfaceFile = string;
+
+/** The surface a target defaults to when it does not name one. */
+export const MAIN_SURFACE_FILE = 'main.bundle.js';
+
 /** A stable target: module anchor + within-module selector. */
 export interface TargetSpec {
   readonly anchor: ModuleAnchor;
   readonly selector: TargetSelector;
+  /**
+   * Which served file this target's anchor was verified against (#98).
+   * Absent means the main bundle, so every pre-#98 target keeps its meaning.
+   *
+   * This is not a hint — it is a scope. The same literal can occur in more than one
+   * file, and an anchor is only ever verified against ONE unpacked bundle, so a
+   * target resolved against a different file than the one it was checked in is a
+   * silent mis-target: the locator finds *something*, the patch applies, and the
+   * mod edits code nobody looked at. Chunk anchors in particular are only meaningful
+   * inside their own chunk. {@link targetSurface} is the one place the default lives.
+   */
+  readonly surface?: SurfaceFile;
+}
+
+/** The surface a target belongs to, applying the main-bundle default (#98). */
+export function targetSurface(spec: TargetSpec): SurfaceFile {
+  return spec.surface ?? MAIN_SURFACE_FILE;
 }
 
 /** A module-level mapping entry: one stable concept -> one 0.6.2 module. */
@@ -149,6 +172,36 @@ export interface MapGenerated {
 }
 
 /**
+ * One lazily-loaded webpack chunk bundle the transform surface covers (#98).
+ *
+ * The game splits real feature code out of `main.bundle.js` into numbered chunks
+ * fetched on demand (`i.e(112)` → `<version>/112.bundle.js`). A host that only
+ * transforms the main bundle cannot anchor, inject, or capture anything inside
+ * one — which is what gated the editor API (#87).
+ *
+ * `hash` is a PER-CHUNK pin, and that is the point of this entry existing at all.
+ * A chunk re-minifies independently of the main bundle: a shared pin would either
+ * trip on every main-bundle change (over-trip) or accept a re-minified chunk the
+ * anchors no longer fit (under-protect). Fail-closed is scoped to match — a stale
+ * chunk pin serves THAT CHUNK vanilla and leaves the main transform alone.
+ *
+ * The map is where this lives rather than in host code because the set of chunks
+ * and their hashes is per-BUILD data, regenerated with the rest of the map. A host
+ * asks "may I transform `<id>.bundle.js`, and against which pin?" and the answer
+ * is a lookup, not a code change.
+ */
+export interface ChunkEntry {
+  /** Webpack chunk id — the `<id>` in `<id>.bundle.js`. Digits only. */
+  readonly id: string;
+  /** sha256 of THIS chunk's bytes. Independent of the main bundle's pin. */
+  readonly hash: BundleHash;
+  /** Byte length as fetched, for provenance / drift reporting. */
+  readonly bytes: number;
+  /** What the chunk contains, for humans reading a diff (e.g. "track editor"). */
+  readonly role: string;
+}
+
+/**
  * A versioned symbol map for a single PolyTrack build.
  *
  * `bundleHash` is the integrity pin: the resolver FAILS CLOSED when the live
@@ -171,6 +224,13 @@ export interface GameMap {
    * (resolved only when the live bundle matches `bundleHash`).
    */
   readonly targets?: Readonly<Record<string, TargetSpec>>;
+  /**
+   * Transformable chunk bundles for this build (#98), keyed by chunk id. Optional:
+   * a map without it declares no chunks, and a host then transforms only the main
+   * bundle — exactly the pre-#98 behaviour. THIS IS THE ALLOWLIST: a chunk absent
+   * here is proxied verbatim, never transformed.
+   */
+  readonly chunks?: Readonly<Record<string, ChunkEntry>>;
 }
 
 /** The concrete target returned by a successful resolution. */

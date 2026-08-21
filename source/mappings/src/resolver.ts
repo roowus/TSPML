@@ -15,6 +15,7 @@
  * narrow further to export / prototype / call-site locators.
  */
 import type {
+  ChunkEntry,
   GameMap,
   Locator,
   ModuleEntry,
@@ -188,4 +189,64 @@ export function resolveTarget(
     };
   }
   return { ok: true, target: targets[key]! };
+}
+
+// ── Chunk resolution (#98) ──────────────────────────────────────────────────
+
+export type ChunkResolveResult =
+  | { readonly ok: true; readonly chunk: ChunkEntry }
+  | {
+      readonly ok: false;
+      readonly reason: 'not-declared' | 'stale-chunk';
+      readonly message: string;
+    };
+
+/**
+ * May this build's `<id>.bundle.js` be transformed, and against which pin?
+ *
+ * Two refusals, deliberately distinct because a host reports them differently:
+ *
+ *  - `'not-declared'` — the id is not in the map's allowlist. Not an error: it is
+ *    a chunk TSPML has never verified anchors against, and it is proxied verbatim.
+ *  - `'stale-chunk'` — the id IS declared but the live bytes do not match its pin.
+ *    The chunk re-minified; its anchors are unverified against these bytes, so
+ *    serving it transformed is exactly the silent mis-target the mappings system
+ *    exists to prevent. Fail closed.
+ *
+ * SCOPED FAIL-CLOSED, and this is the load-bearing difference from the main
+ * bundle's gate: a stale chunk pin invalidates THAT CHUNK only. Chunks re-minify
+ * independently, so a shared verdict would take the whole session vanilla over a
+ * chunk the player may never load. The main bundle's gate is untouched by this.
+ *
+ * `liveHash` is the hash of the bytes about to be served, in the same
+ * `sha256:`-prefixed-or-bare form the other resolvers accept. Omit it to ask only
+ * the allowlist question ("is this id declared at all") — used by a proxy deciding
+ * whether to buffer a response for hashing before it has the bytes.
+ */
+export function resolveChunk(
+  map: GameMap,
+  chunkId: string,
+  liveHash?: string,
+): ChunkResolveResult {
+  const entry = map.chunks?.[chunkId];
+  if (entry === undefined) {
+    return {
+      ok: false,
+      reason: 'not-declared',
+      message: `chunk '${chunkId}' is not declared transformable in the map for PolyTrack ${map.gameVersion}; serving it unmodified`,
+    };
+  }
+  if (liveHash !== undefined && normalizeHash(liveHash) !== normalizeHash(entry.hash)) {
+    return {
+      ok: false,
+      reason: 'stale-chunk',
+      message: `chunk '${chunkId}' hash (${entry.hash}) does not match the live chunk (${liveHash}); refusing to transform it — the chunk re-minified independently of the main bundle`,
+    };
+  }
+  return { ok: true, chunk: entry };
+}
+
+/** Chunk ids this map declares transformable, ascending. Empty when none. */
+export function transformableChunkIds(map: GameMap): string[] {
+  return Object.keys(map.chunks ?? {}).sort((a, b) => Number(a) - Number(b));
 }

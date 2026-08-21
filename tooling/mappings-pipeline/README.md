@@ -33,11 +33,11 @@ review this tooling surfaces. See `docs/research/mappings-drift-spike.md` and AD
 
 | Stage | Script | What it does |
 |---|---|---|
-| **fetch** | `src/fetch.mjs` | Download the new build's `main.bundle.js` (+ sim worker) from `app-polytrack.kodub.com/<ver>/` into `.cache/`. Optional `--chunks` discovers the build's split chunks from the webpack runtime and fetches them for review (#3). Byte-exact + optional `--expect-hash` pin. |
-| **unpack** | `src/unpack.mjs` | webcrack the bundle into per-module files (`.cache/webcrack/v<ver>-raw/`). |
-| **gen-map** | `source/mappings/scripts/gen-map.mjs` | Re-match the **fixed** 0.6.0 renamed source → new target (IDF-weighted shared anchors), extract stable names, compute `bundleHash`, carry the `targets` section forward, write a candidate map. Env-var parameterized (M9-A). |
-| **diff** | `src/diff.mjs` | Pure map-vs-map diff: what modules relocated, which stable names moved, which **mod-facing targets are at risk**, and a risk level. The human-review core. |
-| **verify-targets** | `src/verify-targets.mjs` | Confirm each carried-forward target's anchor literals still resolve together in the unpacked new bundle — the gate that makes carry-forward safe. |
+| **fetch** | `src/fetch.mjs` | Download the new build's `main.bundle.js` (+ sim worker) from `app-polytrack.kodub.com/<ver>/` into `.cache/`. Optional `--chunks` discovers the build's split chunks from the webpack runtime and fetches them (#3), which is also how their pins are re-derived (#98). Byte-exact + optional `--expect-hash` pin. |
+| **unpack** | `src/unpack.mjs` | webcrack the bundle into per-module files (`.cache/webcrack/v<ver>-raw/`). Each chunk unpacks into its **own** dir (`v<ver>-chunk-<id>/`) — two surfaces can both contain a module named `112.js`, and a merged dir would silently drop one. |
+| **gen-map** | `source/mappings/scripts/gen-map.mjs` | Re-match the **fixed** 0.6.0 renamed source → new target (IDF-weighted shared anchors), extract stable names, compute `bundleHash`, carry the `targets` section forward, decide the `chunks` pins (`src/chunk-pins.mjs`), write a candidate map. Env-var parameterized (M9-A). |
+| **diff** | `src/diff.mjs` | Pure map-vs-map diff: what modules relocated, which stable names moved, which **mod-facing targets are at risk**, which chunk pins moved (#98), and a risk level. The human-review core. |
+| **verify-targets** | `src/verify-targets.mjs` | Confirm each carried-forward target's anchor literals still resolve together in the unpacked new build — **routed to the target's own surface** (#98). The gate that makes carry-forward safe. |
 
 `scripts/regen.mjs` runs all five and prints a combined review report.
 
@@ -132,8 +132,10 @@ clobbers a committed map. It then prints:
 
 - **MAP DIFF** — relocated modules, moved stable names, targets at risk, confidence
   drops, and a verdict: `NO DRIFT` / `LOW RISK` / `HIGH RISK`.
-- **TARGET VERIFICATION** — per-target `pass` / `ambiguous` / `fail` against the real
-  unpacked modules.
+- **TARGET VERIFICATION** — per-target `pass` / `ambiguous` / `fail` / `skipped` against
+  the real unpacked modules **of that target's own surface** (#98). Every line names the
+  file it was checked in, because a wholesale mis-route otherwise renders as an ordinary
+  green list.
 
 If both are green, promote and commit:
 
@@ -143,14 +145,45 @@ cp source/mappings/maps/polytrack-0.7.0.candidate.json \
 git add -A && git commit -m "feat(mappings): add 0.7.0 map (regen-pipeline)"
 ```
 
-`regen` exits non-zero on `HIGH` risk or any target `fail`, so it's CI-scriptable.
+`regen` exits non-zero on `HIGH` risk, any target `fail`, or any target `skipped`, so
+it's CI-scriptable.
+
+### Chunks (#98)
+
+The game splits screens into lazily-loaded chunks (`112.bundle.js` is the track editor).
+Each is its own **surface**: it carries its own pin in the map's `chunks` section and is
+transformed independently, so a target anchored inside one is only meaningful when
+checked against that chunk.
+
+```sh
+node scripts/regen.mjs 0.7.0 --chunks        # fetch, re-pin, unpack and verify every chunk
+```
+
+Opt-in rather than automatic: the 0.6.2 chunks are UI-only, so four extra downloads and
+four extra webcrack runs on every regen buy nothing — but a release that moves game logic
+into one shows up here rather than as an unexplained drop in match rate.
+
+Three refusals are worth knowing before you hit them:
+
+| Situation | What happens | Why |
+|---|---|---|
+| a chunk-scoped target with no unpacked chunk | reported **SKIPPED**, exit 1 | Not a pass and not a fail: nothing was checked. "Everything I looked at passed" is the exact shape of a false all-clear. |
+| `--no-fetch --chunks` | hard error | A pin is a hash of bytes this run did not download. Carrying the old pins forward while the caller asked for a re-pin ships stale hashes that look verified. |
+| candidate declares fewer chunks than the baseline | hard error, needs `--allow-chunk-drop` | A chunk *can* legitimately disappear from a build, but that is indistinguishable from the carry-forward bug, and the bug is both commoner and quieter. A human states they checked the new runtime. |
+
+A chunk that is declared but never pinned correctly does not error at runtime — it serves
+vanilla, and every mixin anchored in it stops applying with nothing logged. That is the
+failure the whole section exists to make loud.
 
 ### Standalone modes
 
 ```sh
 node scripts/regen.mjs --diff  <prev.json> <next.json>   # diff two existing maps
-node scripts/regen.mjs --verify <map.json> <unpacked-dir> # verify targets vs unpacked code
+node scripts/regen.mjs --verify <map.json> <unpacked-main-dir> [<chunkId>=<unpacked-chunk-dir> ...]
 ```
+
+The `<chunkId>=<dir>` pairs are explicit rather than inferred from a directory naming
+convention, so a typo'd path is a hard error instead of a silent SKIPPED.
 
 Convenience scripts (`package.json`): `pnpm fetch 0.7.0`, `pnpm gen`, `pnpm diff -- …`,
 `pnpm verify -- …`, `pnpm regen 0.7.0`.
@@ -266,13 +299,16 @@ evidence ranking (`lexical > structural > edge` on stable-name collisions):
 ## Tests
 
 ```sh
-pnpm test    # 132 unit tests — CI-runnable, no bundle needed
+pnpm test    # 173 unit tests — CI-runnable, no bundle needed
 ```
 
-Covering `diff` (23), `verify-targets` (11), `fetch` (8, incl. chunk discovery #3), the
-webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2), `regen`'s
-Node-invocation helper (5, #25), `wasm-locate` (16, #43), `wasm-patch` (9, #43),
-`fingerprint` (20, #1), `select` (17, #1) and `edges` (15, #1).
+Covering `diff` (36, incl. the chunk-pin report + carry guard #98), `verify-targets`
+(20, incl. per-surface routing #98), `chunk-pins` (15, #98), `fetch` (8, incl. chunk
+discovery #3), the webcrack-library guard (2, #5), the isolated-vm ABI branches (5, #2),
+`regen`'s Node-invocation helper (5, #25), `regen --verify` end-to-end (4, #98 —
+spawns the real script, because the thing most likely to break is the exit code and an
+exit code only exists in a process), `wasm-locate` (16, #43), `wasm-patch` (9, #43),
+`fingerprint` (20, #1), `select` (17, #1) and `edges` (16, #1).
 The pure logic is unit-tested with fixture maps and temp module directories. The
 bundle-dependent stages (`fetch`, `unpack`, `gen-map`, the full `regen`) are local-only
 (webcrack + the gitignored `.cache/`), like the M1 spike tests in `source/transform`.
