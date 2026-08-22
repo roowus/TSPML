@@ -13,7 +13,7 @@ Mods are written against a stable API and declarative mixins rather than against
 > - Reload button re-fetches URL-imported mods; share links carry mod URLs (never code) behind a confirm-first prompt.
 > - Warn-only safety classifier (`classifySafety`); `create-tspml-mod` scaffold CLI; `@tspml/api` types package.
 >
-> **500+ unit tests + 5 CI smokes, all green.** Headlessly verified against the real game via Playwright. See [`docs/project/progress.md`](./docs/project/progress.md).
+> **500+ unit tests + 7 CI smokes, all green.** Headlessly verified against the real game via Playwright. See [`docs/project/progress.md`](./docs/project/progress.md).
 
 ## Quick start (create a mod)
 

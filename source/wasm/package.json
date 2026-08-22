@@ -13,13 +13,18 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "find-constant": "./scripts/find-constant.mjs"
+  },
   "files": [
-    "dist"
+    "dist",
+    "scripts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.tests.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "find-constant": "node scripts/find-constant.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

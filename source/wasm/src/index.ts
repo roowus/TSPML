@@ -10,6 +10,9 @@
  *    it produces `not-found`, not a mis-write.
  * 2. {@link ./patch} — the fail-closed writer. Hash-pinned, unique-location,
  *    unique-site, finite-value, all-or-nothing.
+ * 3. {@link ./derive} — the authoring step, which turns "where does 1.05 live in
+ *    this binary" into a `physics.json`. Without it the other two are only usable
+ *    from inside this repo: a `signature` had no command that could emit one.
  *
  * The package exists so both the portal (which serves the patched bytes) and the
  * mappings pipeline (which derives and verifies plans) run the SAME implementation.
@@ -33,6 +36,8 @@ export type {
   WasmFunction,
   WasmSection,
 } from './locate.js';
+export { findConstant, toPhysicsJson } from './derive.js';
+export type { CandidateVerdict, ConstantCandidate, FindConstantResult } from './derive.js';
 export { applyF32Patches, checkPlan, wasmHash } from './patch.js';
 export type {
   AppliedPatch,
