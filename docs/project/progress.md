@@ -1983,3 +1983,81 @@ the one line that chose which classification to show, and no test owned that
 line. Verifying #43 by driving the actual UI is what surfaced it. A safety
 signal that is computed correctly and displayed for the wrong mod is worth
 exactly nothing to the player.
+
+## 2026-08-22 — Physics: a CI smoke, an authoring command, and the f32 boundary written down (#43) ✅
+
+Three gaps left over from shipping #43, in the order they mattered.
+
+**A CI smoke for the carriage (#64).** Every piece of the physics chain had unit
+tests and the whole thing had none. The chain is: the page projects enabled mods
+into a plan, writes it to the Cache API, the service worker replays the game's
+wasm GET as a POST carrying that plan, the route applies it, and response headers
+carry the verdict back to the panel. Unit tests cover each link and cannot see
+the joins between them. `smoke-physics.mjs` drives all six legs in a real browser
+against the live binary.
+
+The target is derived from the binary at run time rather than hardcoded: the
+smoke walks the functions, picks one with a unique fingerprint holding a constant
+that occurs exactly once, and patches that. A pinned signature would rot into a
+false failure on the next PolyTrack release, and deriving it re-proves the
+locator on every run. A stale pin exits early with a verdict naming it as a
+release, not a regression.
+
+The refusal leg is what makes the rest evidence. The same mod, the same code, the
+same request — differing only in whether `wasmHash` matches — must come back
+`plan-refused` with zero bytes changed. Without it, `patched` could be a label the
+page prints whenever a physics mod is installed.
+
+Falsified in both halves before commit, because a smoke that cannot fail proves
+nothing. Breaking `applyF32Patches` turned it red; separately making the service
+worker's `readPhysicsPlan()` return `null` turned it red — and **that second break
+is invisible to every unit test in the repo**, which is exactly the gap the smoke
+exists to close.
+
+**An authoring command (#65).** The spec documented `signature` as `…64 hex
+chars…`, the loader validated it, the portal applied it, and nothing in the
+project emitted one. The only deriving code was a dev-only script reading a
+gitignored cache. A capability nobody outside this repo can invoke is not
+shipped.
+
+The question an author actually has is not "what is the fingerprint of function
+234" — they have no idea which function that is. It is "where does 1.05 live in
+this binary, and can I safely patch it?" So `findConstant` searches by **value**
+and reports a fingerprint as one of the things it found, and `find-constant`
+wraps it as a command:
+
+```
+$ pnpm --filter @tspml/wasm find-constant 1.1 --emit grip=1.4 > physics.json
+```
+
+Every gate the writer will apply is evaluated at authoring time. The writer
+refuses on ambiguity *at apply time* — inside a game the author is trying to
+play, reported through a response header, minutes after the paste. That is a
+terrible place to learn a signature matches two functions. `patchable` means
+precisely "`applyF32Patches` will accept this", and the tests assert it against
+the real writer rather than restating its rules, so the two cannot drift.
+
+It never picks. Searching the live binary for `1.05` returns nine occurrences,
+all nine inside one 135-constant function, none patchable — `oldValue` cannot say
+which site is meant. That is the honest answer, and ranking the hits would be
+guessing at which constant governs grip, which is a question about the game's
+physics that nothing in this repo can answer. `--emit` refuses when more than one
+candidate is patchable for the same reason.
+
+Two bugs found by running it rather than reading it. `-9.81` — gravity, the first
+thing anyone searches for, and an example in my own usage text — was rejected as
+an unknown option, because the parser treated a leading `-` as a flag. And the
+candidate listing shared stdout with the emitted JSON, so the documented
+`--emit … > physics.json` wrote a file starting `1 occurrence, 1 patchable:`.
+Under `--emit` the JSON is the product and stdout belongs to it alone.
+
+**The f32 boundary (#66).** `applyF32Patches` is the entire writer. #43 sketched a
+`PATCH_I32` counterpart, copying PML's shape; it was never built, and the docs
+never said so. Now they do, as a decision rather than an omission: a physics
+constant worth tuning is a float in practice, and a float rewrite in place is the
+one edit that cannot change the size or structure of the binary around it.
+
+The spec's example plan is no longer illustrative — the `wasmHash` and `signature`
+in it were derived from live 0.6.2 and verified to apply.
+
+`source/wasm` 44 tests (17 new), 957 across the repo, 7 CI smokes.

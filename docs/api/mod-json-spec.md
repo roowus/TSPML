@@ -87,8 +87,8 @@ A path, relative to `mod.json`, to a `physics.json` that rewrites f32 constants 
   "patches": [
     {
       "name": "grip",                      // human label, shown in refusals and reports
-      "signature": "…64 hex chars…",       // fingerprint of the function holding the constant
-      "oldValue": 1.05,                    // the f32 currently there; must occur exactly once in that function
+      "signature": "d0d92e0ad4a721e9efa44a4930f3a21e93e5bfedb236243f65516379c2a8adca",
+      "oldValue": 1.100000023841858,       // the f32 currently there; must occur exactly once in that function
       "newValue": 1.4
     }
   ]
@@ -96,6 +96,43 @@ A path, relative to `mod.json`, to a `physics.json` that rewrites f32 constants 
 ```
 
 One path, not a list of environment-scoped descriptors like `mixins`: there is one physics binary and one all-or-nothing apply, so a per-host variant would have nothing to vary. A host that cannot patch the binary skips the file entirely rather than applying part of it.
+
+### Deriving one
+
+You do not write `signature` or `wasmHash` by hand. `find-constant` searches a physics binary by value and prints every place that value occurs, with the fingerprint of the function holding it:
+
+```
+$ pnpm --filter @tspml/wasm build          # once; the command runs the compiled package
+$ pnpm --filter @tspml/wasm find-constant 1.1
+
+fetching https://app-polytrack.kodub.com/0.6.2/polytrack_physics.wasm
+binary sha256: d4ef02676973d41afc34b23b5248f6950b35dc4cc7e3047e3a9c6bd88e4c180e
+searching for f32 1.100000023841858
+
+1 occurrence, 1 patchable:
+
+✓ [0] function 234 — value 1.100000023841858
+      signature d0d92e0ad4a721e9efa44a4930f3a21e93e5bfedb236243f65516379c2a8adca
+      17 f32 constants in this function, payload at 0x2c2e6
+```
+
+It fetches the live binary by default (`--wasm <path>` reads a local copy, `--version` picks a build) and never writes those bytes to disk. Add `--emit <name>=<value>` to print a ready-to-paste file — stdout carries the JSON alone, so `--emit grip=1.4 > physics.json` writes a valid one:
+
+```
+$ pnpm --filter @tspml/wasm find-constant 1.1 --emit grip=1.4 > physics.json
+```
+
+Three things it will not do, each for the same reason — a guess here becomes a corrupted binary later:
+
+- **It never picks for you.** Which constant governs grip is a question about the game's physics, not about the binary, so every hit is reported and none is ranked. `--emit` refuses when more than one candidate is patchable; identify the one you want and write the file from its signature.
+- **It refuses what the loader would refuse**, at authoring time rather than mid-race: a value occurring twice inside its own function (`oldValue` cannot say which site), or a function whose fingerprint matches another function (no signature can name it). Both are common — around 2% of functions are structurally ambiguous, and the clamp idiom puts `-10` and `+10` in one body.
+- **It reports the f32, not what you typed.** `1.05` is stored as `1.0499999523162842`. Copy the printed `value` into `oldValue`; a double literal that looks right will fail the exactly-once check.
+
+If a search comes back empty for a value you can see in a disassembly, that rounding is usually why. Try neighbouring values, or search for a rounder constant nearby and work outwards.
+
+### f32 only
+
+`f32.const` is the whole of it — there is no integer, `f64`, or byte-sequence patching, and no plan to add any. A physics constant a mod would want to tune is a float in practice, and every additional payload type is another way to write the wrong bytes into a running binary. `#43` sketched an `i32` variant; it was not built. A patch is a float rewrite in place, which is the one edit that cannot change the size or structure of the binary around it.
 
 Two independent gates stand between a patch and a write, and both fail closed. `wasmHash` pins the exact bytes the patches were derived against; if the served binary is not those bytes, nothing is applied and the host says so. Separately, each `signature` is re-derived structurally from the binary in hand — by the set of float constants and the histogram of opcodes in a function, never by an offset or index — and a signature matching zero functions or more than one is refused. A stale offset would otherwise mean writing a float into whatever now lives at that address.
 
