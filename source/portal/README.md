@@ -167,6 +167,7 @@ pnpm --filter @tspml/portal smoke:audio             # terminal 2: the api.audio 
 pnpm --filter @tspml/portal smoke:usermods          # terminal 2: runtime user mods + pasted mixins
 pnpm --filter @tspml/portal smoke:ui                # terminal 2: boot overlay + fullscreen/theater + responsive layout
 pnpm --filter @tspml/portal smoke:chunks            # terminal 2: chunk surfaces at the HTTP boundary
+pnpm --filter @tspml/portal smoke:physics           # terminal 2: physics WASM patching (#43)
 ```
 
 `smoke.mjs` asserts the transformed bundle runs (badge in DOM + console), the game reaches
@@ -231,7 +232,28 @@ on `/api/proxy/112.bundle.js` to production with 690 unit tests and five smokes 
 assertions would be vacuous rather than failing. That is exactly how a green Vercel
 preview deploy failed to catch the original bug.
 
-All six portal smokes run in CI (`.github/workflows/smoke.yml`, closing
+`smoke-physics.mjs` covers the one [#43](https://github.com/roowus/TSPML/issues/43) leg
+no unit test can reach: not whether `serveWasm` decides correctly (`wasm-serve.test.ts`
+proves that from bytes and a plan), but whether the **carriage** works — page → Cache API
+→ service-worker POST replay → route → `x-tspml-wasm-*` headers → the SW's postMessage →
+the Physics panel. That chain only exists in a browser with a registered service worker.
+It derives its patch target from the **live** binary rather than hardcoding a signature,
+so it exercises the locator each run instead of a constant that would rot into a false
+failure on the next release. The refusal leg is what makes the result evidence: the same
+mod, the same code, and the same request are sent twice, differing only in whether the
+plan's `wasmHash` pins this build — one reads `plan-refused`, the other `patched, 1
+constant rewritten`, and the sidebar's safety row warns (warn-only, and the game still
+boots on the patched bytes). Both halves were falsified before the file was committed:
+breaking the writer and, separately, severing the SW's plan read each turn it red, and
+the second is invisible to every unit test in the repo.
+
+It needs `TSPML_TRANSFORM=1`, and it checks for that first rather than discovering it
+six legs later. The route gates the wasm surface and its POST behind the same env var,
+so with it unset the binary streams through as a plain 200 with no `x-tspml-*` headers
+and every physics assertion fails for a reason that has nothing to do with physics. A
+missing status header on a 200 therefore exits immediately naming the env var.
+
+All seven portal smokes run in CI (`.github/workflows/smoke.yml`, closing
 [#25](https://github.com/roowus/TSPML/issues/25)) — advisory on PRs plus a daily
 schedule, never merge-gating, because they fetch the live upstream game and can go
 red on a Kodub release rather than a commit. A `pinned-bundle` canary job runs first
