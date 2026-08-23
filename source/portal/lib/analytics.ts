@@ -58,13 +58,16 @@ export function trackEvent(name: string, params: EventParams = {}): void {
 /**
  * The mod-usage events, named here so call sites and any future dashboard
  * agree on the vocabulary:
- * - `mod_added`    { mod_id, method: 'paste' | 'url' | 'share' | 'reload' }
+ * - `mod_added`    { mod_id, method: 'paste' | 'url' | 'modpack' | 'share' | 'reload' }
  * - `mod_loaded`   { mod_id } — one per mod per successful load pass
  * - `mod_load_failed` { mod_id } — the mod's id, not the reason (reasons can
  *   quote manifest contents; the Log section shows them to the user instead)
  * - `mods_session` { count } — how many mods a load pass ran with
  */
-export function trackModAdded(modId: string | null, method: 'paste' | 'url' | 'share' | 'reload'): void {
+export function trackModAdded(
+  modId: string | null,
+  method: 'paste' | 'url' | 'modpack' | 'share' | 'reload',
+): void {
   trackEvent('mod_added', { mod_id: modId ?? '(no id)', method });
 }
 

@@ -1,0 +1,9 @@
+# TSPML sample modpack.
+#
+# A modpack is exactly this: one mod URL per line, '#' for comments. Paste this
+# file's URL into "Add a mod" -> "Import a modpack" and both mods below install
+# at once. Lines are relative to this file, so a pack stays portable if you fork
+# it or move it to another host.
+
+sample-mod/mod.json
+sample-mod-b/mod.json
