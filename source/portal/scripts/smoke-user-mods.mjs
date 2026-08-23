@@ -38,7 +38,15 @@
 //                imports the portal's own /sample-mod/mod.json (same-origin,
 //                no CORS to negotiate; the manifest's entrypoint is fetched
 //                relative to it), the mod loads through the same pipeline,
-//                and removing it clears its record.
+//                and removing it clears its record;
+//   9. pack    — (#80 second slice) a PASTED three-line modpack whose middle
+//                line 404s: lines 1 and 3 install, the pack's own notice says
+//                one failed, and nothing aborts — fail per mod, not per pack;
+//  10. packURL — the same two mods again, this time from a LINKED list
+//                (/sample-pack.txt, whose lines are relative to itself), which
+//                pins the fetch-the-list path and base-relative resolution.
+//                Leg 9 removes its mods first, so leg 10's "loaded" is earned
+//                rather than left over.
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
@@ -48,6 +56,9 @@ const BOGUS_ID = "smoke-bogus-mod";
 // The portal serves this itself (public/sample-mod/) so the URL-import leg has
 // a known-good same-origin target — id from that mod.json.
 const URL_MOD_ID = "tspml-sample-url-mod";
+// The second sample mod (public/sample-mod-b/) — the pack legs need TWO mods,
+// or "the whole pack installed" and "one line installed" look the same.
+const PACK_MOD_ID = "tspml-sample-pack-mod";
 
 const step = (msg) => process.stderr.write(`smoke:usermods · ${msg}\n`);
 
@@ -135,6 +146,25 @@ async function waitForGameFrame(timeout = 45000) {
     await page.waitForTimeout(300);
   }
   return null;
+}
+
+/**
+ * Remove mods by id, tolerating a row that isn't there.
+ *
+ * The pack legs' cleanup must not be the thing that fails when a pack leg
+ * fails: a missing row means the leg above it already went false, and the run
+ * should print that verdict rather than die in the teardown with a 30s locator
+ * timeout that names the wrong problem. The short timeout keeps a genuinely
+ * stuck row from stretching the run.
+ */
+async function removeMods(ids) {
+  for (const id of ids) {
+    await page
+      .click(`aside[aria-label="Mods"] li:has(code:text-is("${id}")) button:has-text("remove")`, {
+        timeout: 5000,
+      })
+      .catch(() => {});
+  }
 }
 
 /** Fill the Add form's three textareas and click Add mod. */
@@ -363,6 +393,79 @@ out.urlModCleared = await page.evaluate((id) => {
     return false;
   }
 }, URL_MOD_ID);
+
+// 9. Modpack, PASTED, with a broken line in the middle (#80's stated
+// acceptance criterion). The list is three lines and line 2 is a 404 on this
+// same origin: a well-formed https URL, so it passes the host rules and fails
+// at the fetch — exactly where a real dead link fails. Lines 1 and 3 must
+// still install and the pack's notice must say one failed. Asserting only
+// "two mods loaded" would pass just as well if the pack aborted after a
+// silent success, so the notice is checked too.
+step("import a pasted modpack whose middle line 404s");
+await page.selectOption('aside[aria-label="Mods"] select.add-select', "pack");
+await page.fill(
+  'aside[aria-label="Mods"] textarea.pack-input',
+  [
+    "# smoke pack",
+    `${BASE_URL}/sample-mod/mod.json`,
+    `${BASE_URL}/sample-mod-missing/mod.json`,
+    `${BASE_URL}/sample-mod-b/mod.json`,
+  ].join("\n"),
+);
+await page.click('aside[aria-label="Mods"] button:has-text("Import modpack")');
+out.packGoodLinesLoaded = await waitForSidebar(
+  () =>
+    /mods:\s*✓ .*tspml-sample-url-mod/.test(document.body.innerText) &&
+    /mods:\s*✓ .*tspml-sample-pack-mod/.test(document.body.innerText),
+  30000,
+);
+// The failure is REPORTED, not swallowed: the pack box's own notice counts it.
+out.packFailureReported = await page
+  .locator('aside[aria-label="Mods"] .pack-box')
+  .innerText()
+  .then((t) => /installed 2 of 3/.test(t) && /1 failed to import/.test(t))
+  .catch(() => false);
+
+step("remove both modpack mods");
+await removeMods([URL_MOD_ID, PACK_MOD_ID]);
+await page.waitForTimeout(1000);
+out.packCleared = await page.evaluate((ids) => {
+  try {
+    const raw = window.localStorage.getItem("tspml.userMods.v1");
+    return !raw || ids.every((id) => !raw.includes(id));
+  } catch {
+    return false;
+  }
+}, [URL_MOD_ID, PACK_MOD_ID]);
+
+// 10. Modpack, LINKED: one .txt URL in the box is a link TO a list, not the
+// list itself. /sample-pack.txt is the portal's own sample pack and its two
+// lines are RELATIVE, so this also pins base-relative resolution — the lines
+// only reach a mod if they resolved against the list's URL.
+step("import the sample modpack from a .txt link");
+await page.fill('aside[aria-label="Mods"] textarea.pack-input', `${BASE_URL}/sample-pack.txt`);
+await page.click('aside[aria-label="Mods"] button:has-text("Import modpack")');
+out.packFromLinkLoaded = await waitForSidebar(
+  () =>
+    /mods:\s*✓ .*tspml-sample-url-mod/.test(document.body.innerText) &&
+    /mods:\s*✓ .*tspml-sample-pack-mod/.test(document.body.innerText),
+  30000,
+);
+out.packFromLinkListed = await sidebarText().then(
+  (t) => t.includes(URL_MOD_ID) && t.includes(PACK_MOD_ID),
+);
+
+step("remove the linked modpack's mods");
+await removeMods([URL_MOD_ID, PACK_MOD_ID]);
+await page.waitForTimeout(1000);
+out.packFromLinkCleared = await page.evaluate((ids) => {
+  try {
+    const raw = window.localStorage.getItem("tspml.userMods.v1");
+    return !raw || ids.every((id) => !raw.includes(id));
+  } catch {
+    return false;
+  }
+}, [URL_MOD_ID, PACK_MOD_ID]);
 await page.selectOption('aside[aria-label="Mods"] select.add-select', "paste");
 
 const PASS =
@@ -392,7 +495,13 @@ const PASS =
   out.rowGone === true &&
   out.urlModLoaded === true &&
   out.urlModListed === true &&
-  out.urlModCleared === true;
+  out.urlModCleared === true &&
+  out.packGoodLinesLoaded === true &&
+  out.packFailureReported === true &&
+  out.packCleared === true &&
+  out.packFromLinkLoaded === true &&
+  out.packFromLinkListed === true &&
+  out.packFromLinkCleared === true;
 
 console.log(
   JSON.stringify(

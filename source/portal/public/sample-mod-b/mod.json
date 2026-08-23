@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "tspml-sample-pack-mod",
+  "name": "TSPML sample pack mod",
+  "version": "1.0.0",
+  "description": "A second tiny sample mod, so the portal's own sample modpack has more than one line in it. Import /sample-pack.txt to see a modpack install both at once.",
+  "authors": ["TSPML"],
+  "environment": "web",
+  "entrypoint": "index.js",
+  "targets": []
+}

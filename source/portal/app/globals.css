@@ -1000,6 +1000,14 @@ a.btn {
   resize: vertical;
 }
 
+/* The modpack box is LINE-oriented (one mod URL per line), and mod URLs are
+   long. Soft-wrapping one would render a single entry as two visual lines and
+   make the list impossible to count, so it scrolls sideways instead. */
+.add-form textarea.pack-input {
+  white-space: pre;
+  overflow-x: auto;
+}
+
 /* ---- Status rows ---- */
 
 .status-row {

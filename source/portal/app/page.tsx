@@ -29,6 +29,8 @@ import { importModFromUrl } from '@/lib/mod-import';
 import { refreshFromSources } from '@/lib/mod-reload';
 import { buildShareUrl, parseShareUrls, SHARE_LIMITS, SHARE_PARAM } from '@/lib/mod-share';
 import type { ShareBuildResult, ShareParseResult } from '@/lib/mod-share';
+import { classifyModpackInput, fetchModpackList, MODPACK_LIMITS } from '@/lib/modpack';
+import type { ModpackParseResult } from '@/lib/modpack';
 import { Icon } from './icons';
 import {
   buildUserPatchPlan,
@@ -329,9 +331,16 @@ export default function PlayPage(): ReactElement {
   // Which add-a-mod method is selected. "paste" and "url" work today; "id"
   // (mod/modpack ids from a registry backend) is the announced next slice of
   // #80, so the dropdown already teaches the model of "several ways".
-  const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'id'>('paste');
+  const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'pack' | 'id'>('paste');
   const [draftUrl, setDraftUrl] = useState('');
   const [importBusy, setImportBusy] = useState(false);
+  // The modpack box (#80): a plain-text list of mod URLs, pasted or linked.
+  // `packNotice` reports the per-line refusals a pack survives — a pack that
+  // installed 4 of 6 must say which two and why, or the player is left
+  // comparing their mod list against a file by hand.
+  const [draftPack, setDraftPack] = useState('');
+  const [packBusy, setPackBusy] = useState(false);
+  const [packNotice, setPackNotice] = useState<string | null>(null);
   // "⟳ reload" (the reload-mods feature): busy while URL re-fetches are in
   // flight; the notice reports per-mod re-fetch failures (stored copy kept).
   const [reloadBusy, setReloadBusy] = useState(false);
@@ -672,11 +681,55 @@ export default function PlayPage(): ReactElement {
   };
 
   /**
+   * Import a list of mod URLs, one after another.
+   *
+   * Shared by the share-link confirm and the modpack box because they ARE the
+   * same operation: a set of links, each imported exactly as a single URL
+   * import is, with one failure never stopping the rest (#80: fail per mod,
+   * not per pack). Sequential rather than parallel so the log reads in order
+   * and a slow host cannot interleave upserts.
+   *
+   * Returns the new set and the failures; the caller applies it with ONE
+   * `updateUserMods`, so a pack of six mods is one unload/reload of the set
+   * rather than six.
+   */
+  const importUrlList = async (
+    urls: readonly string[],
+    method: 'share' | 'modpack',
+    label: string,
+  ): Promise<{ next: readonly UserModRecord[]; failed: string[] }> => {
+    let next = userModsRef.current;
+    const failed: string[] = [];
+    for (const url of urls) {
+      const result = await importModFromUrl(url);
+      if (!result.ok) {
+        failed.push(url);
+        log(`${label} import failed for ${url.slice(0, 80)}: ${result.error.slice(0, 120)}`);
+        continue;
+      }
+      const rec: UserModRecord = {
+        manifest: result.mod.manifest,
+        code: result.mod.code,
+        ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+        ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+        enabled: true,
+        addedAt: new Date().toISOString(),
+        sourceUrl: url,
+      };
+      // upsert, so re-importing a pack the user already has REPLACES by id
+      // rather than piling up duplicate rows (#80: a repeat import converges).
+      next = upsertUserMod(next, rec);
+      log(`added mod '${userModId(rec) ?? '(no id)'}' (${label})`);
+      trackModAdded(userModId(rec), method);
+    }
+    return { next, failed };
+  };
+
+  /**
    * The confirm step for an incoming share link. Each link goes through
    * `importModFromUrl` — the browser's own fetch, same host rules and caps as
-   * the Add form's URL import — sequentially, so the log reads in order and a
-   * slow host can't interleave upserts. One `updateUserMods` at the end: a
-   * single unload/reload of the whole set instead of N.
+   * the Add form's URL import. One `updateUserMods` at the end: a single
+   * unload/reload of the whole set instead of N.
    */
   const handleShareImport = (): void => {
     const prompt = sharePrompt;
@@ -684,28 +737,7 @@ export default function PlayPage(): ReactElement {
     setShareImportBusy(true);
     log(`importing ${prompt.urls.length} mod${prompt.urls.length === 1 ? '' : 's'} from the share link…`);
     void (async () => {
-      let next = userModsRef.current;
-      const failed: string[] = [];
-      for (const url of prompt.urls) {
-        const result = await importModFromUrl(url);
-        if (!result.ok) {
-          failed.push(url);
-          log(`share import failed for ${url.slice(0, 80)}: ${result.error.slice(0, 120)}`);
-          continue;
-        }
-        const rec: UserModRecord = {
-          manifest: result.mod.manifest,
-          code: result.mod.code,
-          ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
-          ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
-          enabled: true,
-          addedAt: new Date().toISOString(),
-          sourceUrl: url,
-        };
-        next = upsertUserMod(next, rec);
-        log(`added mod '${userModId(rec) ?? '(no id)'}' (from the share link)`);
-        trackModAdded(userModId(rec), 'share');
-      }
+      const { next, failed } = await importUrlList(prompt.urls, 'share', 'from the share link');
       setShareImportBusy(false);
       setSharePrompt(null);
       if (failed.length > 0) {
@@ -1160,6 +1192,83 @@ export default function PlayPage(): ReactElement {
       trackModAdded(userModId(rec), 'url');
       updateUserMods(next);
     });
+  };
+
+  /**
+   * Import a modpack (#80): a plain-text list of mod URLs, either pasted into
+   * the box or linked as a single `.txt` URL. Sugar over the URL import and
+   * nothing more — each line is one `importModFromUrl`, so every host rule and
+   * cap applies per mod and a 404 on line 2 does not stop lines 1 and 3.
+   *
+   * No confirm step, unlike an incoming share link: a share link arrives from
+   * someone else and can be opened by a click, whereas this list is something
+   * the player pasted here and then pressed Import on. The unsandboxed-code
+   * warning sits above the button for the same reason it sits above the others.
+   */
+  const handleImportPack = (): void => {
+    if (packBusy) return;
+    const text = draftPack.trim();
+    if (text.length === 0) {
+      setAddError('paste a list of mod URLs (one per line), or a link to a .txt list');
+      return;
+    }
+    setPackBusy(true);
+    setAddError(null);
+    setPackNotice(null);
+    void (async () => {
+      const input = classifyModpackInput(text);
+      let parsed: ModpackParseResult;
+      if (input.kind === 'list') {
+        log(`fetching modpack list…`);
+        const listed = await fetchModpackList(input.url);
+        if (!listed.ok) {
+          setPackBusy(false);
+          setAddError(listed.error);
+          log(`modpack list failed: ${listed.error.slice(0, 120)}`);
+          return;
+        }
+        parsed = listed.parsed;
+      } else {
+        parsed = input.parsed;
+      }
+
+      // Every refusal is named before anything installs, so the count the user
+      // sees at the end has an explanation attached and they are not left
+      // diffing their mod list against the file by hand.
+      for (const bad of parsed.invalid) {
+        log(`modpack line ${bad.line} skipped: ${bad.error.slice(0, 120)}`);
+      }
+      if (parsed.urls.length === 0) {
+        setPackBusy(false);
+        setAddError(
+          parsed.invalid.length > 0
+            ? `no usable mod URLs — all ${parsed.invalid.length} line${parsed.invalid.length === 1 ? '' : 's'} were refused (see the Log section)`
+            : 'that list has no mod URLs in it',
+        );
+        return;
+      }
+
+      log(`importing ${parsed.urls.length} mod${parsed.urls.length === 1 ? '' : 's'} from the modpack…`);
+      const { next, failed } = await importUrlList(parsed.urls, 'modpack', 'from the modpack');
+      setPackBusy(false);
+
+      const notes: string[] = [];
+      const installed = parsed.urls.length - failed.length;
+      notes.push(`installed ${installed} of ${parsed.urls.length}`);
+      if (failed.length > 0) notes.push(`${failed.length} failed to import`);
+      if (parsed.invalid.length > 0) {
+        notes.push(`${parsed.invalid.length} line${parsed.invalid.length === 1 ? '' : 's'} refused`);
+      }
+      if (parsed.dropped > 0) {
+        notes.push(`${parsed.dropped} past the ${MODPACK_LIMITS.maxMods}-mod limit were dropped`);
+      }
+      const clean = failed.length === 0 && parsed.invalid.length === 0 && parsed.dropped === 0;
+      setPackNotice(
+        clean ? null : `${notes.join(', ')} — see the Log section for each one.`,
+      );
+      if (installed > 0) setDraftPack('');
+      if (next !== userModsRef.current) updateUserMods([...next]);
+    })();
   };
 
   /**
@@ -1821,13 +1930,17 @@ export default function PlayPage(): ReactElement {
                   value={addMethod}
                   onChange={(e) => {
                     const v = e.target.value;
-                    setAddMethod(v === 'url' ? 'url' : v === 'id' ? 'id' : 'paste');
+                    setAddMethod(
+                      v === 'url' ? 'url' : v === 'pack' ? 'pack' : v === 'id' ? 'id' : 'paste',
+                    );
                     setAddError(null);
+                    setPackNotice(null);
                   }}
                 >
                   <option value="paste">Paste the mod’s files</option>
                   <option value="url">Import from a URL</option>
-                  <option value="id">Mod / modpack ID (coming soon)</option>
+                  <option value="pack">Import a modpack</option>
+                  <option value="id">Modpack ID (coming soon)</option>
                 </select>
               </label>
               {addMethod === 'paste' ? (
@@ -1875,10 +1988,18 @@ export default function PlayPage(): ReactElement {
                   </button>
                 </>
               ) : null}
+              {addMethod === 'pack' ? (
+                <p className="meta">
+                  One mod URL per line, or a link to a <code>.txt</code> list. Lines
+                  starting with <code>#</code> are comments. Up to{' '}
+                  {MODPACK_LIMITS.maxMods} mods; a line that fails is skipped and
+                  named, the rest still install.
+                </p>
+              ) : null}
               {addMethod === 'id' ? (
                 <p className="meta">
-                  Not available yet — use <strong>Import from a URL</strong> or{' '}
-                  <strong>Paste the mod’s files</strong> for now.
+                  Not available yet — use <strong>Import a modpack</strong> with a
+                  list of URLs, or add mods one at a time, for now.
                 </p>
               ) : null}
               <div className={addMethod === 'paste' ? undefined : 'add-hidden'}>
@@ -1937,6 +2058,46 @@ export default function PlayPage(): ReactElement {
                   ) : null}
                 <button type="button" className="btn btn-primary" onClick={handleAddMod}>
                   Add mod
+                </button>
+              </div>
+              {/* The modpack box (#80). AFTER the paste boxes on purpose: the
+                  smokes fill the paste textareas BY INDEX (0=manifest, 1=code,
+                  2=mixins, 3=physics), so a new textarea may only be appended. */}
+              <div className={addMethod === 'pack' ? 'pack-box' : 'pack-box add-hidden'}>
+                <label className="add-label">
+                  <span className="field-tag req">required</span> mod URLs, one per line
+                  <textarea
+                    className="pack-input"
+                    rows={6}
+                    spellCheck={false}
+                    placeholder={
+                      'https://raw.githubusercontent.com/you/mod-a/main/mod.json\nhttps://raw.githubusercontent.com/you/mod-b/main/dist/index.js\n\n# or a single link to a .txt list of these'
+                    }
+                    value={draftPack}
+                    onChange={(e) => setDraftPack(e.target.value)}
+                  />
+                </label>
+                <p className="warn">
+                  Every mod in a pack runs unsandboxed in your browser — only import
+                  packs from people you trust.
+                </p>
+                {packNotice ? (
+                  <p className="warn">
+                    <Icon name="warn" /> {packNotice}
+                  </p>
+                ) : null}
+                {addError && addMethod === 'pack' ? (
+                  <p className="warn">
+                    <Icon name="error" /> {addError}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={packBusy}
+                  onClick={handleImportPack}
+                >
+                  {packBusy ? 'Importing…' : 'Import modpack'}
                 </button>
               </div>
             </details>

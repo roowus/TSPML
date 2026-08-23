@@ -2061,3 +2061,102 @@ The spec's example plan is no longer illustrative — the `wasmHash` and `signat
 in it were derived from live 0.6.2 and verified to apply.
 
 `source/wasm` 44 tests (17 new), 957 across the repo, 7 CI smokes.
+
+## 2026-08-22 — Modpacks: a list of links, and nothing more (#80) ✅
+
+#80 asked for three things: import a mod by URL, import a whole pack from a
+plain-text link list, and import a pack by a short ID resolved against a
+registry. The first shipped in #83. The third needs a backend that does not
+exist yet. This is the second, which needs no backend at all.
+
+**The format is the whole feature.** A modpack is a `.txt` file: one mod URL per
+line, `#` for comments. No account, no registration, no upload step. A player
+puts the file in a gist and their friend gets their exact setup from the link.
+There is nothing to run, nothing to keep alive, and nothing that stops working
+if this project does.
+
+**Sugar over the URL import, deliberately.** Each line is one
+`importModFromUrl` — the same call the single-URL box makes. So every host rule,
+size cap and failure message already written applies per line, and none of them
+had to be reimplemented for packs. A modpack is a way to say "these mods", not a
+second way to install one.
+
+That also fixes the semantics that matter. A pack fails **per mod, not per
+pack**: line 2 returning 404 does not stop lines 1 and 3, which is the same
+soft-disable philosophy the loader applies to a broken mod. And a repeat import
+converges rather than accumulating, because `upsertUserMod` replaces by manifest
+id — importing the same pack twice leaves you with one copy of each mod, not
+two.
+
+**Links only, never code** — the boundary share links already commit to. Nothing
+in a pack file is a mod's bytes; it is a list of places their authors host them.
+The portal does not become a distribution channel by adding a text file format.
+
+**The share confirm loop and the pack loop were the same function.** They both
+import a list of URLs one at a time, isolate failures per URL, and apply one
+`updateUserMods` at the end so six mods are one unload/reload of the set rather
+than six. Writing the second one revealed that, so `importUrlList` is now
+extracted and the pack path inherits share's proven behaviour instead of a
+parallel copy of it.
+
+**Four rules, each with a reason that outlives the code:**
+
+*No nested packs.* A `.txt` line inside a list is refused, not followed. Nesting
+can loop, can fan out past every cap here, and makes "what will this install?"
+unanswerable from the list in front of the user.
+
+*Relative lines resolve against a fetched list, and are refused in a pasted
+one.* A fetched list has a URL to resolve against, so a pack can say
+`mods/turbo/mod.json` next to itself and survive being forked or moved. A pasted
+list has no base. Falling back to the portal's own origin would point every
+relative line at a host that serves no mods, and fail with a message about the
+wrong host.
+
+*Resolution happens before the host check, and the resolved href is re-checked.*
+Checking first would reject a legal relative line as "not an absolute URL" and
+advise adding `https://`, which is wrong advice for a line that is allowed to be
+relative. Re-checking after means resolution is not a way around the host rules.
+
+*A lone `.txt` line is a link to a list; anything else is the list.* The rule is
+the extension and nothing cleverer. A heuristic that is right more often is
+worse here: when it guesses wrong the user sees the error from the wrong path
+and has no way to force the other one.
+
+**No confirm step, unlike a share link.** A share link arrives from someone else
+and can be opened by a click, so importing without asking would be a drive-by.
+A pack list is something the player pasted into the Add form and then pressed a
+button labelled Import on. That is the confirmation. The unsandboxed-code
+warning sits above the button exactly as it does above the others.
+
+**16 mods per pack**, matching `USER_PATCH_LIMITS.maxMods` and
+`SHARE_LIMITS.maxMods`. A different number here would let a pack import cleanly
+and then have its mixins silently trimmed one layer down.
+
+**Two smoke legs, three mutants.** Leg 9 pastes a three-line pack whose middle
+line 404s on this same origin — a well-formed https URL that passes the host
+rules and dies at the fetch, which is where a real dead link dies. Lines 1 and 3
+must install *and* the box must say `installed 2 of 3, 1 failed to import`;
+asserting only the two loads would pass just as well if the failure were
+swallowed. Leg 10 imports `/sample-pack.txt`, whose two lines are relative, so
+it pins the fetch-the-list path and base resolution together.
+
+Falsified before commit, three ways, each killing a different flag: turning the
+per-mod `continue` into a `break` killed `packGoodLinesLoaded`; resolving
+against a wrong base killed `packFromLinkLoaded`; hardcoding the notice to
+"clean" killed `packFailureReported`. The parser's own rules were mutation-
+tested the same way earlier.
+
+One thing the falsification exposed that the passing run could not: the cleanup
+between legs used a plain `page.click` on a row that may not exist, so mutant 1
+died in the teardown with a 30-second locator timeout naming the wrong problem
+instead of printing its verdict. Cleanup now tolerates a missing row. A smoke
+that fails informatively is worth as much as one that passes.
+
+Screenshotted rather than trusted: DOM assertions passing says the nodes are
+there, not that the box reads well, and those two can disagree.
+
+Portal 367 tests (23 new for the parser), 980 across the repo, 7 CI smokes.
+
+Still open on #80: the modpack **ID** slice. It resolves a short id to one of
+these lists against a registry that stores links and never mod code, so it is a
+lookup wrapped around code that now works, and it waits on that backend.

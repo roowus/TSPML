@@ -52,7 +52,7 @@ Full detail in
 | # | Title | Scope |
 |---|---|---|
 | [#43](https://github.com/roowus/TSPML/issues/43) | No physics WASM patching | Constants compiled into `polytrack_physics.wasm` are unreachable from bundle anchors. Gates M11. |
-| [#80](https://github.com/roowus/TSPML/issues/80) | Import mods by URL + modpacks (txt URL-list or saved modpack ID) | Distribution UX on top of #62's runtime user mods: one-URL mod install, and whole-pack install from a plain-text link list or a backend-resolved modpack ID (links-only DB, client-side fetch, per-mod validation — never a server-side store of user code). |
+| [#80](https://github.com/roowus/TSPML/issues/80) | Modpack IDs (last slice) | Distribution UX on top of #62's runtime user mods. Shipped: one-URL mod install, and whole-pack install from a plain-text list of mod URLs (pasted or linked). Remaining: resolving a short modpack ID against a registry — a links-only DB, client-side fetch, per-mod validation, never a server-side store of user code. Blocked on that backend. |
 
 Closed since the last update: [#21](https://github.com/roowus/TSPML/issues/21)
 (`environment` and `targets` are now enforced: mismatches **soft-disable** the mod via
