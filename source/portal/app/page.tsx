@@ -342,6 +342,14 @@ export default function PlayPage(): ReactElement {
   const [packBusy, setPackBusy] = useState(false);
   const [packNotice, setPackNotice] = useState<string | null>(null);
   const packInputRef = useRef<HTMLTextAreaElement>(null);
+  // #118: refs on every Add-form control, used ONLY to adopt pre-hydration
+  // input (see the effect below). Nothing else reads them.
+  const addSelectRef = useRef<HTMLSelectElement>(null);
+  const manifestRef = useRef<HTMLTextAreaElement>(null);
+  const codeRef = useRef<HTMLTextAreaElement>(null);
+  const mixinsRef = useRef<HTMLTextAreaElement>(null);
+  const physicsRef = useRef<HTMLTextAreaElement>(null);
+  const urlRef = useRef<HTMLInputElement>(null);
   // "⟳ reload" (the reload-mods feature): busy while URL re-fetches are in
   // flight; the notice reports per-mod re-fetch failures (stored copy kept).
   const [reloadBusy, setReloadBusy] = useState(false);
@@ -483,6 +491,53 @@ export default function PlayPage(): ReactElement {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isTheater]);
+
+  /**
+   * Adopt anything typed into the Add form BEFORE React attached (#118).
+   *
+   * The page is server-rendered, so the form is visible and fully usable a few
+   * hundred milliseconds before hydration finishes. Input in that window is
+   * real — it is in the DOM — but React does not know about it, and the first
+   * re-render after hydration (in practice the `swState` flip to `active`,
+   * ~450ms in) renders `value={draftManifest}` over it. Measured on prod: a
+   * dropdown choice made while the SW badge still read "waiting…" was silently
+   * discarded 10 times out of 16; after it read "ready", 0 times out of 10.
+   *
+   * The fix is to READ that input rather than to forbid it. Disabling the form
+   * until hydration would also be correct, but it trades a rare lost keystroke
+   * for a control that is dead every single load — and it would make the one
+   * thing a first-time visitor came to do the one thing that does not respond.
+   *
+   * Why reading the DOM here is sound, and not a race: hydration itself does
+   * NOT rewrite input values — React adopts the server's markup as-is, so the
+   * user's text is still in the field when this effect fires after that first
+   * commit. The overwrite comes from the NEXT render, which cannot happen
+   * before an effect from the previous commit has run. So this always reads the
+   * DOM in the gap between the two. (`useLayoutEffect` would fire marginally
+   * earlier but buys nothing: there is no render in between to lose to.)
+   *
+   * Empty fields are skipped so this can never clobber a real value; the
+   * dependency list is empty, so it happens exactly once per mount.
+   */
+  useEffect(() => {
+    const adoptText = (
+      el: HTMLTextAreaElement | HTMLInputElement | null,
+      set: (v: string) => void,
+    ): void => {
+      const v = el?.value ?? '';
+      if (v.length > 0) set(v);
+    };
+    adoptText(manifestRef.current, setDraftManifest);
+    adoptText(codeRef.current, setDraftCode);
+    adoptText(mixinsRef.current, setDraftMixins);
+    adoptText(physicsRef.current, setDraftPhysics);
+    adoptText(urlRef.current, setDraftUrl);
+    adoptText(packInputRef.current, setDraftPack);
+    // The <select> is the case that actually bit: it is one click, so it is the
+    // control a user is most likely to reach during the pre-hydration window.
+    const picked = addSelectRef.current?.value;
+    if (picked === 'url' || picked === 'pack' || picked === 'id') setAddMethod(picked);
+  }, []);
 
   // Restore the dragged stage/sidebar split — client-only (localStorage does
   // not exist during SSR/prerender, and reading it in useState's initializer
@@ -1933,6 +1988,7 @@ export default function PlayPage(): ReactElement {
               <label className="add-label">
                 Add from
                 <select
+                  ref={addSelectRef}
                   className="add-select"
                   value={addMethod}
                   onChange={(e) => {
@@ -1965,6 +2021,7 @@ export default function PlayPage(): ReactElement {
                   <label className="add-label">
                     <span className="field-tag req">required</span> mod URL
                     <input
+                      ref={urlRef}
                       type="url"
                       className="add-input"
                       spellCheck={false}
@@ -2013,6 +2070,7 @@ export default function PlayPage(): ReactElement {
                 <label className="add-label">
                   <span className="field-tag req">required</span> 1 · mod.json
                   <textarea
+                    ref={manifestRef}
                     rows={5}
                     spellCheck={false}
                     placeholder='{"schemaVersion": 1, "id": "my-mod", "version": "1.0.0", "environment": "web", "entrypoint": "index.js"}'
@@ -2024,6 +2082,7 @@ export default function PlayPage(): ReactElement {
                   <span className="field-tag req">required</span> 2 · entrypoint.js (built
                   ES module, default export)
                   <textarea
+                    ref={codeRef}
                     rows={7}
                     spellCheck={false}
                     placeholder="export default (api) => { /* ... */ };"
@@ -2034,6 +2093,7 @@ export default function PlayPage(): ReactElement {
                 <label className="add-label">
                   <span className="field-tag opt">optional</span> 3 · mixins.json
                   <textarea
+                    ref={mixinsRef}
                     rows={5}
                     spellCheck={false}
                     placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
@@ -2047,6 +2107,7 @@ export default function PlayPage(): ReactElement {
                 <label className="add-label">
                   <span className="field-tag opt">optional</span> 4 · physics.json
                   <textarea
+                    ref={physicsRef}
                     rows={5}
                     spellCheck={false}
                     placeholder='{"wasmHash": "d4ef…", "patches": [{"name": "grip", "signature": "…", "oldValue": 1.05, "newValue": 1.4}]}'

@@ -2168,3 +2168,56 @@ Portal 369 tests (25 new for the parser), 982 across the repo, 7 CI smokes.
 Still open on #80: the modpack **ID** slice. It resolves a short id to one of
 these lists against a registry that stores links and never mod code, so it is a
 lookup wrapped around code that now works, and it waits on that backend.
+
+## 2026-08-22 — #118: input typed before hydration is no longer discarded ✅
+
+Found while verifying #80 on prod, not by a test: choosing "Import a modpack"
+from the dropdown sometimes did nothing at all. The measurement, once it was
+made properly, was unambiguous — a choice made while the service-worker badge
+still read `waiting…` was discarded **10 times out of 16**; once it read
+`ready`, **0 times out of 10**. Every single discard was in the pre-`ready`
+window.
+
+**The mechanism.** The page is server-rendered, so the Add form is on screen
+and fully usable a few hundred milliseconds before React attaches. Input in
+that window is real — it is in the DOM — but React has never heard of it, and
+the first re-render after hydration (in practice the `swState` flip to
+`active`) renders `value={draftManifest}` straight over it. Nothing warns; the
+field simply empties. The dropdown was the case that bit, because it is one
+click and therefore the control a first-time visitor reaches soonest.
+
+This predates #117. The paste boxes reset identically and the dropdown has been
+React-controlled since #82, so it was filed as its own issue rather than folded
+into shipped work.
+
+**Adopt the input rather than forbid it.** An effect on mount reads each Add-form
+control's DOM value and, when non-empty, writes it into state. Disabling the
+form until hydration would also be correct and was rejected: it trades a rare
+lost keystroke for a control that is dead on every single load, and it would
+make the one thing a first-time visitor came to do the one thing that does not
+respond.
+
+Reading the DOM there is not a race. Hydration does not rewrite input values —
+React adopts the server's markup as-is — and the overwrite comes from the *next*
+render, which cannot precede an effect from the previous commit. The effect
+always lands in the gap between the two. Empty fields are skipped, so adoption
+can never clobber a real value.
+
+**Why this needed a new smoke.** Every existing smoke lets the page settle
+before touching the form, which is precisely why none of them ever saw this.
+`smoke:hydration` acts inside the window instead: it delays the client chunks so
+the window is deterministic and generous rather than a race a fast CI runner
+would skip, asserts `preHydrationConfirmed` so a run that *missed* the window
+fails loudly instead of passing vacuously, then waits for hydration plus one
+further render before reading the fields back. Delaying chunks changes when
+React attaches, never what it does when it does.
+
+Falsified both ways before commit: with the adopt effect removed the smoke goes
+red on every leg (manifest `""`, code `""`, method back to `paste`), and the
+`preHydrationConfirmed` guard was checked separately by reading it after waiting
+for hydration, where it correctly reads false.
+
+The smokes drive this same form by textarea index and via `selectOption`, so
+`smoke:usermods` (all 33 legs) and `smoke:ui` were re-run green against the fix.
+
+Portal 369 tests, 982 across the repo, 8 CI smokes.
