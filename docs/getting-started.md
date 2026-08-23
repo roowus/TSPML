@@ -158,6 +158,25 @@ Three things to know:
   patch fails only your mod's row.
 - **Your entrypoint applies live** — events, keybinds, tracks, audio — no reload needed.
 
+### Ship a set of mods at once: a modpack
+
+A modpack is a plain text file. One mod URL per line, `#` for comments:
+
+```
+# my-pack.txt
+https://raw.githubusercontent.com/you/mod-a/main/mod.json
+https://raw.githubusercontent.com/you/mod-b/main/dist/index.js
+```
+
+Switch the Add form's dropdown to **Import a modpack**, then either paste those
+lines directly or paste a single link to the `.txt` file. Each line is one
+ordinary URL import, so every host rule and size cap applies per mod, and a line
+that fails is named and skipped while the rest still install. Lines in a fetched
+list may be relative to the list itself, which keeps a pack portable when it is
+forked or moved. Up to 16 mods per pack, matching the mixin plan's own limit.
+
+The portal serves a working example at `/sample-pack.txt`.
+
 ## 5. Declare a mixin (Tier 2 — the escape hatch)
 
 If events/registries aren't enough, your mod can declare **mixin patches** — surgical AST transforms targeting stable game functions. Edit `mixins.json`:
