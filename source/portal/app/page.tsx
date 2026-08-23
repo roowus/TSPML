@@ -341,6 +341,7 @@ export default function PlayPage(): ReactElement {
   const [draftPack, setDraftPack] = useState('');
   const [packBusy, setPackBusy] = useState(false);
   const [packNotice, setPackNotice] = useState<string | null>(null);
+  const packInputRef = useRef<HTMLTextAreaElement>(null);
   // "⟳ reload" (the reload-mods feature): busy while URL re-fetches are in
   // flight; the notice reports per-mod re-fetch failures (stored copy kept).
   const [reloadBusy, setReloadBusy] = useState(false);
@@ -1266,7 +1267,13 @@ export default function PlayPage(): ReactElement {
       setPackNotice(
         clean ? null : `${notes.join(', ')} — see the Log section for each one.`,
       );
-      if (installed > 0) setDraftPack('');
+      if (installed > 0) {
+        setDraftPack('');
+        // Clearing the value does not reset the scroll position, and this box
+        // scrolls sideways (long URLs, no wrapping). Left alone, the emptied
+        // box shows its placeholder scrolled off mid-word.
+        packInputRef.current?.scrollTo({ left: 0, top: 0 });
+      }
       if (next !== userModsRef.current) updateUserMods([...next]);
     })();
   };
@@ -2067,6 +2074,7 @@ export default function PlayPage(): ReactElement {
                 <label className="add-label">
                   <span className="field-tag req">required</span> mod URLs, one per line
                   <textarea
+                    ref={packInputRef}
                     className="pack-input"
                     rows={6}
                     spellCheck={false}
