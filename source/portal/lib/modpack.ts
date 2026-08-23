@@ -202,7 +202,16 @@ export async function fetchModpackList(
       error: `modpack list: file is ${text.length.toLocaleString()} characters — the limit is ${MODPACK_LIMITS.maxListChars.toLocaleString()}`,
     };
   }
-  return { ok: true, parsed: parseModpackList(text, checked.url.href), source: checked.url.href };
+  // Resolve relative lines against where the list ACTUALLY came from, not
+  // where it was asked for: `github.com/u/r/raw/main/pack.txt` redirects to
+  // raw.githubusercontent.com, and resolving `mod.json` against the pre-
+  // redirect URL would point it at a host that never served the list. The
+  // base is not a trust decision — every resolved line goes back through
+  // checkImportUrl — so following the redirect here cannot widen what a pack
+  // may install. Some fetch implementations leave `res.url` empty; the
+  // requested URL is the honest fallback.
+  const base = typeof res.url === 'string' && res.url.length > 0 ? res.url : checked.url.href;
+  return { ok: true, parsed: parseModpackList(text, base), source: base };
 }
 
 export type ModpackInput =

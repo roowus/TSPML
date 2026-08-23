@@ -2112,6 +2112,14 @@ list has no base. Falling back to the portal's own origin would point every
 relative line at a host that serves no mods, and fail with a message about the
 wrong host.
 
+The base is where the list *actually came from*, not where it was asked for:
+`github.com/u/r/raw/main/pack.txt` redirects to `raw.githubusercontent.com`, and
+resolving against the pre-redirect URL would point every relative line at a host
+that never served the list. Following the redirect cannot widen what a pack may
+install, because the base decides where lines point and never what is allowed —
+every resolved line still goes through `checkImportUrl`, which a test asserts by
+redirecting a list to a kodub host and watching its lines get refused.
+
 *Resolution happens before the host check, and the resolved href is re-checked.*
 Checking first would reject a legal relative line as "not an absolute URL" and
 advise adding `https://`, which is wrong advice for a line that is allowed to be
@@ -2155,7 +2163,7 @@ that fails informatively is worth as much as one that passes.
 Screenshotted rather than trusted: DOM assertions passing says the nodes are
 there, not that the box reads well, and those two can disagree.
 
-Portal 367 tests (23 new for the parser), 980 across the repo, 7 CI smokes.
+Portal 369 tests (25 new for the parser), 982 across the repo, 7 CI smokes.
 
 Still open on #80: the modpack **ID** slice. It resolves a short id to one of
 these lists against a registry that stores links and never mod code, so it is a

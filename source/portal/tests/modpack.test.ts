@@ -189,6 +189,37 @@ describe('fetchModpackList', () => {
     ]);
   });
 
+  it('resolves relative lines against the POST-REDIRECT URL', async () => {
+    // github.com/u/r/raw/main/pack.txt redirects to raw.githubusercontent.com.
+    // Resolving `mod.json` against the URL that was asked for would point it
+    // at a host that never served the list.
+    const f = vi.fn(async () => {
+      const res = new Response('mods/a/mod.json', { status: 200 });
+      Object.defineProperty(res, 'url', { value: 'https://cdn.example/u/r/pack.txt' });
+      return res;
+    });
+    const r = await fetchModpackList(LIST_URL, f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('unreachable');
+    expect(r.source).toBe('https://cdn.example/u/r/pack.txt');
+    expect(r.parsed.urls).toEqual(['https://cdn.example/u/r/mods/a/mod.json']);
+  });
+
+  it('a redirect is not a way past the host rules', async () => {
+    // The base decides where relative lines POINT, never what is allowed:
+    // every resolved line still goes through checkImportUrl.
+    const f = vi.fn(async () => {
+      const res = new Response('x.js', { status: 200 });
+      Object.defineProperty(res, 'url', { value: 'https://app-polytrack.kodub.com/pack.txt' });
+      return res;
+    });
+    const r = await fetchModpackList(LIST_URL, f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('unreachable');
+    expect(r.parsed.urls).toEqual([]);
+    expect(r.parsed.invalid[0]!.error).toMatch(/kodub/i);
+  });
+
   it('never fetches through /api/proxy — it calls the URL directly', async () => {
     // The #80 invariant: the browser fetches, the server never becomes a
     // fetcher of arbitrary user-pointed URLs.
