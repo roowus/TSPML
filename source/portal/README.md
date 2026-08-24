@@ -152,6 +152,8 @@ dependencies. Once installed:
 
 ```sh
 pnpm --filter @tspml/portal dev    # next dev  → http://localhost:3000
+                                   #   /      launcher (instances)
+                                   #   /play  the game
 pnpm --filter @tspml/portal build  # next build
 pnpm --filter @tspml/portal test   # vitest run (unit)
 ```

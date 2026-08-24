@@ -42,6 +42,9 @@ import { chromium } from "playwright";
 import { f32ConstSites, fingerprintAll, wasmHash } from "@tspml/wasm";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
+// The play surface. `/` is the launcher now; BASE_URL stays an origin because
+// other requests in this file are origin-relative.
+const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-physics-smoke.png";
 const MOD_ID = "smoke-physics-mod";
 const WASM_FILE = "polytrack_physics.wasm";
@@ -249,8 +252,8 @@ async function reloadAndSettle() {
   await page.waitForSelector('iframe[title="PolyTrack (proxied)"]', { timeout: 60000 }).catch(() => null);
 }
 
-step(`goto ${BASE_URL}`);
-await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+step(`goto ${PLAY_URL}`);
+await page.goto(PLAY_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 
 // SW-control dance (issue #9): on a cold profile the first load may not mount
 // the game iframe; one reload fixes it. It matters more here than elsewhere —

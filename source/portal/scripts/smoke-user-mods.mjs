@@ -50,6 +50,9 @@
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
+// The play surface. `/` is the launcher now; BASE_URL stays an origin because
+// other requests in this file are origin-relative.
+const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-user-mods-smoke.png";
 const MOD_ID = "smoke-user-mod";
 const BOGUS_ID = "smoke-bogus-mod";
@@ -176,8 +179,8 @@ async function addMod(manifest, code, mixins) {
   await page.click('aside[aria-label="Mods"] button:has-text("Add mod")');
 }
 
-step(`goto ${BASE_URL}`);
-await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+step(`goto ${PLAY_URL}`);
+await page.goto(PLAY_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 
 // SW-control dance (issue #9): on a cold profile the first load may not mount
 // the game iframe; one reload fixes it.

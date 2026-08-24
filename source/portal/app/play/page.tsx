@@ -49,6 +49,12 @@ import {
 import type { PhysicsExclusion, PhysicsReport } from '@/lib/physics-plan';
 import { teardown } from '@/lib/teardown';
 import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
+import {
+  findInstance,
+  readInstances,
+  saveInstances,
+  touchInstance,
+} from '@/lib/instances';
 import { AddModForm } from '@/components/play/AddModForm';
 import { ModTile } from '@/components/play/ModTile';
 import { ServiceWorkerBadge } from '@/components/play/ServiceWorkerBadge';
@@ -314,6 +320,10 @@ export default function PlayPage(): ReactElement {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [sharePrompt, setSharePrompt] = useState<ShareParseResult | null>(null);
   const [shareImportBusy, setShareImportBusy] = useState(false);
+  // The launching instance's name, for the topbar. Null when the page was
+  // opened directly rather than from the launcher, or when the id did not
+  // resolve — both of which are ordinary, so neither shows an error.
+  const [instanceName, setInstanceName] = useState<string | null>(null);
   // Which mod row's source viewer is open (by mod id). A button-toggled panel,
   // NOT a <details>: the smokes click the aside's FIRST <summary> expecting the
   // Add form's, and a per-row summary would steal that slot.
@@ -602,6 +612,41 @@ export default function PlayPage(): ReactElement {
         parsed.invalid.length > 0 ? `, ${parsed.invalid.length} refused` : ''
       }${parsed.dropped > 0 ? `, ${parsed.dropped} over the cap` : ''} — waiting for your confirmation`,
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot URL read; log only touches its stable setter
+  }, []);
+
+  /**
+   * `?instance=<id>` — record the launch and name it in the topbar.
+   *
+   * The launcher's Play button carries the id here. This effect is the ONLY
+   * thing that treats it as meaningful, and it is deliberately small: the id
+   * does not gate the game, choose a bundle, or change which mods load. The
+   * per-instance mod overlay is reserved in the schema and honored by the
+   * resolver but nothing writes it yet, so today an instance is a label plus a
+   * timestamp, and the page renders it as exactly that. A launch surface that
+   * silently behaved differently per instance before the overlay existed would
+   * be the harder bug — this one is merely incomplete, and visibly so.
+   *
+   * An unknown id (a stale bookmark, a link from another browser) is ignored
+   * rather than repaired: `touchInstance` returns its input unchanged for an id
+   * it does not hold, and the guard below means nothing is written. That
+   * matters more than it looks — writing here would put the synthesized default
+   * into a profile that has nothing stored, breaking the lazy-read property for
+   * anyone who merely followed a bad link.
+   */
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('instance');
+    if (id === null || id === '') return;
+    const store = readInstances();
+    const instance = findInstance(store, id);
+    if (instance === null) {
+      log(`instance '${id}' is not in this browser — playing with your full mod library`);
+      return;
+    }
+    setInstanceName(instance.name);
+    const next = touchInstance(store, id, new Date().toISOString());
+    if (next !== store) saveInstances(next);
+    log(`launched instance '${instance.name}' (${instance.gameVersion})`);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot URL read; log only touches its stable setter
   }, []);
 
@@ -1295,9 +1340,21 @@ export default function PlayPage(): ReactElement {
               static SVG; next/image adds nothing here. */}
           <img src="/logo.svg" alt="" className="brand-logo" />
           <h1>TSPML</h1>
-          <span className="brand-sub">play PolyTrack with mods</span>
+          {/* The instance name replaces the tagline rather than joining it:
+              once you have launched something, which thing you launched is the
+              more useful label, and the topbar wraps on narrow screens. */}
+          <span className="brand-sub">
+            {instanceName ?? 'play PolyTrack with mods'}
+          </span>
         </div>
         <div className="topbar-side">
+          {/* A plain <a>, not next/link: leaving the game is a real navigation
+              and a full document load is exactly right here — it tears the
+              iframe down rather than leaving a WebGL context alive behind a
+              client-side route change. */}
+          <a className="docs-link" href="/">
+            Launcher
+          </a>
           <a
             className="docs-link"
             href="https://tspml-docs.vercel.app"

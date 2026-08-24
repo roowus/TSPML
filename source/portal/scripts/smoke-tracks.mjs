@@ -22,6 +22,9 @@
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
+// The play surface. `/` is the launcher now; BASE_URL stays an origin because
+// other requests in this file are origin-relative.
+const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-portal-tracks-smoke.png";
 const NAME = "TSPML Smoke Track";
 const FRAME_SELECTOR = 'iframe[title="PolyTrack (proxied)"]';
@@ -78,8 +81,8 @@ const pageErrors = [];
 page.on("console", (m) => consoleMsgs.push(`${m.type()}: ${m.text().slice(0, 200)}`));
 page.on("pageerror", (e) => pageErrors.push(String(e && e.message ? e.message : e).slice(0, 300)));
 
-step(`goto ${BASE_URL}`);
-await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+step(`goto ${PLAY_URL}`);
+await page.goto(PLAY_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
 
 // The portal mounts the game only once the service worker CONTROLS the page (issue
 // #9). On a cold profile the SW registers but isn't the controller yet, so the first

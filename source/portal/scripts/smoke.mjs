@@ -37,7 +37,10 @@
 // before the boot/race window — instead of at a fixed late point.
 import { chromium } from "playwright";
 
-const URL = process.env.SMOKE_URL ?? "http://localhost:3000";
+// The play surface. `/` is the launcher now, so a bare origin lands on the
+// instance grid and every selector below misses. SMOKE_URL stays an ORIGIN so
+// deploy-preview runs only override the host.
+const URL = `${process.env.SMOKE_URL ?? "http://localhost:3000"}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-smoke.png";
 
 // The seeded user mod (see header). Counters hang off the `api` object, which
