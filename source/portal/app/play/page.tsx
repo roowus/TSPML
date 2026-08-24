@@ -64,6 +64,7 @@ import { BrowseDrawer } from '@/components/play/BrowseDrawer';
 import { ModTile } from '@/components/play/ModTile';
 import { ServiceWorkerBadge } from '@/components/play/ServiceWorkerBadge';
 import type { LoadedModRow, SwState } from '@/components/play/types';
+import { InstanceTile } from '@/components/shell/InstanceTile';
 import { useInstall, type InstallTarget } from '@/components/shell/useInstall';
 
 /**
@@ -1482,7 +1483,12 @@ export default function PlayPage(): ReactElement {
           <h1>TSPML</h1>
           {/* The instance name replaces the tagline rather than joining it:
               once you have launched something, which thing you launched is the
-              more useful label, and the topbar wraps on narrow screens. */}
+              more useful label, and the topbar wraps on narrow screens. Its
+              picture rides along, so the launcher's identity for this profile
+              follows it into the game rather than stopping at the front door. */}
+          {instance === null ? null : (
+            <InstanceTile name={instance.name} icon={instance.icon ?? null} size={22} />
+          )}
           <span className="brand-sub">
             {instanceName ?? 'play PolyTrack with mods'}
           </span>

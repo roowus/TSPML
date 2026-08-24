@@ -7,6 +7,8 @@ import { Icon } from '@/app/icons';
 import { findInstance, INSTANCE_LIMITS, isDisabledInInstance } from '@/lib/instances';
 import { readUserMods, userModId } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
+import { IconPicker } from './IconPicker';
+import { InstanceTile } from './InstanceTile';
 import { useInstances } from './useInstances';
 
 /**
@@ -31,11 +33,12 @@ import { useInstances } from './useInstances';
  * the pool is shared, so "delete" is a smaller act than the word suggests.
  */
 export function InstanceDetail({ id }: { id: string }): ReactElement {
-  const { store, ready, persistFailed, rename, remove, setModDisabled } = useInstances();
+  const { store, ready, persistFailed, rename, setIcon, remove, setModDisabled } = useInstances();
   const [mods, setMods] = useState<UserModRecord[] | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [editingIcon, setEditingIcon] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // The mod pool, like the instance store, is localStorage and so is read on
@@ -83,7 +86,8 @@ export function InstanceDetail({ id }: { id: string }): ReactElement {
 
   return (
     <section className="shell-section">
-      <div className="section-head">
+      <div className="section-head inst-head">
+        <InstanceTile name={instance.name} icon={instance.icon ?? null} size={52} />
         <h2>{instance.name}</h2>
         <code className="inst-version">{instance.gameVersion}</code>
       </div>
@@ -102,6 +106,13 @@ export function InstanceDetail({ id }: { id: string }): ReactElement {
           }}
         >
           <Icon name="pencil" /> Rename
+        </button>
+        <button
+          type="button"
+          className="btn btn-small"
+          onClick={() => setEditingIcon((e) => !e)}
+        >
+          <Icon name="image" /> Picture
         </button>
         <button
           type="button"
@@ -135,6 +146,20 @@ export function InstanceDetail({ id }: { id: string }): ReactElement {
           <button type="button" className="btn btn-primary" onClick={submitRename}>
             Save
           </button>
+        </div>
+      ) : null}
+
+      {/* Unlike the create dialog's draft, this writes through on every change:
+          the instance already exists, so there is nothing to submit and a Save
+          button would only invite someone to close the panel without pressing
+          it. `setIcon` no-ops when nothing actually changed. */}
+      {editingIcon ? (
+        <div className="inst-new">
+          <IconPicker
+            name={instance.name}
+            value={instance.icon ?? null}
+            onChange={(icon) => setIcon(instance.id, icon)}
+          />
         </div>
       ) : null}
 

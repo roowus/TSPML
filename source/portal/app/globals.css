@@ -115,8 +115,20 @@ body {
   font-size: 13px;
 }
 
+/* The launching instance's picture sits immediately before its name, tighter
+   than the brand's own 9px gap so the two read as one label rather than as a
+   third top-level item beside the logo and the wordmark. */
+.brand > .inst-tile {
+  margin-left: -3px;
+  margin-right: -3px;
+}
+
 @media (max-width: 560px) {
-  .brand-sub {
+  /* The tile goes with the name it labels. A picture alone would identify the
+     instance to someone who already knows which picture they picked, and to
+     nobody else. */
+  .brand-sub,
+  .brand > .inst-tile {
     display: none;
   }
 }
@@ -1308,13 +1320,22 @@ a.btn {
   );
 }
 
+/* Center, not baseline: the picture has no text baseline to align to, and
+   baseline-aligning the name against it dropped the version code low. */
 .inst-card-link {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 8px;
   color: var(--text);
   text-decoration: none;
+}
+
+/* The name takes the leftover width so the version code stays pinned right
+   however long the name is — space-between cannot do that once a third,
+   fixed-width child sits at the head of the row. */
+.inst-card-link .inst-name {
+  flex: 1;
+  min-width: 0;
 }
 
 .inst-card-link:hover .inst-name {
@@ -1363,6 +1384,102 @@ a.btn {
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: 4px;
+}
+
+/* ---- Instance pictures ---- */
+
+/* Sized by a custom property rather than a class per scale: the tile appears at
+   22px (the play topbar), 40px (grid card), 52px (detail header) and 56px (the
+   picker preview), and four variant classes would be four rules free to drift.
+   Square with a 4px radius, matching the launcher's angular language — the mod
+   sidebar's .mod-tile is rounder on purpose, since these are different objects
+   and looking alike would suggest they are interchangeable. */
+.inst-tile {
+  flex: none;
+  width: var(--tile-size, 44px);
+  height: var(--tile-size, 44px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-weight: 700;
+  /* Scales with the tile so one rule covers every size. */
+  font-size: calc(var(--tile-size, 44px) * 0.42);
+  line-height: 1;
+  overflow: hidden;
+}
+
+.inst-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* The rule separates the picture from the fields above it in the create dialog.
+   On the detail page the picker is a panel on its own, so there is nothing to
+   separate it from and the line reads as a stray divider. */
+.icon-picker {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.icon-picker:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.icon-picker-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.icon-picker-controls {
+  min-width: 0;
+}
+
+.icon-picker-controls .add-label {
+  margin-top: 0;
+}
+
+/* The real input is driven by the Upload button beside the preview. Hidden with
+   position rather than display:none so it stays focusable and keeps announcing
+   itself to assistive tech; display:none would take it out of the a11y tree and
+   leave the button pointing at nothing. */
+.icon-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.icon-url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.icon-url-row .add-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The detail header gains a picture, so its h2 takes the leftover width and the
+   version code stays pinned right. */
+.inst-head > h2 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .version-note {
