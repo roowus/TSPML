@@ -22,7 +22,7 @@
 // generous. It changes WHEN React attaches, never WHAT it does when it does —
 // the code under test is the same code prod runs.
 //
-// FALSIFIED: with the adopt-on-mount effect in app/page.tsx removed, every leg
+// FALSIFIED: with the adopt-on-mount effect in app/play/page.tsx removed, every leg
 // below goes false (manifest "", code "", method back to "paste"). The
 // `preHydrationConfirmed` guard was falsified separately, by reading it AFTER
 // waiting for hydration: it goes false, so a run that missed the window cannot

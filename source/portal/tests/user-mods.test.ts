@@ -633,17 +633,17 @@ describe('special dependency ids resolve in the portal (#73)', () => {
     expect(PORTAL_RESOLVE_CONTEXT.polytrackVersion).toBeTruthy();
   });
 
-  it('page.tsx derives api.version from the shared constant, not a literal', () => {
+  it('the play page derives api.version from the shared constant, not a literal', () => {
     // The drift #73 names has two halves, and only one is reachable by running
-    // loadMods: the resolve context is imported here, but what page.tsx hands
-    // mods on `api.version` is a module-scope constant this suite never
+    // loadMods: the resolve context is imported here, but what the play page
+    // hands mods on `api.version` is a module-scope constant this suite never
     // executes (it is a 'use client' React page). Re-pointing it at a literal
     // compiles, runs, and every behavioural test above stays green while mods
     // read a version their `depends` range was never checked against. The
     // failure mode is silence, so the check has to read the code.
-    const source = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../app/play/page.tsx', import.meta.url), 'utf8');
     const decl = /^const TSPML_VERSION = (.+);$/m.exec(source);
-    expect(decl, 'page.tsx must declare const TSPML_VERSION at module scope').not.toBeNull();
+    expect(decl, 'app/play/page.tsx must declare const TSPML_VERSION at module scope').not.toBeNull();
     expect(decl?.[1]).toBe('TSPML_LOADER_VERSION');
   });
 });
