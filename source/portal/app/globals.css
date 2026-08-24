@@ -161,6 +161,86 @@ body {
      inline). A custom property rather than an inline width on the aside so
      the ≤900px stacked layout's `width: auto` still wins. */
   --sidebar-width: 340px;
+  /* The containing block for .browse-drawer, which is absolutely positioned so
+     it can cover the stage WITHOUT joining the flex row. Out of flow matters:
+     smoke-ui asserts the sidebar sits below the stage in the stacked layout,
+     and a fourth flex item would move it. */
+  position: relative;
+}
+
+/* ---- In-play catalog drawer ---- */
+
+/* Covers the stage area only — the sidebar stays reachable, so a mod installed
+   from the drawer can be seen appearing in Your mods without closing anything.
+   The right offset is the same custom property the flex row uses (plus the 6px
+   gap and the 8px resizer), so dragging the split moves the drawer with it. */
+.browse-drawer {
+  position: absolute;
+  inset: 0 calc(var(--sidebar-width) + 14px) 0 0;
+  z-index: 60; /* over the boot overlay (4), stage controls (5), theater (50) */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  /* Nearly opaque rather than solid: the running game stays faintly visible
+     behind it, which is the whole difference between this and a page. */
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(3px);
+  animation: drawer-in 140ms ease-out;
+}
+
+/* `hidden` is the closed state, and `display: flex` above would defeat the UA
+   rule that implements it. Closed means not rendered and not focusable, while
+   the component stays MOUNTED so the fetched catalog and the search box survive
+   a close/reopen. */
+.browse-drawer[hidden] {
+  display: none;
+}
+
+/* Opening slides the panel a few pixels in from the sidebar edge it is anchored
+   to, so the drawer reads as arriving over the stage rather than the stage
+   being replaced. Re-triggers on every open for free: `[hidden]` sets
+   `display: none`, and an element that becomes rendered restarts its animation.
+   Short and opacity-led, because it plays over a running game. */
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.drawer-head > h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+/* Theater mode paints a FIXED stage over the whole tab, and .content is pushed
+   out of the viewport behind it — so an absolutely-positioned drawer would open
+   somewhere nobody can see. Match the stage: cover the viewport, and sit above
+   it. Without this, "Browse" in theater mode does nothing visible, which reads
+   as a broken button rather than a layout rule. */
+.app.theater .browse-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  border-radius: 0;
+}
+
+.browse-btn[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ---- Stage/sidebar drag handle ---- */
@@ -333,6 +413,25 @@ body {
   transition: width 300ms ease;
 }
 
+/* Reduced motion.
+ *
+ * Scoped, not a blanket `* { transition: none !important }`. Two of the
+ * transitions on this page are load-bearing rather than decorative and a
+ * sweeping rule would take them out along with the rest:
+ *
+ *   - `.boot-bar-fill { transition: width }` is the boot PROGRESS bar. Killing
+ *     the tween does not remove motion, it just makes the same motion jump —
+ *     and progress is information, so it stays. Reduced motion means no
+ *     gratuitous movement, not no feedback.
+ *   - `.boot-overlay { transition: opacity }` fades the overlay out before it
+ *     detaches. `smoke.mjs` requires that element to reach `state:'detached'`;
+ *     the unmount is driven by a timer rather than `transitionend`, so removing
+ *     the fade is safe — but only because that is true, and it is worth writing
+ *     down next to the rule that depends on it.
+ *
+ * What goes: the indefinite loops (a sweep and a spinner that never settle) and
+ * the hover/press tweens, none of which carry information the end state does not.
+ */
 @media (prefers-reduced-motion: reduce) {
   .boot-bar::after {
     animation: none;
@@ -341,6 +440,21 @@ body {
 
   .icon-spin {
     animation: none;
+  }
+
+  /* The drawer's translate-in becomes an appear-in-place. It still appears, and
+     `hidden` still drives whether it is there at all, so nothing about opening
+     or closing changes except the travel. */
+  .browse-drawer {
+    animation: none;
+  }
+
+  /* Hover/focus tweens on the stage controls and the sidebar grip. The end
+     states (opacity 1, the accent grip) are unchanged — they arrive at once. */
+  .stage-btn,
+  .content-resizer::before,
+  .boot-overlay {
+    transition: none;
   }
 }
 
@@ -675,6 +789,19 @@ body {
 
 .status-pill.pill-off {
   color: var(--muted);
+}
+
+/* The per-instance switch, tinted so it never reads as the library `disable`
+   button sitting next to it. Cyan is the "this instance" colour throughout the
+   launcher; deliberately not green, which is reserved for status semantics. */
+.btn-instance-toggle {
+  border-color: rgba(70, 211, 255, 0.35);
+  color: var(--accent-2);
+}
+
+.btn-instance-toggle:hover {
+  border-color: rgba(70, 211, 255, 0.6);
+  background: rgba(70, 211, 255, 0.1);
 }
 
 .meta {
@@ -1246,11 +1373,28 @@ a.btn {
   margin-top: 8px;
 }
 
+/* The per-instance switch sits under its row's id, not beside it: a long mod
+   id and a long button label were fighting for the same line. */
+.inst-mods .row-buttons,
+.inst-mods .meta {
+  margin-top: 4px;
+}
+
 .empty-note {
   margin-top: 10px;
   padding: 14px;
   border: 1px dashed var(--border-strong);
   border-radius: 4px;
+}
+
+/* An empty note that carries a way forward (Retry) is a <div> of paragraphs,
+   not a bare <p>. Kill the stacking margins so it does not read as two blocks. */
+.empty-note > p {
+  margin: 0 0 10px;
+}
+
+.empty-note > p:last-child {
+  margin-bottom: 0;
 }
 
 /* ---- Browse: the curated catalog ---- */
@@ -1580,15 +1724,32 @@ a.btn {
   border: 0;
 }
 
-/* Visible focus everywhere in the shell. The play page inherits the browser
-   default; the launcher is keyboard-navigated far more, so it gets a ring that
-   does not depend on the UA's contrast choices. */
+/* Visible focus in the shell, and in the in-play drawer.
+   The drawer is on the play page and therefore NOT inside `.shell`, but it
+   renders the same <Catalog> — tabs, tag chips, search, install buttons. Left to
+   the UA default those controls would have a visible ring on /browse and a
+   near-invisible one over the dark stage, which is the worst possible split:
+   the same component, keyboard-usable in one place and not the other. */
 .shell a:focus-visible,
 .shell button:focus-visible,
 .shell input:focus-visible,
-.shell select:focus-visible {
+.shell select:focus-visible,
+.browse-drawer a:focus-visible,
+.browse-drawer button:focus-visible,
+.browse-drawer input:focus-visible,
+.browse-drawer select:focus-visible {
   outline: 2px solid var(--accent-2);
   outline-offset: 2px;
+}
+
+/* The tabpanel takes focus programmatically (tabIndex={-1}) so a screen-reader
+   user landing past the tabs has somewhere to arrive. It is a container, not a
+   control, and ringing the entire grid on that arrival reads as an error state.
+   `:focus-visible` would not fire here anyway on most engines; this makes the
+   intent explicit rather than leaving it to engine behaviour. */
+.browse-drawer [role='tabpanel']:focus,
+.shell [role='tabpanel']:focus {
+  outline: none;
 }
 
 @media (max-width: 720px) {
@@ -1632,5 +1793,14 @@ a.btn {
   /* Stacked layout: a horizontal split does not exist to resize. */
   .content-resizer {
     display: none;
+  }
+
+  /* Stacked, so there is no sidebar column to leave room for; and .content is
+     taller than the viewport here, so anchoring to it would put the drawer's
+     bottom off-screen with nothing scrollable. Fixed to the viewport instead. */
+  .browse-drawer {
+    position: fixed;
+    inset: 0;
+    border-radius: 0;
   }
 }

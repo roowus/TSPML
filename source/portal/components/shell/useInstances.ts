@@ -8,6 +8,7 @@ import {
   removeInstance,
   renameInstance,
   saveInstances,
+  setModDisabledInInstance,
   touchInstance,
 } from '@/lib/instances';
 import type { Instance, InstanceStore } from '@/lib/instances';
@@ -52,6 +53,12 @@ export interface UseInstances {
   remove(id: string): void;
   /** Stamp `lastPlayedAt` and make active. Call this as a launch happens. */
   touch(id: string, nowIso: string): void;
+  /**
+   * Switch one mod off (or back on) FOR ONE INSTANCE. Writes the instance
+   * store only — the shared mod pool is untouched, which is the entire point:
+   * the same mod stays exactly as it is for every other instance.
+   */
+  setModDisabled(instanceId: string, modId: string, disabled: boolean): void;
 }
 
 export function useInstances(): UseInstances {
@@ -109,5 +116,17 @@ export function useInstances(): UseInstances {
     [store, commit],
   );
 
-  return { store, ready, persistFailed, create, rename, remove, touch };
+  const setModDisabled = useCallback(
+    (instanceId: string, modId: string, disabled: boolean): void => {
+      const next = setModDisabledInInstance(store, instanceId, modId, disabled);
+      // Same identity guard as `touch`, for the same reason: a no-op (or an
+      // unknown instance id) returns the input store, and persisting that would
+      // write the synthesized default into a profile that has nothing stored.
+      if (next === store) return;
+      commit(next);
+    },
+    [store, commit],
+  );
+
+  return { store, ready, persistFailed, create, rename, remove, touch, setModDisabled };
 }

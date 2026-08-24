@@ -2221,3 +2221,70 @@ The smokes drive this same form by textarea index and via `selectOption`, so
 `smoke:usermods` (all 33 legs) and `smoke:ui` were re-run green against the fix.
 
 Portal 369 tests, 982 across the repo, 8 CI smokes.
+
+## 2026-08-24 — the portal became a launcher ✅
+
+Five phases, five PRs (#121 through #125), turning one 2,476-line route into a
+launcher with a play surface behind it. The decisions are in the
+[decision log](./decision-log.md) as ADR-015 through ADR-018; this entry is
+about what was hard to get right.
+
+**The dominant risk was never the design.** Seven Playwright smokes gate
+`smoke.yml` on exact DOM, and vitest runs `environment: 'node'` — there is no
+DOM unit test anywhere in the repo, so those smokes are the only proof any UI
+behaviour works at all. That single fact settled the CSS question before it was
+asked: one plain stylesheet, no CSS Modules, no Tailwind, because hashed or
+utility class names would invalidate every selector in the only regression net
+the UI has.
+
+It also shaped the sequencing. Moving the play surface off `/` was the riskiest
+structural change, so it shipped alone, with `/` left as a query-preserving
+`redirect()` — **zero smoke files edited**, the whole suite proving the moved
+component unchanged. Only then did `/` become the launcher and the six URL
+constants change. That ordering is why nothing in this work ever had two
+candidate explanations for a red run.
+
+**Three claims were falsified before they were trusted**, each by planting the
+bug it guards and watching exactly one leg go red:
+
+- Pointing the drawer at the launcher's install target turned
+  `installsLiveIntoTheRunningGame` red **while `persistedToTheLibrary` stayed
+  green** — direct proof that no storage assertion can tell the two install
+  endings apart, which is why the check reads the sidebar's `mods: ✓` line
+  instead.
+- Adding a `key` that changes on open turned `gameNeverRemounted` red with
+  **every other verdict still green** — the reason `smoke-drawer.mjs` stamps
+  `iframe.contentWindow` rather than checking that an iframe exists. Everything
+  cheaper stays green while the product silently restarts the player's run on
+  every install, which is the precise failure the drawer was built to prevent.
+- Removing the tablist's `focus()` move left focus on the old tab while the
+  panel changed underneath it — the silent half of a roving tabindex, invisible
+  to anything that only clicks.
+
+**Two things were found by reading rather than by failing.** The instance model
+was going to copy mod records per instance until the quota arithmetic was
+checked: `IMPORT_LIMITS.maxCodeChars` is 2 MB against roughly 5 MB of
+localStorage, and `saveUserMods` returns `false` instead of throwing, so three
+instances with two mods each would have degraded into **quiet** data loss at
+exactly the point the feature started being useful. And the browse tabs, moved
+verbatim from working code, carried `role="tab"` with no `aria-controls`, no
+tabpanel, and no arrow-key handling — a role that promises keyboard behaviour
+it did not implement, which is worse than plain buttons rather than better.
+
+**Texture packs were designed and then dropped**, on two findings that both
+survived checking against source: the shipped bundle contains exactly one 3D
+texture (`images/smoke.png`), and PML has no texture-pack feature to be
+compatible with. What look like texture mods elsewhere are ordinary mods calling
+`editorExtras.registerModel(url)` with a `.glb`. Model and asset swapping
+belongs to mods, not to a content type.
+
+**The version picker ships built and honest.** 0.6.2 is the only selectable
+option and the UI says why: three separate places hardcode that version (two
+static map imports, the service worker's `GAME_VERSION`, the proxy route's
+default), all of them fail-closed, so a picker that let you choose 0.6.0 today
+would hand you an unmodded game while looking like it worked. Instances still
+store `gameVersion`, validated on read, so the seam has a caller when the 0.6.0
+map lands.
+
+Repo 1,081 tests, portal 468, **11 CI smokes** (three new: registry,
+per-instance overlay, drawer).

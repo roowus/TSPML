@@ -175,6 +175,21 @@ jobs:
       - name: smoke — browse the registry, install, and the mod loads in game
         run: pnpm --filter @tspml/portal smoke:registry
 
+      # The per-instance overlay. vitest is node-env, so the wiring from
+      # ?instance= through the projected mod set to the loader has no other
+      # test, and it asserts against localStorage that the projection is never
+      # persisted back into the shared pool — a bug that would silently make one
+      # instance's switch everybody's and look like success from the UI.
+      - name: smoke — per-instance mod overlay (one shared library, #79)
+        run: pnpm --filter @tspml/portal smoke:instances
+
+      # The in-play catalog drawer. Its reason to exist is that a route change
+      # to /browse unmounts the game iframe, so the assertion with teeth is that
+      # the frame is the SAME DOCUMENT after an install — a remount would look
+      # like success everywhere else while silently restarting the player's run.
+      - name: smoke — browse and install without leaving the game (#80)
+        run: pnpm --filter @tspml/portal smoke:drawer
+
       - name: smoke — page layout (fullscreen control, responsive stacking)
         run: pnpm --filter @tspml/portal smoke:ui
 

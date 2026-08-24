@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   addInstance,
+  applyInstanceOverlay,
   DEFAULT_INSTANCE_ID,
   defaultInstanceStore,
   effectiveEnabledIds,
   findInstance,
   INSTANCE_LIMITS,
   INSTANCES_STORAGE_KEY,
+  isDisabledInInstance,
   readInstances,
   removeInstance,
   renameInstance,
   saveInstances,
+  setModDisabledInInstance,
   slugifyInstanceName,
   touchInstance,
   uniqueInstanceId,
@@ -288,5 +291,97 @@ describe('effectiveEnabledIds — the two switches compose', () => {
   it('an overlay naming a mod that is not installed changes nothing', () => {
     const instance = { ...defaultInstanceStore().instances[0]!, disabledModIds: ['ghost'] };
     expect(effectiveEnabledIds(pool, instance)).toEqual(['a', 'b']);
+  });
+});
+
+describe('setModDisabledInInstance', () => {
+  const base = defaultInstanceStore();
+
+  it('switches a mod off for one instance only', () => {
+    const two = addInstance(base, 'Other', '0.6.2');
+    expect(two.ok).toBe(true);
+    if (!two.ok) return;
+    const next = setModDisabledInInstance(two.store, DEFAULT_INSTANCE_ID, 'a', true);
+    expect(findInstance(next, DEFAULT_INSTANCE_ID)?.disabledModIds).toEqual(['a']);
+    // The whole point of the feature: the other instance is untouched.
+    expect(findInstance(next, two.instance.id)?.disabledModIds).toEqual([]);
+  });
+
+  it('switching back on removes the id rather than leaving a tombstone', () => {
+    const off = setModDisabledInInstance(base, DEFAULT_INSTANCE_ID, 'a', true);
+    const on = setModDisabledInInstance(off, DEFAULT_INSTANCE_ID, 'a', false);
+    expect(findInstance(on, DEFAULT_INSTANCE_ID)?.disabledModIds).toEqual([]);
+  });
+
+  it('is idempotent — switching off twice does not duplicate the id', () => {
+    const once = setModDisabledInInstance(base, DEFAULT_INSTANCE_ID, 'a', true);
+    const twice = setModDisabledInInstance(once, DEFAULT_INSTANCE_ID, 'a', true);
+    expect(findInstance(twice, DEFAULT_INSTANCE_ID)?.disabledModIds).toEqual(['a']);
+    // Unchanged input is returned as-is, so a no-op cannot trigger a write.
+    expect(twice).toBe(once);
+  });
+
+  it('an unknown instance id changes nothing', () => {
+    expect(setModDisabledInInstance(base, 'nope', 'a', true)).toBe(base);
+  });
+});
+
+describe('isDisabledInInstance', () => {
+  const instance = { ...defaultInstanceStore().instances[0]!, disabledModIds: ['b'] };
+
+  it('reports the instance switch, not the pool one', () => {
+    expect(isDisabledInInstance(instance, 'b')).toBe(true);
+    expect(isDisabledInInstance(instance, 'a')).toBe(false);
+  });
+
+  it('no instance and no id are both "not disabled here"', () => {
+    expect(isDisabledInInstance(null, 'b')).toBe(false);
+    expect(isDisabledInInstance(instance, null)).toBe(false);
+  });
+});
+
+describe('applyInstanceOverlay — the projection the runtime consumes', () => {
+  const rec = (id: string | null, enabled: boolean) => ({
+    enabled,
+    ...(id === null ? {} : { manifest: { id } }),
+  });
+
+  it('flattens the overlay into enabled so every consumer sees one rule', () => {
+    // The loader, the mixin plan, the physics plan and the share builder each
+    // read record.enabled independently. Flattening first is what stops them
+    // from disagreeing about what is running.
+    const pool = [rec('a', true), rec('b', true)];
+    const instance = { ...defaultInstanceStore().instances[0]!, disabledModIds: ['b'] };
+    expect(applyInstanceOverlay(pool, instance).map((m) => m.enabled)).toEqual([true, false]);
+  });
+
+  it('never re-enables a mod the pool switch turned off', () => {
+    const pool = [rec('a', false)];
+    const instance = { ...defaultInstanceStore().instances[0]!, disabledModIds: [] };
+    expect(applyInstanceOverlay(pool, instance)[0]?.enabled).toBe(false);
+  });
+
+  it('leaves the input records untouched — the pool is what gets persisted', () => {
+    // The projection must never reach saveUserMods; mutating in place would
+    // make one instance's choices everyone's on the next write.
+    const pool = [rec('a', true)];
+    const instance = { ...defaultInstanceStore().instances[0]!, disabledModIds: ['a'] };
+    const out = applyInstanceOverlay(pool, instance);
+    expect(pool[0]?.enabled).toBe(true);
+    expect(out[0]?.enabled).toBe(false);
+    expect(out[0]).not.toBe(pool[0]);
+  });
+
+  it('a null instance returns an untouched copy — the pre-instances behaviour', () => {
+    const pool = [rec('a', true), rec('b', false)];
+    expect(applyInstanceOverlay(pool, null).map((m) => m.enabled)).toEqual([true, false]);
+  });
+
+  it('a mod with no manifest id is out of the overlay’s reach, not disabled by it', () => {
+    // The overlay addresses mods by id. A record without one cannot be named,
+    // so it must keep running rather than be swept up by an unrelated entry.
+    const pool = [rec(null, true)];
+    const instance = { ...defaultInstanceStore().instances[0]!, disabledModIds: ['a'] };
+    expect(applyInstanceOverlay(pool, instance)[0]?.enabled).toBe(true);
   });
 });

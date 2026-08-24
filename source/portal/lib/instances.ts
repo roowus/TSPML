@@ -10,7 +10,8 @@
  *
  * There is exactly one mod pool — {@link USER_MODS_STORAGE_KEY} — and instances
  * OVERLAY it. An instance stores `disabledModIds`, a list of ids it turns off
- * for itself; it never holds a copy of a record.
+ * for itself; it never holds a copy of a record. {@link applyInstanceOverlay}
+ * is how that becomes something the runtime can consume.
  *
  * That is a quota decision before it is a design one. `IMPORT_LIMITS`
  * permits a 2 MB entrypoint against a localStorage budget of roughly 5 MB, so
@@ -74,11 +75,10 @@ export interface Instance {
   /**
    * Mods from the shared pool this instance turns OFF.
    *
-   * Reserved and honored by the resolver ({@link effectiveEnabledIds}) but not
-   * yet written by any UI — the launcher gains the per-instance toggle in a
-   * later slice. It composes with, and does not replace, `record.enabled`: that
-   * stays the global switch the play page's disable button writes, which
-   * `smoke-user-mods` depends on. A mod runs when BOTH say so.
+   * Composes with, and does not replace, `record.enabled`: that stays the
+   * pool-wide switch the play page's disable button writes, which
+   * `smoke-user-mods` depends on. A mod runs when BOTH say so — see
+   * {@link effectiveEnabledIds} and {@link applyInstanceOverlay}.
    */
   readonly disabledModIds: readonly string[];
 }
@@ -354,4 +354,77 @@ export function effectiveEnabledIds(
   return pool
     .filter((m) => m.id !== null && m.enabled && !off.has(m.id))
     .map((m) => m.id as string);
+}
+
+/** Is this mod switched off BY THE INSTANCE (regardless of the pool switch)? */
+export function isDisabledInInstance(instance: Instance | null, modId: string | null): boolean {
+  if (instance === null || modId === null) return false;
+  return instance.disabledModIds.includes(modId);
+}
+
+/**
+ * Flip one mod's per-instance switch. Pure; returns the next store.
+ *
+ * A mod with no manifest id cannot be addressed by the overlay at all — the
+ * overlay is a list of ids — so callers must not offer the control for one.
+ * Unknown instance ids return the store unchanged, matching `touchInstance`.
+ */
+export function setModDisabledInInstance(
+  store: InstanceStore,
+  instanceId: string,
+  modId: string,
+  disabled: boolean,
+): InstanceStore {
+  const target = store.instances.find((i) => i.id === instanceId);
+  if (target === undefined) return store;
+  // A no-op returns the SAME store, not an equal one. Callers persist on
+  // change (`if (next !== store) saveInstances(next)`, as the launch effect
+  // already does), so rebuilding here would turn every redundant click into a
+  // localStorage write.
+  if (target.disabledModIds.includes(modId) === disabled) return store;
+  return {
+    ...store,
+    instances: store.instances.map((i) =>
+      i.id === instanceId
+        ? {
+            ...i,
+            disabledModIds: disabled
+              ? [...i.disabledModIds, modId]
+              : i.disabledModIds.filter((m) => m !== modId),
+          }
+        : i,
+    ),
+  };
+}
+
+/**
+ * Project the shared pool through an instance's overlay, as RECORDS.
+ *
+ * This is the shape the play page actually needs. Four independent consumers
+ * decide what runs by reading `record.enabled` — the loader, the mixin plan,
+ * the physics plan, and the share-link builder — and threading an instance
+ * into each would be four chances to forget one, in exactly the places where
+ * forgetting means a mod silently running when the player switched it off.
+ * Flattening the overlay into `enabled` before any of them see it means they
+ * keep their single rule and cannot disagree.
+ *
+ * The projection is for RUNNING only. It must never be handed to
+ * `saveUserMods`: the pool is shared, and persisting the projection would make
+ * one instance's choices everyone's — the per-instance switch would silently
+ * become the global one. Callers persist the true pool and run the projection.
+ *
+ * A null instance projects to the input untouched, which is how the portal
+ * behaved before instances existed and is what `/play` with no `?instance=`
+ * still does.
+ */
+export function applyInstanceOverlay<
+  T extends { readonly enabled: boolean; readonly manifest?: { readonly id?: unknown } },
+>(pool: readonly T[], instance: Instance | null): T[] {
+  if (instance === null || instance.disabledModIds.length === 0) return [...pool];
+  const off = new Set(instance.disabledModIds);
+  return pool.map((m) => {
+    const id = typeof m.manifest?.id === 'string' ? m.manifest.id : null;
+    if (id === null || !off.has(id) || !m.enabled) return m;
+    return { ...m, enabled: false };
+  });
 }
