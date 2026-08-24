@@ -8,6 +8,7 @@ import {
   removeInstance,
   renameInstance,
   saveInstances,
+  setInstanceIcon,
   setModDisabledInInstance,
   touchInstance,
 } from '@/lib/instances';
@@ -48,8 +49,14 @@ export interface UseInstances {
   readonly ready: boolean;
   /** Set when a write was refused (quota, or a locked-down profile). */
   readonly persistFailed: boolean;
-  create(name: string, gameVersion: string): { ok: true; instance: Instance } | { ok: false; error: string };
+  create(
+    name: string,
+    gameVersion: string,
+    icon?: string | null,
+  ): { ok: true; instance: Instance } | { ok: false; error: string };
   rename(id: string, name: string): { ok: true } | { ok: false; error: string };
+  /** Set or clear an instance's picture. Null removes it. */
+  setIcon(id: string, icon: string | null): void;
   remove(id: string): void;
   /** Stamp `lastPlayedAt` and make active. Call this as a launch happens. */
   touch(id: string, nowIso: string): void;
@@ -78,8 +85,8 @@ export function useInstances(): UseInstances {
   }, []);
 
   const create = useCallback(
-    (name: string, gameVersion: string) => {
-      const result = addInstance(store, name, gameVersion);
+    (name: string, gameVersion: string, icon?: string | null) => {
+      const result = addInstance(store, name, gameVersion, icon ?? undefined);
       if (!result.ok) return result;
       commit(result.store);
       return { ok: true as const, instance: result.instance };
@@ -93,6 +100,18 @@ export function useInstances(): UseInstances {
       if (!result.ok) return result;
       commit(result.store);
       return { ok: true as const };
+    },
+    [store, commit],
+  );
+
+  const setIcon = useCallback(
+    (id: string, icon: string | null): void => {
+      const next = setInstanceIcon(store, id, icon);
+      // Same identity guard as `touch` below: `setInstanceIcon` returns the
+      // input store for a no-op or an unknown id, and persisting that would
+      // write the synthesized default into a profile that has nothing stored.
+      if (next === store) return;
+      commit(next);
     },
     [store, commit],
   );
@@ -128,5 +147,5 @@ export function useInstances(): UseInstances {
     [store, commit],
   );
 
-  return { store, ready, persistFailed, create, rename, remove, touch, setModDisabled };
+  return { store, ready, persistFailed, create, rename, setIcon, remove, touch, setModDisabled };
 }

@@ -7,6 +7,8 @@ import { Icon } from '@/app/icons';
 import { DEFAULT_GAME_VERSION } from '@/lib/game-versions';
 import { INSTANCE_LIMITS } from '@/lib/instances';
 import type { Instance } from '@/lib/instances';
+import { IconPicker } from './IconPicker';
+import { InstanceTile } from './InstanceTile';
 import { VersionPicker } from './VersionPicker';
 import { useInstances } from './useInstances';
 
@@ -22,6 +24,7 @@ function InstanceCard({ instance }: { instance: Instance }): ReactElement {
   return (
     <li className="inst-card">
       <Link className="inst-card-link" href={`/instance/${instance.id}`}>
+        <InstanceTile name={instance.name} icon={instance.icon ?? null} size={40} />
         <span className="inst-name">{instance.name}</span>
         <code className="inst-version">{instance.gameVersion}</code>
       </Link>
@@ -54,10 +57,11 @@ export function InstanceGrid(): ReactElement {
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftVersion, setDraftVersion] = useState(DEFAULT_GAME_VERSION);
+  const [draftIcon, setDraftIcon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = (): void => {
-    const result = create(draftName, draftVersion);
+    const result = create(draftName, draftVersion, draftIcon);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -65,6 +69,7 @@ export function InstanceGrid(): ReactElement {
     setError(null);
     setDraftName('');
     setDraftVersion(DEFAULT_GAME_VERSION);
+    setDraftIcon(null);
     setCreating(false);
   };
 
@@ -110,6 +115,10 @@ export function InstanceGrid(): ReactElement {
             Game version
           </label>
           <VersionPicker id="inst-version" value={draftVersion} onChange={setDraftVersion} />
+          {/* The picture is chosen BEFORE the instance exists, so this one is a
+              draft the create call carries in — unlike the detail page, where
+              the same control writes straight through to an existing row. */}
+          <IconPicker name={draftName} value={draftIcon} onChange={setDraftIcon} />
           {error ? (
             <p className="warn">
               <Icon name="error" /> {error}

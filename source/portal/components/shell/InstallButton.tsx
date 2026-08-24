@@ -71,7 +71,7 @@ export function InstallButton({
           <div className="install-actions">
             <button
               type="button"
-              className="btn-play"
+              className="btn btn-play"
               disabled={state.phase === 'busy'}
               onClick={() => {
                 void install.install(entry);
@@ -96,7 +96,7 @@ export function InstallButton({
       ) : (
         <button
           type="button"
-          className="btn-play"
+          className="btn btn-play"
           disabled={state.phase === 'busy'}
           onClick={() => setConfirming(true)}
         >
