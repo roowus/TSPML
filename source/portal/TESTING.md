@@ -25,7 +25,8 @@ This is the claim headless tests **cannot** make: "the transform produces *worki
 # from the repo root:
 TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev
 ```
-Open **http://localhost:3000**.
+Open **http://localhost:3000/play**. (`/` is the launcher; `/play` is the
+surface that mounts the game.)
 
 **What you should see (give it ~35–40s on a cold dev proxy):**
 - A green **`TSPML transform ✔ LIVE`** badge fixed in the top-left corner → the transform ran **and** the Car module's factory executed (our injected hook fired at boot). ✅
@@ -46,7 +47,7 @@ Open **http://localhost:3000**.
 ```bash
 pnpm --filter @tspml/portal dev     # WITHOUT TSPML_TRANSFORM
 ```
-Open http://localhost:3000. Does the *unmodified* game render and play through the proxy + service worker? (Note: the vanilla path hits the **same** unofficial-gate / track-load issues as the transformed path — that's the game's own origin check, not the transform.)
+Open http://localhost:3000/play. Does the *unmodified* game render and play through the proxy + service worker? (Note: the vanilla path hits the **same** unofficial-gate / track-load issues as the transformed path — that's the game's own origin check, not the transform.)
 - DevTools → **Network**: confirm game requests go to `/api/proxy/...` (not directly to `kodub.com`, which would CORS-fail). Watch for any 4xx/5xx or an asset type the proxy mishandles — a numbered `*.bundle.js` chunk, `polytrack_physics.wasm`, a `blob:`/`data:` worker URL, or a websocket. These tell us what the proxy needs for full coverage (M2 follow-ups / issue #3).
 
 ## What to paste back to me (gold for M4)

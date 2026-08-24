@@ -23,15 +23,18 @@
   --red: #f85149;
   --amber: #d29922;
 
-  /* Accents. `--accent` was USED in two rules (.docs-link, .content-resizer
-     hover) and never declared, so the inline fallback was doing all the work —
-     which meant the theme had no single place to change it. Declared here at
-     exactly that fallback value: this commit fixes the missing declaration
-     without repainting anything. The launcher's palette change is a deliberate
-     later edit to this one line, not a side effect of tidying. */
-  --accent: #7c5cff;
+  /* Accents. `--accent` was used in two rules and never declared until the
+     groundwork slice pinned it at its inline fallback (#7c5cff); this is the
+     deliberate palette edit that was deferred to the launcher.
+     Marker orange and telemetry cyan, which is a track-and-instruments idea
+     rather than a generic product purple. Used sparingly: current nav state,
+     focus rings, and the one primary launcher action.
+     Note what is NOT here — green. `--green` is status vocabulary the smokes
+     read out of the sidebar (`mods: ✓ …`), so nothing decorative may borrow
+     it, or a healthy glyph and a button start meaning the same thing. */
+  --accent: #ff8a3d;
   --accent-2: #46d3ff;
-  --accent-quiet: rgba(124, 92, 255, 0.14);
+  --accent-quiet: rgba(255, 138, 61, 0.14);
 }
 
 * {
@@ -127,7 +130,7 @@ body {
 .docs-link {
   font-size: 13px;
   font-weight: 600;
-  color: var(--accent, #7c5cff);
+  color: var(--accent);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -187,7 +190,7 @@ body {
 .content-resizer:focus-visible::before,
 .content-resizer:active::before {
   inset: 0 2px;
-  background: var(--accent, #7c5cff);
+  background: var(--accent);
 }
 
 .content-resizer:focus-visible {
@@ -1040,6 +1043,241 @@ a.btn {
   height: 8px;
   border-radius: 50%;
   flex: none;
+}
+
+/* ---- Launcher shell (app/(shell)/*) ----
+ *
+ * Deliberately a different surface from the play page, and the difference is
+ * structural rather than decorative: the game is edge-to-edge and dark because
+ * nothing should compete with the stage, while the launcher is a centered
+ * column with breathing room because reading and choosing is what happens here.
+ *
+ * The visual language is instrument-panel, not app-store shelf: 4px radii, 1px
+ * hairline borders, no drop shadows, accents only on focus and current state.
+ * Nothing here uses --green, which stays reserved for the status semantics the
+ * smokes read (`mods: ✓ …`) — a green button beside a green health glyph makes
+ * both mean less.
+ */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding: 10px 14px 24px;
+  gap: 10px;
+}
+
+.shell-body {
+  display: flex;
+  gap: 22px;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  flex: 1;
+}
+
+.nav-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: none;
+  width: 168px;
+  padding-top: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.nav-item:hover {
+  color: var(--text);
+  background: var(--panel);
+}
+
+/* Current-state comes off aria-current, so the marker cannot drift out of sync
+   with what a screen reader is told. */
+.nav-item[aria-current='page'] {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border-strong);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.shell-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.shell-section {
+  padding: 4px 0;
+}
+
+.shell-section > h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.shell-section .section-head > h2 {
+  font-size: 17px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.inst-subhead {
+  margin: 26px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+
+/* ---- Instance grid ---- */
+
+.inst-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.inst-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.inst-card:hover {
+  border-color: var(--border-strong);
+}
+
+/* Reserves the card's height before the mount read lands, so the grid does not
+   jump when the real instances arrive. Hatched rather than blank: an empty
+   bordered box reads as a broken card, a hatched one reads as pending. */
+.inst-card-skeleton {
+  min-height: 104px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--panel),
+    var(--panel) 6px,
+    var(--panel-deep) 6px,
+    var(--panel-deep) 12px
+  );
+}
+
+.inst-card-link {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.inst-card-link:hover .inst-name {
+  text-decoration: underline;
+}
+
+.inst-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.inst-version {
+  flex: none;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inst-card .row-buttons {
+  margin-top: 6px;
+}
+
+.inst-actions {
+  margin: 14px 0 0;
+}
+
+/* The launcher's one filled action. Orange rather than the play page's green
+   --btn-primary, because green is status vocabulary here. */
+.btn-play {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #120d00;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.btn-play:hover {
+  background: #ffa163;
+  border-color: #ffa163;
+}
+
+.inst-new {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+
+.version-note {
+  margin-top: 6px;
+}
+
+.inst-mods {
+  margin-top: 8px;
+}
+
+.empty-note {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+}
+
+/* Visible focus everywhere in the shell. The play page inherits the browser
+   default; the launcher is keyboard-navigated far more, so it gets a ring that
+   does not depend on the UA's contrast choices. */
+.shell a:focus-visible,
+.shell button:focus-visible,
+.shell input:focus-visible,
+.shell select:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .shell-body {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .nav-rail {
+    width: auto;
+    flex-direction: row;
+  }
+
+  .nav-item[aria-current='page'] {
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
 }
 
 /* ---- Narrow screens: stack, game keeps a 16:9 box ---- */

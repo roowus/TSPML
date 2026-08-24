@@ -32,6 +32,9 @@
 import { chromium } from 'playwright';
 
 const BASE_URL = process.env.SMOKE_URL ?? 'http://localhost:3000';
+// The play surface. `/` is the launcher now; BASE_URL stays an origin because
+// other requests in this file are origin-relative.
+const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? '/tmp/tspml-hydration-smoke.png';
 // Long enough that even a loaded CI runner is still pre-hydration when the
 // typing happens; the smoke waits on hydration afterwards rather than sleeping,
@@ -65,8 +68,8 @@ await page.route('**/_next/static/chunks/**', async (route) => {
   await route.continue();
 });
 
-step(`goto ${BASE_URL} (client chunks delayed ${CHUNK_DELAY_MS}ms)`);
-await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+step(`goto ${PLAY_URL} (client chunks delayed ${CHUNK_DELAY_MS}ms)`);
+await page.goto(PLAY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
 const out = {};
 
