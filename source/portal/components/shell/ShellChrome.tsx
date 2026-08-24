@@ -20,11 +20,11 @@ import { Icon } from '@/app/icons';
  */
 export function ShellChrome({
   children,
-  /** Which rail item is current. `browse` arrives with the registry slice. */
+  /** Which rail item is current. */
   active,
 }: {
   children: ReactNode;
-  active?: 'instances' | undefined;
+  active?: 'instances' | 'browse' | undefined;
 }): ReactElement {
   return (
     <div className="shell">
@@ -56,8 +56,13 @@ export function ShellChrome({
           >
             <Icon name="grid" /> Instances
           </Link>
-          {/* Browse lands with the registry slice. A disabled-looking rail
-              item for a route that 404s would be worse than its absence. */}
+          <Link
+            className="nav-item"
+            href="/browse"
+            aria-current={active === 'browse' ? 'page' : undefined}
+          >
+            <Icon name="search" /> Browse
+          </Link>
         </nav>
         <main className="shell-main">{children}</main>
       </div>

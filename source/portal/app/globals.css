@@ -1253,6 +1253,333 @@ a.btn {
   border-radius: 4px;
 }
 
+/* ---- Browse: the curated catalog ---- */
+
+.browse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.browse-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 14px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.browse-tab {
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.browse-tab:hover {
+  color: var(--text);
+}
+
+.browse-tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.browse-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.browse-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 260px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+/* The input carries the border on its own elsewhere; inside the search shell
+   the wrapper owns it, so the two do not draw a double hairline. */
+.browse-search .add-input {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: 8px 0;
+}
+
+.browse-search .add-input:focus-visible {
+  outline: none;
+}
+
+.browse-search:focus-within {
+  border-color: var(--accent-2);
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tag-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.tag-chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-quiet);
+}
+
+/* Tags on a card are labels, not controls — no pointer, no hover response. */
+.tag-static {
+  cursor: default;
+}
+
+.tag-warn {
+  cursor: default;
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.browse-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.entry-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.entry-tile {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--panel-deep);
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 600;
+  object-fit: cover;
+}
+
+.entry-tile-lg {
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+}
+
+.entry-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.entry-name {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.entry-name:hover {
+  color: var(--accent);
+}
+
+.entry-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.install-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+/* On the detail page the box is not inside a card, so `align-items: stretch`
+   from the column flex would run the Install button the whole width of the
+   viewport. A slab of accent orange across 1200px reads as a banner rather
+   than a control; in a card it is correctly full-bleed, hence the scoping. */
+.shell-section > .install-box {
+  align-items: flex-start;
+  max-width: 62ch;
+  margin-top: 12px;
+}
+
+.install-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* The disclosure is meant to be read, so it is not a whisper: full contrast
+   text on an amber hairline, at the size of the surrounding copy. */
+.install-warn {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--amber);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.install-error,
+.install-blocked {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.install-error {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.install-done {
+  margin: 0;
+  margin-top: auto;
+  color: var(--green);
+  font-size: 12.5px;
+}
+
+.entry-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.entry-detail-head h2 {
+  margin: 0;
+}
+
+.nav-back {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.nav-back:hover {
+  color: var(--accent);
+}
+
+.inline-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.inline-link:hover {
+  text-decoration: underline;
+}
+
+.entry-facts {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px 16px;
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.entry-facts dt {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+
+.entry-facts dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.entry-source {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.entry-links {
+  flex-direction: row;
+  gap: 14px;
+}
+
+/* Label text for screen readers where an icon already carries the meaning
+   visually. Not `display:none`, which removes it from the a11y tree too. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Visible focus everywhere in the shell. The play page inherits the browser
    default; the launcher is keyboard-navigated far more, so it gets a ring that
    does not depend on the UA's contrast choices. */

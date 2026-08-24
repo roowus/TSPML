@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "The TSPML mod catalog. A CURATED LIST, not a search index: there is no",
+    "backend behind it, so there are no ratings, no download counts, and no",
+    "version history. The UI says so where it is browsed.",
+    "",
+    "Read through lib/registry.ts, which validates every row and DROPS anything",
+    "malformed rather than defaulting it. tests/registry.test.ts validates this",
+    "file in CI, so a bad commit fails before it deploys.",
+    "",
+    "source.url may be relative. It resolves against whatever origin serves this",
+    "file, which is why the portal's own sample entries are relative: a hardcoded",
+    "https://tspml.vercel.app/... would make a local dev server install from",
+    "production and look like it worked.",
+    "",
+    "'format' is required and reserved: 'tspml' installs, 'pml' renders as a named",
+    "refusal rather than being installed wrong. Adding an entry is a PR."
+  ],
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "kind": "mod",
+      "format": "tspml",
+      "id": "tspml-sample-url-mod",
+      "name": "TSPML sample URL mod",
+      "author": "TSPML",
+      "summary": "A tiny mod served by the portal itself. Install it to see the whole path work end to end, from this list into a running game.",
+      "tags": ["example"],
+      "source": { "type": "mod-json", "url": "/sample-mod/mod.json" },
+      "gameVersions": ["0.6.2"],
+      "safety": { "touchesPhysics": false, "leaderboardRisk": "none" },
+      "dependencies": []
+    },
+    {
+      "kind": "mod",
+      "format": "tspml",
+      "id": "tspml-sample-pack-mod",
+      "name": "TSPML sample pack mod",
+      "author": "TSPML",
+      "summary": "A second tiny mod, so the sample modpack has more than one line in it. Harmless on its own.",
+      "tags": ["example"],
+      "source": { "type": "mod-json", "url": "/sample-mod-b/mod.json" },
+      "gameVersions": ["0.6.2"],
+      "safety": { "touchesPhysics": false, "leaderboardRisk": "none" },
+      "dependencies": []
+    },
+    {
+      "kind": "modpack",
+      "format": "tspml",
+      "id": "tspml-sample-pack",
+      "name": "TSPML sample modpack",
+      "author": "TSPML",
+      "summary": "Both sample mods at once. A modpack is a plain text file of mod URLs, one per line, and installs each of them separately.",
+      "tags": ["example"],
+      "source": { "type": "modpack-txt", "url": "/sample-pack.txt" },
+      "gameVersions": ["0.6.2"],
+      "safety": { "touchesPhysics": false, "leaderboardRisk": "none" },
+      "dependencies": []
+    }
+  ]
+}

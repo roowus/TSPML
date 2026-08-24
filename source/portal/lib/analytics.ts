@@ -58,7 +58,11 @@ export function trackEvent(name: string, params: EventParams = {}): void {
 /**
  * The mod-usage events, named here so call sites and any future dashboard
  * agree on the vocabulary:
- * - `mod_added`    { mod_id, method: 'paste' | 'url' | 'modpack' | 'share' | 'reload' }
+ * - `mod_added`    { mod_id, method: 'paste' | 'url' | 'modpack' | 'share' | 'reload' | 'registry' }
+ *   `registry` is a launcher install from the curated catalog. Kept distinct
+ *   from `url` even though the machinery is identical: the question worth
+ *   answering is whether browsing finds people mods they would not have typed
+ *   a URL for, and folding the two together makes that unanswerable.
  * - `mod_loaded`   { mod_id } — one per mod per successful load pass
  * - `mod_load_failed` { mod_id } — the mod's id, not the reason (reasons can
  *   quote manifest contents; the Log section shows them to the user instead)
@@ -66,7 +70,7 @@ export function trackEvent(name: string, params: EventParams = {}): void {
  */
 export function trackModAdded(
   modId: string | null,
-  method: 'paste' | 'url' | 'modpack' | 'share' | 'reload',
+  method: 'paste' | 'url' | 'modpack' | 'share' | 'reload' | 'registry',
 ): void {
   trackEvent('mod_added', { mod_id: modId ?? '(no id)', method });
 }

@@ -17,7 +17,8 @@
     "smoke:hydration": "node scripts/smoke-hydration.mjs",
     "shot:check": "node scripts/shot-check.mjs",
     "smoke:chunks": "node scripts/smoke-chunks.mjs",
-    "smoke:physics": "node scripts/smoke-physics.mjs"
+    "smoke:physics": "node scripts/smoke-physics.mjs",
+    "smoke:registry": "node scripts/smoke-registry.mjs"
   },
   "dependencies": {
     "@tspml/api": "workspace:*",
