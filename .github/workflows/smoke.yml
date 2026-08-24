@@ -168,6 +168,13 @@ jobs:
       - name: smoke — runtime user mods (add / mixins #62 / persist / disable / remove)
         run: pnpm --filter @tspml/portal smoke:usermods
 
+      # The launcher's reason to exist: a player who never types a URL. Follows
+      # one catalog entry from /browse through the confirm step into a LOADED mod
+      # on /play, because an install that writes a record the play page ignores
+      # would pass every cheaper check.
+      - name: smoke — browse the registry, install, and the mod loads in game
+        run: pnpm --filter @tspml/portal smoke:registry
+
       - name: smoke — page layout (fullscreen control, responsive stacking)
         run: pnpm --filter @tspml/portal smoke:ui
 
