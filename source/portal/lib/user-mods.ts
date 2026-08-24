@@ -28,7 +28,17 @@
  * "no user mods" rather than a boot loop.
  */
 
-const STORAGE_KEY = 'tspml.userMods.v1';
+/**
+ * The one canonical mod pool. Exported because instances (`lib/instances.ts`)
+ * overlay this key rather than copying records into per-instance stores — a
+ * record can be 2 MB of code against a ~5 MB localStorage budget, so copies
+ * would blow the quota, and `saveUserMods` fails QUIETLY (returns false) when
+ * they do. Three smokes also hardcode this string; one exported constant beats
+ * four literals drifting apart.
+ */
+export const USER_MODS_STORAGE_KEY = 'tspml.userMods.v1';
+
+const STORAGE_KEY = USER_MODS_STORAGE_KEY;
 
 /** A mod the user added at runtime. `manifest` stays RAW (unknown): the loader
  *  owns validation, and re-validating here would just drift from it. */
@@ -66,6 +76,20 @@ export interface UserModRecord {
    * URL and replaces the stored copy (lib/mod-reload.ts).
    */
   readonly sourceUrl?: string;
+  /**
+   * Which mod format this record's `code` is. Absent means `tspml`, which is
+   * every record written so far and every record this build writes.
+   *
+   * Reserved now rather than later because it is a STORAGE schema, and storage
+   * is the thing you cannot retrofit — a field added after rows exist has to
+   * cope with rows that predate it forever. More to the point, this is the
+   * field that decides how the code is EXECUTED, which is where the formats
+   * genuinely diverge: a TSPML entrypoint is an ES module with a default export
+   * receiving `api`, while a PML entrypoint exports a named `polyMod` binding
+   * against a `pml` global. `importFromSource` will branch on this when PML
+   * support lands; today nothing writes anything but `tspml`.
+   */
+  readonly format?: 'tspml' | 'pml';
 }
 
 /** The `id` a record claims, or null if it doesn't even have one. */
@@ -160,7 +184,12 @@ function isUserModRecord(v: unknown): v is UserModRecord {
     // `sourceUrl` is optional (pasted mods and pre-reload rows lack it); when
     // present it must be a string — reload hands it straight to the import
     // path, which re-checks the host rules on every use.
-    (v.sourceUrl === undefined || typeof v.sourceUrl === 'string')
+    (v.sourceUrl === undefined || typeof v.sourceUrl === 'string') &&
+    // `format` is optional (absent = tspml, which is every row today). An
+    // UNRECOGNISED value drops the row rather than defaulting to tspml: the
+    // field decides how the code is executed, and running a foreign format's
+    // module through the tspml path is a worse outcome than not loading it.
+    (v.format === undefined || v.format === 'tspml' || v.format === 'pml')
   );
 }
 

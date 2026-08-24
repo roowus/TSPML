@@ -22,6 +22,16 @@
   --green: #3fb950;
   --red: #f85149;
   --amber: #d29922;
+
+  /* Accents. `--accent` was USED in two rules (.docs-link, .content-resizer
+     hover) and never declared, so the inline fallback was doing all the work —
+     which meant the theme had no single place to change it. Declared here at
+     exactly that fallback value: this commit fixes the missing declaration
+     without repainting anything. The launcher's palette change is a deliberate
+     later edit to this one line, not a side effect of tidying. */
+  --accent: #7c5cff;
+  --accent-2: #46d3ff;
+  --accent-quiet: rgba(124, 92, 255, 0.14);
 }
 
 * {

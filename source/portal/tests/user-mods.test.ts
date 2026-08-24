@@ -19,6 +19,7 @@ import {
   userModHomepage,
   userModIcon,
   userModId,
+  USER_MODS_STORAGE_KEY,
   type UserModRecord,
 } from '../lib/user-mods.js';
 import { loadMods, PORTAL_RESOLVE_CONTEXT } from '../lib/mod-loader.js';
@@ -177,6 +178,45 @@ describe('user-mods storage', () => {
       'tspml.userMods.v1': JSON.stringify([pasted, { ...record({ id: 'bad' }), sourceUrl: 42 }]),
     });
     expect(readUserMods(corrupt)).toEqual([pasted]);
+  });
+
+  it('round-trips a known format and accepts rows without one', () => {
+    // Absent means tspml, which is every row written so far. The field exists in
+    // storage ahead of its reader because a storage schema is the one thing that
+    // cannot be retrofitted: a field added after rows exist has to cope with rows
+    // that predate it forever.
+    const explicit = record({ id: 'declared', format: 'tspml' });
+    const legacy = record({ id: 'old' }); // no format key at all
+    const storage = memoryStorage();
+    expect(saveUserMods([explicit, legacy], storage)).toBe(true);
+    expect(readUserMods(storage)).toEqual([explicit, legacy]);
+  });
+
+  it('drops a row whose format is unrecognised rather than defaulting it to tspml', () => {
+    // This field decides how the code is EXECUTED — a tspml entrypoint is a
+    // default-export factory taking `api`, a pml one is a named `polyMod`
+    // binding against a `pml` global. Running a foreign format's module through
+    // the tspml path is a worse outcome than not loading it, so an unreadable
+    // value drops the row.
+    const good = record({ id: 'good' });
+    const storage = memoryStorage({
+      [USER_MODS_STORAGE_KEY]: JSON.stringify([
+        good,
+        { ...record({ id: 'future' }), format: 'someformat' },
+        { ...record({ id: 'wrong-type' }), format: 1 },
+      ]),
+    });
+    expect(readUserMods(storage)).toEqual([good]);
+  });
+
+  it('exports the storage key it actually reads', () => {
+    // Three smokes seed this string via addInitScript, and instances overlay the
+    // same key rather than copying records. One exported constant beats four
+    // literals drifting apart.
+    expect(USER_MODS_STORAGE_KEY).toBe('tspml.userMods.v1');
+    const mod = record({ id: 'seeded' });
+    const storage = memoryStorage({ [USER_MODS_STORAGE_KEY]: JSON.stringify([mod]) });
+    expect(readUserMods(storage)).toEqual([mod]);
   });
 });
 
