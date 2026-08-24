@@ -461,11 +461,13 @@ body {
     animation: none;
   }
 
-  /* Hover/focus tweens on the stage controls and the sidebar grip. The end
-     states (opacity 1, the accent grip) are unchanged — they arrive at once. */
+  /* Hover/focus tweens on the stage controls, the sidebar grip, and the mod
+     shelf rows. The end states (opacity 1, the accent grip, the row's darker
+     background) are unchanged — they arrive at once. */
   .stage-btn,
   .content-resizer::before,
-  .boot-overlay {
+  .boot-overlay,
+  .rows.mod-shelf li {
     transition: none;
   }
 }
@@ -859,6 +861,161 @@ body {
    fight a long id for width. */
 .row-buttons.mod-actions {
   margin-top: 10px;
+}
+
+/* ---- The mod shelf (Your mods) ----
+
+   A shelf of switches, not a stack of cards: one line per mod, the two
+   switches leading, everything referential behind the row's "details" button.
+   The rows keep the mod-card DOM contract (first <span> is the status pill)
+   but drop the card chrome — six bordered boxes in a 340px column was most of
+   what made the old list feel heavy. */
+
+.shelf-count {
+  margin-top: 0;
+}
+
+.shelf-filter {
+  margin-top: 10px;
+}
+
+/* The bulk bar. Sticky so a long shelf cannot scroll the actions for the
+   current selection out of view; z-index 10 is the bottom of the app's scale
+   (10 chrome / 20 overlay / 50 theater) and stays under the boot overlay. */
+.shelf-bulk {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  background: var(--panel-deep);
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+}
+
+.shelf-bulk-count {
+  color: var(--accent-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Undo, not a confirm dialog: removing a mod is cheap to reverse (the record
+   is still in memory) and the modal would land on every single removal. */
+.shelf-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border-strong);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+}
+
+.shelf-undo-text {
+  color: var(--text-body);
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rows.mod-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 10px;
+}
+
+/* `.rows li` sets the separators and outranks a bare `.shelf-row`, so the
+   row's own padding has to live on this selector to survive. */
+.rows.mod-shelf li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 8px;
+  border-top: 1px solid var(--border);
+  border-radius: 4px;
+  transition: background 120ms ease;
+}
+
+.rows.mod-shelf li:first-child {
+  border-top: 0;
+}
+
+.rows.mod-shelf li:hover {
+  background: var(--panel-deep);
+}
+
+/* A mod that is not running is dimmed rather than restyled — the row must
+   still be fully readable, because "why is this off" is exactly the question
+   being asked of it. */
+.shelf-row-off {
+  opacity: 0.72;
+}
+
+.shelf-row-off .mod-tile {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.shelf-row-off .mod-tile img {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.shelf-check {
+  flex: none;
+  /* Nudged down to the id's optical center rather than the row's top. */
+  margin-top: 9px;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-2);
+  cursor: pointer;
+}
+
+.shelf-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.shelf-facts {
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-switches {
+  margin-top: 7px;
+}
+
+/* Destructive, and coloured as such — but only on hover, so a shelf of six
+   mods is not six red buttons shouting at rest. */
+.btn-danger:hover {
+  border-color: rgba(248, 81, 73, 0.55);
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--red);
+}
+
+.shelf-details {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.shelf-details > .row-buttons {
+  margin-top: 6px;
 }
 
 /* Inside a card the meta lines share one rhythm: 5px between every line,
@@ -1841,16 +1998,26 @@ a.btn {
   border: 0;
 }
 
-/* Visible focus in the shell, and in the in-play drawer.
+/* Visible focus in the shell, in the in-play drawer, and in the sidebar.
    The drawer is on the play page and therefore NOT inside `.shell`, but it
    renders the same <Catalog> — tabs, tag chips, search, install buttons. Left to
    the UA default those controls would have a visible ring on /browse and a
    near-invisible one over the dark stage, which is the worst possible split:
-   the same component, keyboard-usable in one place and not the other. */
+   the same component, keyboard-usable in one place and not the other.
+
+   The sidebar is here for the same reason: the mod shelf is a keyboard surface
+   (a filter field, a checkbox per row, four buttons per row), and tabbing
+   through it against #0d1117 with the UA default ring is guesswork. */
 .shell a:focus-visible,
 .shell button:focus-visible,
 .shell input:focus-visible,
 .shell select:focus-visible,
+.sidebar a:focus-visible,
+.sidebar button:focus-visible,
+.sidebar input:focus-visible,
+.sidebar select:focus-visible,
+.sidebar textarea:focus-visible,
+.sidebar summary:focus-visible,
 .browse-drawer a:focus-visible,
 .browse-drawer button:focus-visible,
 .browse-drawer input:focus-visible,

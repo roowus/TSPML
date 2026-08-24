@@ -18,8 +18,6 @@ import {
   readUserMods,
   saveUserMods,
   upsertUserMod,
-  userModDocs,
-  userModHomepage,
   userModIcon,
   userModId,
 } from '@/lib/user-mods';
@@ -61,6 +59,7 @@ import {
 } from '@/lib/instances';
 import { AddModForm } from '@/components/play/AddModForm';
 import { BrowseDrawer } from '@/components/play/BrowseDrawer';
+import { ModShelf } from '@/components/play/ModShelf';
 import { ModTile } from '@/components/play/ModTile';
 import { ServiceWorkerBadge } from '@/components/play/ServiceWorkerBadge';
 import type { LoadedModRow, SwState } from '@/components/play/types';
@@ -351,10 +350,6 @@ export default function PlayPage(): ReactElement {
    */
   const runningMods = (): UserModRecord[] =>
     applyInstanceOverlay(userModsRef.current, instanceRef.current);
-  // Which mod row's source viewer is open (by mod id). A button-toggled panel,
-  // NOT a <details>: the smokes click the aside's FIRST <summary> expecting the
-  // Add form's, and a per-row summary would steal that slot.
-  const [sourceOpenId, setSourceOpenId] = useState<string | null>(null);
   // The boot/status log: what happened, when, in order. Shown live on the
   // loading overlay (last lines) and in full in the sidebar's Log section —
   // the honest answer to "what is it doing?" while the overlay progress bar
@@ -1760,286 +1755,91 @@ export default function PlayPage(): ReactElement {
           ) : null}
 
           <section className="side-section">
-            <div className="section-head">
-              <h2>Your mods</h2>
-              {/* Reload = re-fetch URL-imported mods from their source, then
-                  re-run the whole set through the loader. Entrypoint changes
-                  apply live; mixin changes raise the restart banner as usual.
-                  Rendered only with mods present — a reload of nothing is
-                  noise, and the smokes' empty-store boot stays button-free. */}
-              {userMods.length > 0 ? (
-                <span className="row-buttons">
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    title="Build a link that carries your enabled URL-imported mods (links only, never code) — whoever opens it is asked before anything imports"
-                    onClick={handleShare}
-                  >
-                    <Icon name="share" /> share
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    disabled={reloadBusy}
-                    title="Re-fetch URL-imported mods from their source and reload every mod"
-                    onClick={handleReloadMods}
-                  >
-                    <Icon name="refresh" className={reloadBusy ? 'icon-spin' : undefined} />{' '}
-                    {reloadBusy ? 'reloading…' : 'reload'}
-                  </button>
-                </span>
-              ) : null}
-            </div>
-            {/* Said out loud, because it is the one thing about instances that
-                surprises people: there is ONE mod library, and an instance is a
-                view onto it. Without this line, "skip in this instance" next to
-                "remove" reads as two flavours of delete. */}
-            {instance !== null && userMods.length > 0 ? (
-              <p className="meta">
-                One library, shared by every instance. “skip in this instance” switches a mod off
-                for <strong>{instanceName}</strong> only; “disable” switches it off everywhere and
-                “remove” deletes it from the library.
-              </p>
-            ) : null}
-            {/* The built share link: shown in full with its own copy button —
-                the link is the ground truth, the copy is a convenience. */}
-            {sharePanel?.url ? (
-              <div className="share-panel">
-                <div className="share-panel-row">
-                  <code className="share-panel-url">{sharePanel.url}</code>
-                  <button
-                    type="button"
-                    className="btn btn-small share-copy-btn"
-                    title="Copy the share link to the clipboard"
-                    onClick={handleShareCopy}
-                  >
-                    {shareCopied ? (
-                      <>
-                        <Icon name="check" /> copied
-                      </>
-                    ) : (
-                      <>
-                        <Icon name="copy" /> copy
-                      </>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    title="Close"
-                    onClick={() => setSharePanel(null)}
-                  >
-                    <Icon name="close" />
-                  </button>
-                </div>
-                <p className="meta">
-                  {sharePanel.included.length} mod{sharePanel.included.length === 1 ? '' : 's'} —
-                  links only, never code; the recipient confirms first.
-                  {sharePanel.noSource.length > 0
-                    ? ` Pasted mods can’t ride a link: ${sharePanel.noSource.join(', ')} left out.`
-                    : ''}
-                </p>
-              </div>
-            ) : null}
-            {shareNotice ? <p className="meta share-notice">{shareNotice}</p> : null}
-            {reloadNotice ? (
-              <p className="warn">
-                <Icon name="warn" /> {reloadNotice}
-              </p>
-            ) : null}
-            {userMods.length === 0 ? (
-              <p className="meta">None yet — add one below.</p>
-            ) : (
-              <ul className="rows mod-cards">
-                {userMods.map((mod, i) => {
-                  const modId = userModId(mod);
-                  const id = modId ?? `(no id #${i + 1})`;
-                  const version = typeof mod.manifest.version === 'string' ? mod.manifest.version : null;
-                  const homepage = userModHomepage(mod);
-                  const docs = userModDocs(mod);
-                  // The two switches, and what they compose to. `mod.enabled` is
-                  // the pool-wide one; `offHere` is this instance's overlay. A
-                  // mod runs only when both say yes, so the card reports the
-                  // EFFECTIVE state and the pill names which switch is holding
-                  // it back — "disabled" and "off here" mean different things to
-                  // anyone with more than one instance.
-                  const offHere = isDisabledInInstance(instance, modId);
-                  const running = mod.enabled && !offHere;
-                  return (
-                    <li key={id} className={running ? 'mod-card' : 'mod-card mod-card-off'}>
-                      {/* The tile and body wrapper are <i>/<div> on purpose so a
-                          row's FIRST <span> is the status pill — same shape as
-                          the Loaded-mods rows the smoke reads. */}
-                      <ModTile id={id} icon={userModIcon(mod)} />
-                      {/* Card structure, top to bottom: (1) id + on/off pill,
-                          (2) facts line (version · mixins), (3) origin on its
-                          own single line (truncated, full URL in the title —
-                          a wrapping URL is what made these cards unreadable),
-                          (4) the action buttons in a row of their own so they
-                          never fight a long id for space. */}
-                      <div className="mod-card-body">
-                        <div className="row-head">
-                          <code title={id}>{id}</code>
-                          <span
-                            className={running ? 'status-pill pill-on' : 'status-pill pill-off'}
-                            title={
-                              mod.enabled
-                                ? offHere
-                                  ? `On in your library, switched off for '${instanceName}'`
-                                  : 'On in your library and in this instance'
-                                : 'Switched off in your library, for every instance'
-                            }
-                          >
-                            {mod.enabled ? (offHere ? 'off here' : 'enabled') : 'disabled'}
-                          </span>
-                        </div>
-                        {version || mod.mixins || mod.physics ? (
-                          <div className="meta">
-                            {[
-                              version ? `v${version}` : '',
-                              mod.mixins ? `${mod.mixins.length} mixin${mod.mixins.length === 1 ? '' : 's'}` : '',
-                              // Worth its own badge (#43): this is the one thing a
-                              // mod can carry that rewrites the physics binary, so
-                              // "why are my lap times different" has an answer
-                              // visible on the card.
-                              mod.physics ? 'physics patch' : '',
-                            ]
-                              .filter((s) => s.length > 0)
-                              .join(' · ')}
-                          </div>
-                        ) : null}
-                        {/* Where the mod came from — the origin "⟳ reload" re-fetches
-                            (URL imports) or the honest "this browser only" for pastes. */}
-                        <div className="meta origin" title={mod.sourceUrl ?? 'Added by pasting — the only copy is this browser’s storage'}>
-                          <Icon name="link" />
-                          {mod.sourceUrl ? (
-                            <a href={mod.sourceUrl} target="_blank" rel="noreferrer">
-                              {mod.sourceUrl}
-                            </a>
+            {/* The shelf owns the library's presentation and nothing else:
+                every switch below calls back into the session cluster here,
+                which is what keeps the pool the single source of truth. The
+                share panel and the reload/share notices ride in as `notices`
+                so they stay between the header and the list, where they were.
+                See ModShelf's header for the smoke contracts it preserves. */}
+            <ModShelf
+              mods={userMods}
+              instanceName={instanceName}
+              isOffHere={(modId) => isDisabledInInstance(instance, modId)}
+              reloadBusy={reloadBusy}
+              onShare={handleShare}
+              onReload={handleReloadMods}
+              onSetEnabled={(targets, enabled) =>
+                updateUserMods(
+                  userModsRef.current.map((m) => (targets.includes(m) ? { ...m, enabled } : m)),
+                )
+              }
+              onSetOffHere={setInstanceModDisabled}
+              onRemove={(targets) =>
+                updateUserMods(userModsRef.current.filter((m) => !targets.includes(m)))
+              }
+              // Undo goes back through `upsertUserMod` rather than a plain
+              // append: between the remove and the undo the same id could have
+              // been re-imported, and two records answering to one id is a
+              // state the loader has no way to resolve.
+              onRestore={(targets) =>
+                updateUserMods(
+                  targets.reduce<UserModRecord[]>((acc, r) => upsertUserMod(acc, r), [
+                    ...userModsRef.current,
+                  ]),
+                )
+              }
+              notices={
+                <>
+                  {/* The built share link: shown in full with its own copy
+                      button — the link is the ground truth, the copy is a
+                      convenience. */}
+                  {sharePanel?.url ? (
+                    <div className="share-panel">
+                      <div className="share-panel-row">
+                        <code className="share-panel-url">{sharePanel.url}</code>
+                        <button
+                          type="button"
+                          className="btn btn-small share-copy-btn"
+                          title="Copy the share link to the clipboard"
+                          onClick={handleShareCopy}
+                        >
+                          {shareCopied ? (
+                            <>
+                              <Icon name="check" /> copied
+                            </>
                           ) : (
-                            <span className="origin-text">pasted (this browser only)</span>
+                            <>
+                              <Icon name="copy" /> copy
+                            </>
                           )}
-                        </div>
-                        <div className="row-buttons mod-actions">
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            title="Show this mod's stored manifest, code, and mixins"
-                            onClick={() => setSourceOpenId((cur) => (cur === id ? null : id))}
-                          >
-                            <Icon name="code" /> {sourceOpenId === id ? 'hide source' : 'source'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            title={
-                              mod.enabled
-                                ? 'Switch this mod off in your library — for every instance'
-                                : 'Switch this mod on in your library'
-                            }
-                            onClick={() =>
-                              updateUserMods(
-                                userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
-                              )
-                            }
-                          >
-                            {mod.enabled ? 'disable' : 'enable'}
-                          </button>
-                          {/* The per-instance switch, deliberately NOT merged
-                              with the library one beside it. Offered only when
-                              there is an instance to scope to and the mod has a
-                              manifest id (the overlay is a list of ids and
-                              cannot address a mod without one), and only while
-                              the library switch is on — a control that promised
-                              to turn on a mod the library has off would be
-                              lying, since both switches must agree.
-
-                              The label says "this instance" in full rather than
-                              pairing "disable"/"off here": the two buttons sit
-                              inches apart and do different things, so the
-                              expensive mistake is reading one as the other. It
-                              also keeps `button:has-text("disable")` — which
-                              smoke-user-mods leg 6 clicks to exercise the
-                              LIBRARY switch — matching exactly one button. */}
-                          {instance !== null && modId !== null && mod.enabled ? (
-                            <button
-                              type="button"
-                              className="btn btn-small btn-instance-toggle"
-                              title={
-                                offHere
-                                  ? `Run this mod in '${instanceName}' again. Your other instances are unaffected either way.`
-                                  : `Stop running this mod in '${instanceName}' only. It stays in your library and keeps running in your other instances.`
-                              }
-                              onClick={() => setInstanceModDisabled(modId, !offHere)}
-                            >
-                              {offHere ? 'use in this instance' : 'skip in this instance'}
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="btn btn-small"
-                            onClick={() => {
-                              setSourceOpenId((cur) => (cur === id ? null : cur));
-                              updateUserMods(userModsRef.current.filter((m) => m !== mod));
-                            }}
-                          >
-                            remove
-                          </button>
-                          {/* "docs" opens the manifest's dedicated `docs` URL —
-                              usage documentation, NOT the repo. `homepage`
-                              (typically the repo) gets its own honestly-named
-                              "site" link. Both helpers return http(s) URLs
-                              only, so these anchors can't smuggle a
-                              javascript: href out of a pasted manifest. */}
-                          {docs ? (
-                            <a
-                              className="btn btn-small"
-                              href={docs}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={`Open this mod’s documentation: ${docs}`}
-                            >
-                              <Icon name="external" /> docs
-                            </a>
-                          ) : null}
-                          {homepage ? (
-                            <a
-                              className="btn btn-small"
-                              href={homepage}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={`Open this mod’s site: ${homepage}`}
-                            >
-                              <Icon name="external" /> site
-                            </a>
-                          ) : null}
-                        </div>
-                        {sourceOpenId === id ? (
-                          <div className="source-view">
-                            <div className="source-label">mod.json</div>
-                            <pre className="source-pre">{JSON.stringify(mod.manifest, null, 2)}</pre>
-                            <div className="source-label">entrypoint.js ({mod.code.length.toLocaleString()} chars)</div>
-                            <pre className="source-pre">{mod.code}</pre>
-                            {mod.mixins ? (
-                              <>
-                                <div className="source-label">mixins.json</div>
-                                <pre className="source-pre">{JSON.stringify(mod.mixins, null, 2)}</pre>
-                              </>
-                            ) : null}
-                            {mod.physics ? (
-                              <>
-                                <div className="source-label">physics.json</div>
-                                <pre className="source-pre">{JSON.stringify(mod.physics, null, 2)}</pre>
-                              </>
-                            ) : null}
-                          </div>
-                        ) : null}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          title="Close"
+                          onClick={() => setSharePanel(null)}
+                        >
+                          <Icon name="close" />
+                        </button>
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                      <p className="meta">
+                        {sharePanel.included.length} mod{sharePanel.included.length === 1 ? '' : 's'} —
+                        links only, never code; the recipient confirms first.
+                        {sharePanel.noSource.length > 0
+                          ? ` Pasted mods can’t ride a link: ${sharePanel.noSource.join(', ')} left out.`
+                          : ''}
+                      </p>
+                    </div>
+                  ) : null}
+                  {shareNotice ? <p className="meta share-notice">{shareNotice}</p> : null}
+                  {reloadNotice ? (
+                    <p className="warn">
+                      <Icon name="warn" /> {reloadNotice}
+                    </p>
+                  ) : null}
+                </>
+              }
+            />
             {persistWarning ? (
               <p className="warn">
                 <Icon name="warn" /> {persistWarning}
