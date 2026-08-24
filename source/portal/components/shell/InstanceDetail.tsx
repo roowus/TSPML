@@ -4,30 +4,34 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Icon } from '@/app/icons';
-import { findInstance, INSTANCE_LIMITS } from '@/lib/instances';
+import { findInstance, INSTANCE_LIMITS, isDisabledInInstance } from '@/lib/instances';
 import { readUserMods, userModId } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
 import { useInstances } from './useInstances';
 
 /**
- * One instance: its version, the mod library it launches with, and the three
- * things you can do to it (play, rename, delete).
+ * One instance: its version, which of the shared library's mods it runs, and
+ * the three things you can do to it (play, rename, delete).
  *
- * ## The mod list here is READ-ONLY, and that is the honest rendering
+ * ## What this page can and cannot change about a mod
  *
  * Mods live in one shared pool (`tspml.userMods.v1`) that every instance
- * overlays; this page reads that pool so you can see what a launch will load.
- * The per-instance on/off overlay (`disabledModIds`) is reserved in the schema
- * and honored by the resolver, but nothing writes it yet — so showing a toggle
- * here would be a control that silently does nothing. It arrives with the
- * overlay slice. Until then the copy says where mods are actually managed
- * rather than implying this page manages them.
+ * overlays. This page writes the OVERLAY — which mods this instance skips —
+ * and never the pool. So there is no add, no remove, and no library-wide
+ * enable here: those all change what every other instance sees, and they
+ * belong where the mod itself is managed, on the play page. The copy has to
+ * keep the two apart, because "off" meaning two different things one line
+ * apart is the confusion this whole model risks.
+ *
+ * A mod the LIBRARY has switched off renders as such and offers no per-instance
+ * control: both switches must agree for a mod to run, so a toggle here would
+ * promise something it cannot deliver.
  *
  * Deleting an instance deletes NO mods, and the confirm has to say so out loud:
  * the pool is shared, so "delete" is a smaller act than the word suggests.
  */
 export function InstanceDetail({ id }: { id: string }): ReactElement {
-  const { store, ready, persistFailed, rename, remove } = useInstances();
+  const { store, ready, persistFailed, rename, remove, setModDisabled } = useInstances();
   const [mods, setMods] = useState<UserModRecord[] | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
@@ -170,10 +174,11 @@ export function InstanceDetail({ id }: { id: string }): ReactElement {
         </p>
       ) : null}
 
-      <h3 className="inst-subhead">Mod library</h3>
+      <h3 className="inst-subhead">Mods</h3>
       <p className="meta">
-        Shared by every instance. Add, remove, and toggle mods on the play page;
-        this list is what a launch will load.
+        Your mod library is shared by every instance; this page picks which of
+        them <strong>{instance.name}</strong> runs. Adding and removing mods, and
+        switching one off for every instance at once, happen on the play page.
       </p>
       {mods === null ? (
         <p className="meta">Loading…</p>
@@ -184,16 +189,46 @@ export function InstanceDetail({ id }: { id: string }): ReactElement {
         </p>
       ) : (
         <ul className="rows inst-mods">
-          {mods.map((m, n) => (
-            <li key={userModId(m) ?? `row-${n}`}>
-              <div className="row-head">
-                <code>{userModId(m) ?? '(no id)'}</code>
-                <span className={m.enabled ? 'status-pill pill-on' : 'status-pill pill-off'}>
-                  {m.enabled ? 'on' : 'off'}
-                </span>
-              </div>
-            </li>
-          ))}
+          {mods.map((m, n) => {
+            const modId = userModId(m);
+            const offHere = isDisabledInInstance(instance, modId);
+            const running = m.enabled && !offHere;
+            return (
+              <li key={modId ?? `row-${n}`}>
+                <div className="row-head">
+                  <code>{modId ?? '(no id)'}</code>
+                  <span className={running ? 'status-pill pill-on' : 'status-pill pill-off'}>
+                    {m.enabled ? (offHere ? 'skipped here' : 'on') : 'off in library'}
+                  </span>
+                </div>
+                {/* No control for a library-disabled mod (it would not run
+                    whatever this said) and none for a mod with no manifest id
+                    (the overlay addresses mods by id and cannot name it). */}
+                {m.enabled && modId !== null ? (
+                  <div className="row-buttons">
+                    <button
+                      type="button"
+                      className="btn btn-small btn-instance-toggle"
+                      title={
+                        offHere
+                          ? `Run this mod in ${instance.name} again`
+                          : `Stop running this mod in ${instance.name}. It stays in your library and keeps running in your other instances.`
+                      }
+                      onClick={() => setModDisabled(instance.id, modId, !offHere)}
+                    >
+                      {offHere ? 'use in this instance' : 'skip in this instance'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="meta">
+                    {modId === null
+                      ? 'No id in its manifest, so it cannot be switched per instance.'
+                      : 'Switched off in your library, so it runs in no instance. Turn it back on from the play page.'}
+                  </p>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

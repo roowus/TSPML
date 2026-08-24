@@ -44,6 +44,13 @@ declare global {
     __smokeUserMixin?: boolean;
     /** Set in the GAME frame by smoke.mjs's SEEDED user mod's mixin inject. */
     __smokeSeededMixin?: boolean;
+    /**
+     * Smoke scratch: how many times smoke-instances.mjs's mod ran. Counted
+     * rather than flagged because the per-instance overlay legs assert it
+     * stayed UNDEFINED for the instance that skips the mod — a boolean could
+     * not tell "never ran" from "ran and set false".
+     */
+    __smokeOverlayRuns?: number;
   }
 }
 
