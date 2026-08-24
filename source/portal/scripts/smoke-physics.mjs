@@ -190,13 +190,16 @@ const physicsPanel = () =>
   page.evaluate(() => {
     const secs = Array.from(document.querySelectorAll('aside[aria-label="Mods"] section.side-section'));
     const sec = secs.find((s) => s.querySelector("h2")?.textContent?.trim() === "Physics");
-    return sec instanceof HTMLElement ? sec.innerText : "";
+    // The Mods menu is an overlay closed by default (mounted, `hidden`) —
+    // queries see through that but innerText would not, so textContent.
+    return sec instanceof HTMLElement ? sec.textContent ?? "" : "";
   });
 
 const sidebarText = () =>
   page.evaluate(() => {
     const aside = document.querySelector('aside[aria-label="Mods"]');
-    return aside instanceof HTMLElement ? aside.innerText : "";
+    // textContent, not innerText — see the note on physicsPanel above.
+    return aside instanceof HTMLElement ? aside.textContent ?? "" : "";
   });
 
 /** Poll the Physics panel until it matches, or time out to false. The panel is
@@ -222,6 +225,11 @@ async function waitForSidebar(predicateSource, timeout = 60000) {
  *  click on the summary CLOSES it when it is already open — and fill() then
  *  times out on textareas that are in the DOM but not visible. */
 async function openAddForm() {
+  // The menu overlay is closed by default; open it before anything inside.
+  if (await page.evaluate(() => /** @type {HTMLElement | null} */ (document.querySelector('aside[aria-label="Mods"]'))?.hidden ?? false)) {
+    await page.click('.mods-btn');
+    await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
+  }
   const first = page.locator('aside[aria-label="Mods"] textarea').first();
   if (!(await first.isVisible().catch(() => false))) {
     await page.click('aside[aria-label="Mods"] summary');
@@ -245,6 +253,11 @@ async function addMod(physics) {
  *  served, which is exactly why the page raises a restart banner for one. */
 async function reloadAndSettle() {
   const nav = page.waitForEvent("domcontentloaded", { timeout: 30000 }).catch(() => null);
+  // The banner lives inside the Mods menu overlay; open it if closed.
+  if (await page.evaluate(() => /** @type {HTMLElement | null} */ (document.querySelector('aside[aria-label="Mods"]'))?.hidden ?? false)) {
+    await page.click('.mods-btn');
+    await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
+  }
   const banner = page.locator('aside[aria-label="Mods"] button:has-text("reload now")');
   if ((await banner.count()) > 0) await banner.first().click();
   else await page.reload({ waitUntil: "domcontentloaded" });
@@ -273,7 +286,7 @@ out.frameMounted = !!frameEl;
 
 step("wait for the cold session to settle at 'mods: none'");
 out.initialLoadSettled = await waitForSidebar(
-  () => /mods:\s*none/.test(document.body.innerText),
+  () => /mods:\s*none/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   90000,
 );
 
@@ -289,21 +302,21 @@ out.coldNotPatched = !/patched/i.test(await physicsPanel());
 step("add the mod WITHOUT its physics.json");
 await addMod(null);
 out.addedLoaded = await waitForSidebar(
-  () => /mods:\s*✓ .*smoke-physics-mod/.test(document.body.innerText),
+  () => /mods:\s*✓ .*smoke-physics-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 // "declares a physics.json but none was pasted — the physics binary is [unchanged]".
 // A physics mod that silently does nothing is the single most confusing outcome
 // this feature can produce, so the gap must be named, by mod id.
 out.physicsSkippedSurfaced = await waitForSidebar(
-  () => /smoke-physics-mod[^]{0,120}declares[^]{0,40}physics\.json/i.test(document.body.innerText),
+  () => /smoke-physics-mod[^]{0,120}declares[^]{0,40}physics\.json/i.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   20000,
 );
 
 // ── 4. A plan pinned to another build is refused ─────────────────────────────
 step("re-add with a plan pinned to ANOTHER build, then reload");
 await addMod(physicsJson(FOREIGN_PIN));
-out.foreignRestartBanner = await waitForSidebar(() => /need a restart/.test(document.body.innerText), 20000);
+out.foreignRestartBanner = await waitForSidebar(() => /need a restart/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")), 20000);
 await reloadAndSettle();
 
 out.foreignRefused = await waitForPanel(/plan-refused/i, 120000);
@@ -321,7 +334,7 @@ out.foreignNotVanillaLabel = !/\bvanilla\b/i.test(refusedPanel);
 // ── 5. A plan pinned to THIS build is applied ────────────────────────────────
 step("re-add with a plan pinned to THIS build, then reload");
 await addMod(physicsJson(liveHash));
-out.goodRestartBanner = await waitForSidebar(() => /need a restart/.test(document.body.innerText), 20000);
+out.goodRestartBanner = await waitForSidebar(() => /need a restart/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")), 20000);
 await reloadAndSettle();
 
 out.patched = await waitForPanel(/patched/i, 120000);
@@ -335,7 +348,7 @@ out.patchedDisclosesRisk = /not vanilla/i.test(patchedPanel);
 // WARN for a physics mod. It must not block, and there is no 'block' to reach —
 // the assertion that matters is that the row is not silent or green.
 out.safetyRowWarns = await waitForSidebar(
-  () => /safety:\s*⚠ leaderboard risk/.test(document.body.innerText),
+  () => /safety:\s*⚠ leaderboard risk/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 // Captured HERE, not in the final report: leg 6 removes the mod, and the row
@@ -350,7 +363,7 @@ out.gameFrameSurvives = await page
   .then(() => true)
   .catch(() => false);
 out.gameBooted = await waitForSidebar(
-  () => /tracks:\s*✓ attached/.test(document.body.innerText),
+  () => /tracks:\s*✓ attached/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   90000,
 );
 
@@ -358,6 +371,11 @@ await page.screenshot({ path: SHOT });
 
 // ── 6. Remove ────────────────────────────────────────────────────────────────
 step("remove the mod");
+// Reloads close the menu; the remove button is inside it.
+if (await page.evaluate(() => /** @type {HTMLElement | null} */ (document.querySelector('aside[aria-label="Mods"]'))?.hidden ?? false)) {
+  await page.click('.mods-btn');
+  await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
+}
 await page.click(`aside[aria-label="Mods"] li:has(code:text-is("${MOD_ID}")) button:has-text("remove")`);
 await page.waitForTimeout(1000);
 out.storageCleared = await page.evaluate((id) => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { Audio, Editor, EditorLifecycle, EventBus, Keybinds, Tracks } from '@tspml/api-bridge';
 import type {
   EditorAccessor,
@@ -101,7 +101,8 @@ import { useInstall, type InstallTarget } from '@/components/shell/useInstall';
  * — so it needs no early-capture slot and attaches from a single object.
  *
  * Layout/styling lives in globals.css. The headless smokes assert on this
- * page's rendered text and structure (aside[aria-label="Mods"], the Add form's
+ * page's rendered text and structure (aside[aria-label="Mods"] — now the Mods
+ * MENU panel over the stage rather than a split-screen column — the Add form's
  * <summary> + textareas 0-2 in that order — box 4 (physics.json, #43) is
  * APPENDED after them for exactly this reason, the "Your mixins" heading, the restart banner's
  * "need a restart" / "reload now", the `mods:`/`safety:` status lines, and the
@@ -116,18 +117,6 @@ const GAME_FRAME_SRC = `/api/proxy/?version=${GAME_VERSION}`;
  * runtime and what its `depends` range was checked against cannot disagree.
  */
 const TSPML_VERSION = TSPML_LOADER_VERSION;
-
-// The stage/sidebar split. The width is persisted so a chosen layout survives
-// reloads; the clamp keeps both panes usable (the sidebar's content needs
-// ~260px before it wraps badly; past 640px the game pane starves on a laptop).
-const SIDEBAR_WIDTH_KEY = 'tspml.sidebarWidth.v1';
-const SIDEBAR_DEFAULT_WIDTH = 340;
-const SIDEBAR_MIN_WIDTH = 260;
-const SIDEBAR_MAX_WIDTH = 640;
-
-function clampSidebarWidth(w: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(w)));
-}
 
 /**
  * What the portal puts on `window.__tspml`: the full mod-facing {@link TspmlApi}
@@ -300,12 +289,12 @@ export default function PlayPage(): ReactElement {
   // The in-play catalog, as an overlay over the stage rather than a route: a
   // navigation to /browse would unmount the game iframe and lose the run.
   const [browseOpen, setBrowseOpen] = useState(false);
-  // The stage/sidebar split, draggable via the resizer bar between them.
-  // Rides a CSS custom property on .content (never an inline width on the
-  // aside) so the ≤900px stacked layout's `width: auto` still wins — an inline
-  // style would override the media query and wedge the phone layout.
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
-  const sidebarDragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  // The Mods menu — every mod-management surface that used to be a permanent
+  // split-screen sidebar column. Same overlay pattern as the browse drawer:
+  // mounted as a sibling of section.stage inside div.content so opening it can
+  // never re-parent or unmount the game iframe. `hidden` when closed keeps its
+  // DOM (and therefore every smoke selector) present at all times.
+  const [menuOpen, setMenuOpen] = useState(false);
   // Boot progress plumbing: the stage shows a step list until every TSPML boot
   // stage lands (SW controls the page → mixin plan parked → game bundle loaded
   // → mods loaded), then fades. `frameLoaded` flips in handleFrameLoad;
@@ -459,88 +448,25 @@ export default function PlayPage(): ReactElement {
     }
   };
 
-  // Esc leaves theater mode — but only while the PORTAL window has focus; keys
-  // pressed inside the game iframe land in the game (that is what keybinds are
-  // for). The on-stage button is therefore the primary way out, Esc a courtesy.
+  // Esc leaves theater mode and closes the Mods menu — but only while the
+  // PORTAL window has focus; keys pressed inside the game iframe land in the
+  // game (that is what keybinds are for). The on-stage buttons are the primary
+  // way out of either, Esc a courtesy.
   useEffect(() => {
-    if (!isTheater) return;
+    if (!isTheater && !menuOpen) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setIsTheater(false);
+      if (e.key === 'Escape') {
+        setIsTheater(false);
+        setMenuOpen(false);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isTheater]);
+  }, [isTheater, menuOpen]);
 
   // The #118 pre-hydration adoption effect lives in AddModForm, not here: it
   // reads the DOM through refs on the Add-form controls, and the fix only holds
   // while it is a []-dep mount effect in the same component that renders them.
-
-  // Restore the dragged stage/sidebar split — client-only (localStorage does
-  // not exist during SSR/prerender, and reading it in useState's initializer
-  // would also hydration-mismatch the server-rendered CSS var).
-  useEffect(() => {
-    try {
-      const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
-      if (Number.isFinite(stored) && stored > 0) setSidebarWidth(clampSidebarWidth(stored));
-    } catch {
-      // Storage blocked — the default width is fine.
-    }
-  }, []);
-
-  /**
-   * Drag-to-resize for the stage/sidebar split. Pointer events + capture on
-   * the handle itself: the iframe next door swallows mouse events the moment
-   * the pointer crosses into it, so without `setPointerCapture` every drag
-   * dies at the frame edge. The bar sits to the sidebar's LEFT, so dragging
-   * left (negative dx) grows the sidebar.
-   */
-  const onResizeStart = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    sidebarDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startWidth: sidebarWidth };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onResizeMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    const drag = sidebarDragRef.current;
-    if (!drag || e.pointerId !== drag.pointerId) return;
-    setSidebarWidth(clampSidebarWidth(drag.startWidth - (e.clientX - drag.startX)));
-  };
-  const onResizeEnd = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    const drag = sidebarDragRef.current;
-    if (!drag || e.pointerId !== drag.pointerId) return;
-    sidebarDragRef.current = null;
-    setSidebarWidth((w) => {
-      try {
-        window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
-      } catch {
-        // Best-effort persistence, like the mod list's.
-      }
-      return w;
-    });
-  };
-  const onResizeKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
-    // Keyboard operability for the separator (role="separator" contract):
-    // arrows nudge the split; Home/End jump to the extremes.
-    const step = 24;
-    const next =
-      e.key === 'ArrowLeft'
-        ? sidebarWidth + step
-        : e.key === 'ArrowRight'
-          ? sidebarWidth - step
-          : e.key === 'Home'
-            ? SIDEBAR_MAX_WIDTH
-            : e.key === 'End'
-              ? SIDEBAR_MIN_WIDTH
-              : null;
-    if (next === null) return;
-    e.preventDefault();
-    const w = clampSidebarWidth(next);
-    setSidebarWidth(w);
-    try {
-      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
-    } catch {
-      // Best-effort.
-    }
-  };
 
   /**
    * `?instance=<id>` — resolve the launching instance, record the launch.
@@ -1508,10 +1434,7 @@ export default function PlayPage(): ReactElement {
         </div>
       </header>
 
-      <div
-        className="content"
-        style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
-      >
+      <div className="content">
         {/* Mount also gates on planReady (#62): the SW reads the mixin plan
             from the Cache API while serving the bundle, so it must be parked
             before the frame's first fetch. The park is a couple of Cache API
@@ -1529,6 +1452,19 @@ export default function PlayPage(): ReactElement {
                 allowFullScreen
               />
               <div className="stage-controls">
+                {/* Opens the Mods menu OVER the stage — every mod surface that
+                    used to be the split-screen sidebar. Deliberately not a link:
+                    any navigation unmounts this iframe and ends the run. */}
+                <button
+                  type="button"
+                  className="stage-btn mods-btn"
+                  onClick={() => setMenuOpen((m) => !m)}
+                  aria-expanded={menuOpen}
+                  aria-controls="mods-menu"
+                  title={menuOpen ? 'Close the mod manager' : 'Manage mods'}
+                >
+                  <Icon name="pencil" /> Mods
+                </button>
                 {/* Opens the catalog OVER the stage. Deliberately not a link to
                     /browse: that navigation unmounts this iframe and ends the
                     run. Lives here rather than in the sidebar because the
@@ -1644,37 +1580,38 @@ export default function PlayPage(): ReactElement {
           install={drawerInstall}
         />
 
-        {/* Drag handle for the stage/sidebar split. A plain div with the
-            separator role (not a button — it is not activatable, it is
-            draggable). Hidden by CSS in the ≤900px stacked layout, where a
-            horizontal split has no meaning, and painted over in theater mode
-            like the rest of the chrome. */}
-        <div
-          className="content-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the game / mod manager split"
-          aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
-          aria-valuenow={sidebarWidth}
-          tabIndex={0}
-          title="Drag to resize (arrow keys work too); double-click to reset"
-          onPointerDown={onResizeStart}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeEnd}
-          onPointerCancel={onResizeEnd}
-          onKeyDown={onResizeKeyDown}
-          onDoubleClick={() => {
-            setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
-            try {
-              window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(SIDEBAR_DEFAULT_WIDTH));
-            } catch {
-              // Best-effort.
-            }
-          }}
-        />
+        {/* The Mods menu: everything that used to be the permanent sidebar,
+            now one overlay panel opened from the stage's Mods button. Same
+            sibling-of-stage placement as the browse drawer — opening it can
+            never re-parent or unmount the game iframe. `hidden` when closed
+            keeps its DOM present for the smokes that read the aside without
+            opening it first, and matches the drawer's close/reopen semantics.
+            role="dialog" + aria-modal="false" like BrowseDrawer: it is an
+            overlay, but the game stays visible and running behind it. */}
+        <aside
+          id="mods-menu"
+          className="mods-menu"
+          role="dialog"
+          aria-modal="false"
+          aria-label="Mods"
+          hidden={!menuOpen}
+        >
+          {/* Smoke contract: several smokes click this aside's FIRST summary
+              blind to open the Add form — no other summary may precede it.
+              The header's close control is a BUTTON, so it cannot steal that
+              slot; a <details> summary up here would break three smokes. */}
+          <div className="mods-menu-head">
+            <h2>Mods</h2>
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => setMenuOpen(false)}
+              title="Close the mod manager (Esc works too)"
+            >
+              <Icon name="close" /> Close
+            </button>
+          </div>
 
-        <aside className="sidebar" aria-label="Mods">
           {/* Incoming share link: the confirm-first panel. It lists every link
               and does NOTHING until "Import" is clicked — mod code runs
               unsandboxed, so a share URL must never auto-run anything. Links
