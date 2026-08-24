@@ -138,7 +138,7 @@ Two independent gates stand between a patch and a write, and both fail closed. `
 
 Declaring `physics` marks the mod as a leaderboard risk whatever `vanillaSafe` claims: rewriting a constant changes how every lap time is produced. The label is warn-only, as everywhere else in TSPML — the player decides.
 
-Limits: 16 patches per mod, 32 across all enabled mods. Two mods patching the same constant is a conflict, and the later one is dropped with a reason rather than both being refused.
+Limits: 16 patches per mod, 32 across all enabled mods. When several mods declare `physics` the portal merges them into one plan and reports every mod it left out, by reason: `malformed` (its file does not parse), `hash-conflict` (it pins a different binary than the first mod in the merge), `duplicate-target` (it patches a constant an earlier mod already claimed), `over-cap` (adding it would exceed 32). Exclusion is **per mod, not per patch** — the earlier mod keeps its patches and the later one is left out whole, rather than both being refused or one applying half a plan.
 
 > ⚠️ **`includes` is parsed but not implemented (#16).** It would let a mod package ship another mod nested inside it, and TSPML has no delivery mechanism for that — we cannot yet install a mod from a directory at all, let alone one nested inside another package. Declaring it validates cleanly and now emits an `unsupported-includes` warning; **the nested mod will not be loaded.** Ship it separately and use `depends` instead. The field stays in the schema (rejecting it would break manifests that are valid per this spec) and may be honoured later.
 
