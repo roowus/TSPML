@@ -11,9 +11,12 @@
 //   4. clicking again exits fullscreen;
 //   5. clicking expand puts the app in theater mode: the stage covers the whole
 //      viewport WITHOUT the Fullscreen API; clicking again restores the layout;
-//   6. the sidebar's Log section exists collapsed, and opening it shows the
-//      timestamped session events the boot path wrote;
-//   7. at a phone-width viewport the sidebar stacks BELOW the game stage.
+//   6. the Mods menu opens from the stage's Mods button, and its Log section
+//      exists collapsed, opening to the timestamped session events the boot
+//      path wrote;
+//   7. there is no split screen at ANY width: the stage fills the play
+//      surface, the menu is closed by default, and at phone width it covers
+//      the viewport as a full overlay instead of stacking under the game.
 //
 //   pnpm --filter @tspml/portal dev       # in one terminal (:3000)
 //   pnpm --filter @tspml/portal smoke:ui  # in another
@@ -135,7 +138,29 @@ out.theaterExited = await settle(
 // 6. Session log: the sidebar's Log section is collapsed by default; opening
 // it reveals the timestamped lines the boot path logged (SW registration,
 // frame load, mods loaded — anything, we only assert lines exist).
-step('open the sidebar Log section');
+// The Mods menu is an overlay closed by default (the old always-on sidebar
+// is gone); open it from the stage button. It must also stay CLOSED at rest —
+// a menu that renders open would be the split screen back by another name.
+out.menuClosedAtRest = await page.evaluate(
+  () =>
+    /** @type {HTMLElement | null} */ (
+      document.querySelector('aside[aria-label="Mods"]')
+    )?.hidden === true,
+);
+out.stageFillsWidth = await page.evaluate(() => {
+  const stage = document.querySelector('.stage');
+  const content = document.querySelector('.content');
+  return (
+    !!stage &&
+    !!content &&
+    Math.abs(stage.getBoundingClientRect().width - content.getBoundingClientRect().width) < 2
+  );
+});
+await page.click('.mods-btn');
+await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
+out.menuOpens = true;
+
+step('open the menu Log section');
 out.logCollapsed = await page.evaluate(() => {
   const d = document.querySelector('details.log-details');
   return d instanceof HTMLDetailsElement && !d.open;
@@ -146,15 +171,33 @@ out.logHasLines = await page.evaluate(
   () => document.querySelectorAll('details.log-details .log-line').length >= 3,
 );
 
-step('narrow viewport: sidebar stacks under the stage');
+step('narrow viewport: menu is a full overlay, not a stack');
+// Close the menu first so the check is about the CLOSED geometry. Esc, not
+// the Mods button: the open overlay covers the stage controls, so the toggle
+// is unreachable while the menu is up (its own Close button is the way out,
+// same contract as the browse drawer).
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
 await page.setViewportSize({ width: 480, height: 900 });
 await page.waitForTimeout(500);
-out.narrowStacked = await page.evaluate(() => {
+out.narrowStageFullBleed = await page.evaluate(() => {
   const stage = document.querySelector('.stage');
-  const side = document.querySelector('.sidebar');
-  return (
-    !!stage && !!side && side.getBoundingClientRect().top >= stage.getBoundingClientRect().bottom - 1
+  const content = document.querySelector('.content');
+  if (!stage || !content) return false;
+  // Against .content (the app keeps its frame padding at every width).
+  const r = stage.getBoundingClientRect();
+  return Math.abs(r.width - content.getBoundingClientRect().width) < 2;
+});
+// And opened at this width it covers the viewport (CSS makes it fixed).
+await page.click('.mods-btn');
+await page.waitForTimeout(400);
+out.narrowMenuCoversViewport = await page.evaluate(() => {
+  const menu = /** @type {HTMLElement | null} */ (
+    document.querySelector('aside[aria-label="Mods"]')
   );
+  if (!menu || menu.hidden) return false;
+  const r = menu.getBoundingClientRect();
+  return r.left <= 1 && r.width >= window.innerWidth - 2 && r.height >= window.innerHeight - 2;
 });
 await page.screenshot({ path: SHOT });
 
@@ -172,7 +215,11 @@ const PASS =
   out.theaterExited === true &&
   out.logCollapsed === true &&
   out.logHasLines === true &&
-  out.narrowStacked === true;
+  out.menuClosedAtRest === true &&
+  out.menuOpens === true &&
+  out.stageFillsWidth === true &&
+  out.narrowStageFullBleed === true &&
+  out.narrowMenuCoversViewport === true;
 
 console.log(JSON.stringify({ PASS, verdict: out, shot: SHOT }, null, 2));
 await browser.close();

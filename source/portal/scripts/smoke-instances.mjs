@@ -139,7 +139,17 @@ async function open(instanceId) {
       .waitForSelector('iframe[title="PolyTrack (proxied)"]', { timeout: 45000 })
       .catch(() => null);
   }
+  await openModsMenu();
   return !!frame;
+}
+
+/** Open the Mods menu overlay. Closed by default; the legs click buttons
+ *  inside it, so every `open()` lands with it visible. */
+async function openModsMenu() {
+  if (await page.evaluate(() => /** @type {HTMLElement | null} */ (document.querySelector('aside[aria-label="Mods"]'))?.hidden ?? false)) {
+    await page.click('.mods-btn');
+    await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
+  }
 }
 
 const sidebarText = () =>
@@ -147,7 +157,9 @@ const sidebarText = () =>
     const aside = /** @type {HTMLElement | null} */ (
       document.querySelector('aside[aria-label="Mods"]')
     );
-    return aside?.innerText ?? "";
+    // textContent: the Mods menu overlay is closed by default (`hidden` but
+    // mounted) and innerText of a hidden element reads as "".
+    return aside?.textContent ?? "";
   });
 
 /** Wait until the main frame matches (or timeout → false). */
@@ -191,7 +203,7 @@ async function poolIsUntouched() {
 step("leg A — /play?instance=keep: the mod runs");
 out.aFrameMounted = await open("keep");
 out.aModLoads = await waitForSidebar(
-  () => /mods:\s*✓ .*smoke-overlay-mod/.test(document.body.innerText),
+  () => /mods:\s*✓ .*smoke-overlay-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
 );
 out.aEntrypointRan = await page
   .waitForFunction(() => window.__smokeOverlayRuns === 1, undefined, { timeout: 15000 })
@@ -207,7 +219,7 @@ step("leg B — /play?instance=skip: the same mod does not");
 out.bFrameMounted = await open("skip");
 // A pool of one, entirely overlaid off, settles at the same honest "none" an
 // empty pool does — the loader was handed nothing and says so.
-out.bModSkipped = await waitForSidebar(() => /mods:\s*none/.test(document.body.innerText));
+out.bModSkipped = await waitForSidebar(() => /mods:\s*none/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")));
 out.bEntrypointDidNotRun = await page.evaluate(() => window.__smokeOverlayRuns === undefined);
 const bText = await sidebarText();
 // Hidden from the instance, NOT removed from the library.
@@ -226,7 +238,7 @@ await page
   .click('aside[aria-label="Mods"] button:has-text("use in this instance")', { timeout: 10000 })
   .catch(() => {});
 out.cModLoadsAfterToggle = await waitForSidebar(
-  () => /mods:\s*✓ .*smoke-overlay-mod/.test(document.body.innerText),
+  () => /mods:\s*✓ .*smoke-overlay-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   60000,
 );
 out.cEntrypointRan = await page.evaluate(() => window.__smokeOverlayRuns >= 1);
@@ -242,7 +254,7 @@ step("leg D — 'skip in this instance' unloads it live, pool still enabled");
 await page
   .click('aside[aria-label="Mods"] button:has-text("skip in this instance")', { timeout: 10000 })
   .catch(() => {});
-out.dModUnloadsLive = await waitForSidebar(() => /mods:\s*none/.test(document.body.innerText), 60000);
+out.dModUnloadsLive = await waitForSidebar(() => /mods:\s*none/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")), 60000);
 const dInstance = await readInstance("skip");
 out.dOverlayWritten = !!dInstance && dInstance.disabledModIds.includes(MOD_ID);
 out.dPoolStillEnabled = await poolIsUntouched();

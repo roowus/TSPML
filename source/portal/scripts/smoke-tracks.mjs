@@ -100,7 +100,7 @@ if (!frameEl) {
 // faster, and a stall is named instead of silent.
 const attached = await stage(
   "wait for the capture patches (tracks: ✓ attached)",
-  page.waitForFunction(() => document.body.innerText.includes("tracks: ✓ attached"), undefined, {
+  page.waitForFunction(() => (document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "").includes("tracks: ✓ attached"), undefined, {
     timeout: 90000,
     polling: 500,
   }),

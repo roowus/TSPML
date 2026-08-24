@@ -112,7 +112,7 @@ if (!frameEl) {
 // sidebar rather than sleeping a flat interval: a stall is then named instead of silent.
 const attached = await stage(
   "wait for the capture patch (audio: ✓ attached)",
-  page.waitForFunction(() => document.body.innerText.includes("audio: ✓ attached"), undefined, {
+  page.waitForFunction(() => (document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "").includes("audio: ✓ attached"), undefined, {
     timeout: 90000,
     polling: 500,
   }),

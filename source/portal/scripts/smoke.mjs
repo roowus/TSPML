@@ -229,7 +229,12 @@ const sidebar = await page.mainFrame().evaluate((expected) => {
     document.querySelector('aside[aria-label="Mods"]')
   );
   if (!aside) return { present: false, text: "", modIds: [], statuses: [] };
-  const text = aside.innerText || "";
+  // The Mods menu is an overlay closed by default (the Mods stage button opens
+  // it), but it stays MOUNTED when closed — `hidden`, not unrendered. Queries
+  // see through that; innerText would not, so this reads textContent. The
+  // status rows are plain text nodes, which is what the row() regex below
+  // still matches.
+  const text = aside.textContent || "";
   // Scope to the "Loaded mods" section: with user mods seeded, the "Your mods"
   // rows (whose first <span> is the buttons wrapper) and the "Your mixins"
   // report rows also render a <code> — only the loaded list's first <span> is
@@ -247,8 +252,11 @@ const sidebar = await page.mainFrame().evaluate((expected) => {
     .filter(Boolean)
     .map((el) => el.textContent.trim());
   const row = (label) => {
-    const m = text.match(new RegExp(`^${label}:\\s*(.+)$`, "m"));
-    return m ? m[1].trim() : null;
+    // textContent has no line structure, so the anchored ^…$ form is gone;
+    // each status line ends at the next label (or the footer), and the labels
+    // are unique, so a lazy match to the next known boundary is equivalent.
+    const m = text.match(new RegExp(`${label}:\\s*(.+?)(?=(bridge:|registry:|mods:|safety:|tracks:|audio:|editor:|TSPML is a fan-made)|$)`));
+    return m ? m[1].trim().replace(/\s+/g, " ") : null;
   };
   return {
     present: true,

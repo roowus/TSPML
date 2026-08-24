@@ -84,7 +84,9 @@ const sidebarText = () =>
     const aside = /** @type {HTMLElement | null} */ (
       document.querySelector('aside[aria-label="Mods"]')
     );
-    return aside?.innerText ?? "";
+    // textContent: the Mods menu overlay is closed by default (`hidden` but
+    // mounted), and innerText of a hidden element reads as "".
+    return aside?.textContent ?? "";
   });
 
 const out = {};
@@ -190,7 +192,7 @@ out.listedUnderYourMods = await waitFor(
     const aside = /** @type {HTMLElement | null} */ (
       document.querySelector('aside[aria-label="Mods"]')
     );
-    return (aside?.innerText ?? "").includes(id);
+    return (aside?.textContent ?? "").includes(id);
   },
   ENTRY_ID,
   60000,
@@ -204,7 +206,7 @@ out.modLoaded = await waitFor(
     const aside = /** @type {HTMLElement | null} */ (
       document.querySelector('aside[aria-label="Mods"]')
     );
-    return new RegExp("mods:\\s*✓ .*" + id).test(aside?.innerText ?? "");
+    return new RegExp("mods:\\s*✓ .*" + id).test(aside?.textContent ?? "");
   },
   ENTRY_ID,
   90000,

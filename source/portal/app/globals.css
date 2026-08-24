@@ -216,28 +216,23 @@ body {
 .content {
   display: flex;
   flex: 1;
-  gap: 6px;
-  min-height: 0; /* lets the stage/sidebar shrink instead of overflowing */
-  /* The stage/sidebar split, driven by the resizer bar (page.tsx sets it
-     inline). A custom property rather than an inline width on the aside so
-     the ≤900px stacked layout's `width: auto` still wins. */
-  --sidebar-width: 340px;
-  /* The containing block for .browse-drawer, which is absolutely positioned so
-     it can cover the stage WITHOUT joining the flex row. Out of flow matters:
-     smoke-ui asserts the sidebar sits below the stage in the stacked layout,
-     and a fourth flex item would move it. */
+  min-height: 0; /* lets the stage shrink instead of overflowing */
+  /* No split any more: the stage IS the play surface, full-bleed, and the mod
+     surfaces are two overlays (the Mods menu and the browse drawer) anchored to
+     this box. `position: relative` is what they position against — out of flow
+     matters, because an in-flow panel would join the flex row and resize the
+     running game. */
   position: relative;
 }
 
 /* ---- In-play catalog drawer ---- */
 
-/* Covers the stage area only — the sidebar stays reachable, so a mod installed
-   from the drawer can be seen appearing in Your mods without closing anything.
-   The right offset is the same custom property the flex row uses (plus the 6px
-   gap and the 8px resizer), so dragging the split moves the drawer with it. */
+/* Covers the whole play surface. The Mods menu is the sibling overlay; opening
+   one while the other is open is fine — both are panels over a paused-in-place
+   game, and each has its own close control. */
 .browse-drawer {
   position: absolute;
-  inset: 0 calc(var(--sidebar-width) + 14px) 0 0;
+  inset: 0;
   z-index: 60; /* over the boot overlay (4), stage controls (5), theater (50) */
   display: flex;
   flex-direction: column;
@@ -291,8 +286,10 @@ body {
    out of the viewport behind it — so an absolutely-positioned drawer would open
    somewhere nobody can see. Match the stage: cover the viewport, and sit above
    it. Without this, "Browse" in theater mode does nothing visible, which reads
-   as a broken button rather than a layout rule. */
-.app.theater .browse-drawer {
+   as a broken button rather than a layout rule. The Mods menu needs the same
+   rule for exactly the same reason — both are .content-anchored overlays. */
+.app.theater .browse-drawer,
+.app.theater .mods-menu {
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -302,40 +299,6 @@ body {
 .browse-btn[aria-expanded='true'] {
   border-color: var(--accent);
   color: var(--accent);
-}
-
-/* ---- Stage/sidebar drag handle ---- */
-
-.content-resizer {
-  flex: none;
-  width: 8px;
-  border-radius: var(--r-sm);
-  cursor: col-resize;
-  touch-action: none; /* pointer events drive the drag; don't scroll instead */
-  background: transparent;
-  position: relative;
-}
-
-/* The visible grip: a slim line that widens/brightens under the pointer so
-   the affordance is discoverable without a permanent visual seam. */
-.content-resizer::before {
-  content: '';
-  position: absolute;
-  inset: 0 3px;
-  border-radius: 2px;
-  background: var(--border);
-  transition: background 0.15s ease, inset 0.15s ease;
-}
-
-.content-resizer:hover::before,
-.content-resizer:focus-visible::before,
-.content-resizer:active::before {
-  inset: 0 2px;
-  background: var(--accent);
-}
-
-.content-resizer:focus-visible {
-  outline: none;
 }
 
 /* ---- Game stage ---- */
@@ -510,14 +473,13 @@ body {
     animation: none;
   }
 
-  /* Hover/focus tweens across every surface: the stage controls, the sidebar
-     grip, the mod shelf rows, and the launcher's buttons, nav, tabs, chips and
-     cards. Every end state (opacity 1, the accent grip, a darker row, a lit
-     border) is unchanged — they arrive at once instead of over 140ms.
+  /* Hover/focus tweens across every surface: the stage controls, the mod
+     shelf rows, and the launcher's buttons, nav, tabs, chips and cards. Every
+     end state (opacity 1, a darker row, a lit border) is unchanged — they
+     arrive at once instead of over 140ms.
      Listed by name rather than swept with `*` for the reason above the block:
      two transitions on this page carry information and must survive. */
   .stage-btn,
-  .content-resizer::before,
   .boot-overlay,
   .rows.mod-shelf li,
   .btn,
@@ -650,16 +612,52 @@ body {
   opacity: 0.8;
 }
 
-/* ---- Sidebar ---- */
-
-.sidebar {
-  width: var(--sidebar-width, 340px);
-  flex: none;
+/* ---- Mods menu ----
+ *
+ * Everything that used to live in a permanent split-screen sidebar column now
+ * lives in ONE overlay panel opened from the stage's "Mods" button — the same
+ * pattern as the browse drawer beside it. The game keeps its whole surface;
+ * mod management is something you open, use, and close rather than furniture
+ * permanently eating a third of the screen.
+ *
+ * `hidden` is the closed state (the UA rule wins over display:flex below, same
+ * as .browse-drawer), and the panel stays MOUNTED when closed: the Add form is
+ * server-rendered and must stay so for #118's pre-hydration adoption, and the
+ * smokes read this aside's text without opening it first. */
+.mods-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 60; /* over the boot overlay (4), stage controls (5), theater (50) */
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   padding: 16px;
+}
+
+/* The menu opens with the same arrival as the drawer: a few pixels in from the
+   stage edge, short and opacity-led, because it plays over a running game.
+   Re-triggers on every open for free via [hidden]'s display:none. */
+.mods-menu {
+  animation: drawer-in 140ms ease-out;
+}
+
+.mods-menu[hidden] {
+  display: none; /* `display: block`-ish default above would defeat the UA rule */
+}
+
+.mods-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.mods-menu-head > h2 {
+  margin: 0;
+  font-size: 15px;
 }
 
 .side-section {
@@ -677,7 +675,7 @@ body {
   line-height: 1.5;
 }
 
-.sidebar > .side-section:first-child {
+.mods-menu > .side-section:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
@@ -2139,11 +2137,17 @@ a.btn {
 .shell input:focus-visible,
 .shell select:focus-visible,
 .sidebar a:focus-visible,
+.mods-menu a:focus-visible,
 .sidebar button:focus-visible,
+.mods-menu button:focus-visible,
 .sidebar input:focus-visible,
+.mods-menu input:focus-visible,
 .sidebar select:focus-visible,
+.mods-menu select:focus-visible,
 .sidebar textarea:focus-visible,
+.mods-menu textarea:focus-visible,
 .sidebar summary:focus-visible,
+.mods-menu summary:focus-visible,
 .browse-drawer a:focus-visible,
 .browse-drawer button:focus-visible,
 .browse-drawer input:focus-visible,
@@ -2243,39 +2247,20 @@ a.btn {
   }
 }
 
-/* ---- Narrow screens: stack, game keeps a 16:9 box ---- */
-
+/* ---- Narrow screens ----
+ *
+ * There is no split to re-flow at any width any more: the stage is the play
+ * surface at 1440px and at 375px alike. The only narrow-specific rule left is
+ * the overlays — pinned to the viewport rather than to .content, because on a
+ * phone the panel wants the whole screen and its own scrolling, not a share of
+ * the game's box. */
 @media (max-width: 900px) {
-  .app {
-    height: auto;
-    min-height: 100dvh;
-  }
-
-  .content {
-    flex-direction: column;
-  }
-
-  .stage {
-    flex: none;
-    aspect-ratio: 16 / 9;
-  }
-
-  .sidebar {
-    width: auto;
-    overflow-y: visible;
-  }
-
-  /* Stacked layout: a horizontal split does not exist to resize. */
-  .content-resizer {
-    display: none;
-  }
-
-  /* Stacked, so there is no sidebar column to leave room for; and .content is
-     taller than the viewport here, so anchoring to it would put the drawer's
-     bottom off-screen with nothing scrollable. Fixed to the viewport instead. */
-  .browse-drawer {
+  .browse-drawer,
+  .mods-menu {
     position: fixed;
     inset: 0;
+    z-index: 60;
     border-radius: 0;
+    max-height: none;
   }
 }

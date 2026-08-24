@@ -75,8 +75,17 @@ const out = {};
 
 // The server-rendered form must be REACHABLE this early, or there is no bug to
 // have and nothing below means anything.
+//
+// The Mods menu is an overlay closed by default (`hidden`, set server-side),
+// and its opener button cannot be used yet — clicking anything requires React.
+// Removing the `hidden` attribute directly is pure DOM, no JS, so the panel
+// (and with it the Add form) becomes visible exactly as it would after a real
+// user opened the menu — without touching hydration timing at all.
 step('open the Add form from server-rendered HTML');
-await page.waitForSelector(`${ASIDE} summary`, { timeout: 30000 });
+await page.waitForSelector(`${ASIDE} summary`, { state: 'attached', timeout: 30000 });
+await page.evaluate(() => {
+  document.querySelector('aside[aria-label="Mods"]')?.removeAttribute('hidden');
+});
 await page.click(`${ASIDE} summary`);
 out.formUsableBeforeHydration = !!(await page
   .waitForSelector(SELECT, { timeout: 30000 })
