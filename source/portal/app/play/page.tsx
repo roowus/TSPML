@@ -50,15 +50,21 @@ import type { PhysicsExclusion, PhysicsReport } from '@/lib/physics-plan';
 import { teardown } from '@/lib/teardown';
 import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
 import {
+  applyInstanceOverlay,
   findInstance,
+  isDisabledInInstance,
   readInstances,
   saveInstances,
+  setModDisabledInInstance,
   touchInstance,
+  type Instance,
 } from '@/lib/instances';
 import { AddModForm } from '@/components/play/AddModForm';
+import { BrowseDrawer } from '@/components/play/BrowseDrawer';
 import { ModTile } from '@/components/play/ModTile';
 import { ServiceWorkerBadge } from '@/components/play/ServiceWorkerBadge';
 import type { LoadedModRow, SwState } from '@/components/play/types';
+import { useInstall, type InstallTarget } from '@/components/shell/useInstall';
 
 /**
  * The play surface, at `/play`.
@@ -291,6 +297,9 @@ export default function PlayPage(): ReactElement {
   // sidebar collapse via a class on .app — WITHOUT the Fullscreen API, so the
   // browser chrome stays. A separate control from fullscreen on purpose.
   const [isTheater, setIsTheater] = useState(false);
+  // The in-play catalog, as an overlay over the stage rather than a route: a
+  // navigation to /browse would unmount the game iframe and lose the run.
+  const [browseOpen, setBrowseOpen] = useState(false);
   // The stage/sidebar split, draggable via the resizer bar between them.
   // Rides a CSS custom property on .content (never an inline width on the
   // aside) so the ≤900px stacked layout's `width: auto` still wins — an inline
@@ -320,10 +329,27 @@ export default function PlayPage(): ReactElement {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [sharePrompt, setSharePrompt] = useState<ShareParseResult | null>(null);
   const [shareImportBusy, setShareImportBusy] = useState(false);
-  // The launching instance's name, for the topbar. Null when the page was
-  // opened directly rather than from the launcher, or when the id did not
-  // resolve — both of which are ordinary, so neither shows an error.
-  const [instanceName, setInstanceName] = useState<string | null>(null);
+  // The launching instance, for the topbar and the per-instance mod overlay.
+  // Null when the page was opened directly rather than from the launcher, or
+  // when the id did not resolve — both ordinary, so neither shows an error, and
+  // both mean NO overlay (the whole library runs, as it did before instances).
+  //
+  // Mirrored into a ref for the same reason `userMods` is: the plan-parking and
+  // loader paths run outside React's render cycle and would otherwise read a
+  // stale instance, which here means running a mod the player switched off.
+  const [instance, setInstance] = useState<Instance | null>(null);
+  const instanceRef = useRef<Instance | null>(null);
+  const instanceName = instance?.name ?? null;
+  /**
+   * The mod set as it should RUN: the shared library projected through this
+   * instance's overlay.
+   *
+   * Every runtime consumer takes this, and `saveUserMods` never does — see
+   * {@link applyInstanceOverlay}. Persisting the projection would turn one
+   * instance's per-mod switch into everybody's.
+   */
+  const runningMods = (): UserModRecord[] =>
+    applyInstanceOverlay(userModsRef.current, instanceRef.current);
   // Which mod row's source viewer is open (by mod id). A button-toggled panel,
   // NOT a <details>: the smokes click the aside's FIRST <summary> expecting the
   // Add form's, and a per-row summary would steal that slot.
@@ -520,6 +546,48 @@ export default function PlayPage(): ReactElement {
     }
   };
 
+  /**
+   * `?instance=<id>` — resolve the launching instance, record the launch.
+   *
+   * Declared BEFORE the hydration effect on purpose. Effects run in declaration
+   * order on mount, and the hydration effect parks the mixin and physics plans
+   * for the frame that is about to boot; if the instance were not resolved by
+   * then, the first plan would be parked without the overlay and the running
+   * bundle would carry patches from a mod this instance has switched off. The
+   * bundle is immutable once loaded, so that is not a glitch that a re-render
+   * fixes — only a reload does.
+   *
+   * An unknown id (a stale bookmark, a link from another browser) is ignored
+   * rather than repaired: `touchInstance` returns its input unchanged for an id
+   * it does not hold, and the guard below means nothing is written. That
+   * matters more than it looks — writing here would put the synthesized default
+   * into a profile that has nothing stored, breaking the lazy-read property for
+   * anyone who merely followed a bad link. It also means NO overlay, so the
+   * whole library runs, exactly as it did before instances existed.
+   */
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('instance');
+    if (id === null || id === '') return;
+    const store = readInstances();
+    const found = findInstance(store, id);
+    if (found === null) {
+      log(`instance '${id}' is not in this browser — playing with your full mod library`);
+      return;
+    }
+    instanceRef.current = found;
+    setInstance(found);
+    const next = touchInstance(store, id, new Date().toISOString());
+    if (next !== store) saveInstances(next);
+    log(
+      `launched instance '${found.name}' (${found.gameVersion})${
+        found.disabledModIds.length > 0
+          ? ` — ${found.disabledModIds.length} mod${found.disabledModIds.length === 1 ? '' : 's'} switched off for this instance`
+          : ''
+      }`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot URL read; log only touches its stable setter
+  }, []);
+
   // Hydrate the user-mod list from localStorage once, on the client only —
   // reading in the initial useState would run during SSR/prerender too. Then
   // park the mixin patch plan (#62): the iframe mount gates on `planReady`, so
@@ -533,9 +601,13 @@ export default function PlayPage(): ReactElement {
         ? `restored ${stored.length} user mod${stored.length === 1 ? '' : 's'} from browser storage`
         : 'no stored user mods',
     );
+    // What gets PARKED is the projection, not the pool: a mixin or physics
+    // patch from a mod this instance switched off must not reach the bundle.
+    // `stored` stays the thing shown and persisted.
+    const running = runningMods();
     let cancelled = false;
     planChainRef.current = planChainRef.current.then(async () => {
-      const r = await parkUserPatchPlan(stored);
+      const r = await parkUserPatchPlan(running);
       if (cancelled) return;
       parkedFingerprintRef.current = r.fingerprint;
       servedFingerprintRef.current = r.fingerprint; // the first frame loads THIS plan
@@ -549,7 +621,7 @@ export default function PlayPage(): ReactElement {
       // releases the iframe. The wasm is fetched well after the bundle, so this
       // has slack the mixin plan does not — but gating both on one flag keeps
       // "the plan is parked" a single fact rather than two racing ones.
-      const p = await parkPhysicsPlan(stored);
+      const p = await parkPhysicsPlan(running);
       if (cancelled) return;
       parkedPhysicsRef.current = p.fingerprint;
       servedPhysicsRef.current = p.fingerprint;
@@ -616,41 +688,6 @@ export default function PlayPage(): ReactElement {
   }, []);
 
   /**
-   * `?instance=<id>` — record the launch and name it in the topbar.
-   *
-   * The launcher's Play button carries the id here. This effect is the ONLY
-   * thing that treats it as meaningful, and it is deliberately small: the id
-   * does not gate the game, choose a bundle, or change which mods load. The
-   * per-instance mod overlay is reserved in the schema and honored by the
-   * resolver but nothing writes it yet, so today an instance is a label plus a
-   * timestamp, and the page renders it as exactly that. A launch surface that
-   * silently behaved differently per instance before the overlay existed would
-   * be the harder bug — this one is merely incomplete, and visibly so.
-   *
-   * An unknown id (a stale bookmark, a link from another browser) is ignored
-   * rather than repaired: `touchInstance` returns its input unchanged for an id
-   * it does not hold, and the guard below means nothing is written. That
-   * matters more than it looks — writing here would put the synthesized default
-   * into a profile that has nothing stored, breaking the lazy-read property for
-   * anyone who merely followed a bad link.
-   */
-  useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('instance');
-    if (id === null || id === '') return;
-    const store = readInstances();
-    const instance = findInstance(store, id);
-    if (instance === null) {
-      log(`instance '${id}' is not in this browser — playing with your full mod library`);
-      return;
-    }
-    setInstanceName(instance.name);
-    const next = touchInstance(store, id, new Date().toISOString());
-    if (next !== store) saveInstances(next);
-    log(`launched instance '${instance.name}' (${instance.gameVersion})`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot URL read; log only touches its stable setter
-  }, []);
-
-  /**
    * Build the share link for the CURRENT mod set and open the share panel,
    * which shows the link itself next to a copy button. Links only: the URL
    * carries each enabled mod's sourceUrl, never code — pasted mods can't ride
@@ -662,7 +699,10 @@ export default function PlayPage(): ReactElement {
   const handleShare = (): void => {
     setShareNotice(null);
     setShareCopied(false);
-    const r = buildShareUrl(userModsRef.current, window.location.href);
+    // The projection, not the pool: a link should carry what the sharer is
+    // actually playing. Sharing a mod they had switched off for this instance
+    // would hand the recipient a set the sharer never ran.
+    const r = buildShareUrl(runningMods(), window.location.href);
     if (r.url === null) {
       setSharePanel(null);
       setShareNotice(
@@ -829,31 +869,29 @@ export default function PlayPage(): ReactElement {
   };
 
   /**
-   * Replace the user-mod list: update state, persist, and reload the whole mod
-   * set through the loader (there is no incremental add — the loader owns
-   * dependency resolution over the FULL set, so the honest operation is
-   * unload-everything, load-everything).
+   * Re-park the plans and reload every mod, for the CURRENT running set.
+   *
+   * Called whenever what-should-run changes, which happens two ways that look
+   * different and behave identically from here: the pool changed
+   * (add/remove/global toggle) or the instance's overlay changed. Both end in
+   * the same unload-everything/load-everything, because the loader owns
+   * dependency resolution over the full set and there is no honest incremental
+   * add.
    *
    * Reloads are chained on a single promise: React state updates make rapid
    * toggle clicks cheap, but each still queues an unload/load pair, and
    * interleaving two of those would double-load mods.
    */
-  const updateUserMods = (next: UserModRecord[]): void => {
-    userModsRef.current = next;
-    setUserMods(next);
+  const refreshRunningSet = (): void => {
     // A built share link reflects the set at build time — close the panel
-    // rather than show a link that no longer matches what's enabled.
+    // rather than show a link that no longer matches what's running.
     setSharePanel(null);
-    setPersistWarning(
-      saveUserMods(next)
-        ? null
-        : 'Storage unavailable — mods work this session but will not survive a reload.',
-    );
+    const running = runningMods();
     // Re-park the mixin plan (#62). The RUNNING frame keeps the bundle it was
     // served with — if the effective patch set changed, only a reload applies
     // it, so surface the restart banner instead of pretending.
     planChainRef.current = planChainRef.current.then(async () => {
-      const r = await parkUserPatchPlan(next);
+      const r = await parkUserPatchPlan(running);
       parkedFingerprintRef.current = r.fingerprint;
       planSetsRef.current = r.sets;
       setMixinOverCap(r.overCap);
@@ -862,7 +900,7 @@ export default function PlayPage(): ReactElement {
       // sharper reason than a mixin one — the binary is instantiated once at
       // boot, so the running sim keeps whatever constants it was built with no
       // matter what the cache now holds.
-      const p = await parkPhysicsPlan(next);
+      const p = await parkPhysicsPlan(running);
       parkedPhysicsRef.current = p.fingerprint;
       setPhysicsExcluded(p.excluded);
       setNeedsRestart(
@@ -874,11 +912,61 @@ export default function PlayPage(): ReactElement {
     reloadChainRef.current = reloadChainRef.current.then(async () => {
       try {
         await unloadModsRef.current?.();
-        applyLoadSummary(await loadMods(api, { userMods: userModsRef.current }));
+        applyLoadSummary(await loadMods(api, { userMods: runningMods() }));
       } catch (e) {
         setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`);
       }
     });
+  };
+
+  /**
+   * Replace the user-mod list: update state, persist, and reload the set.
+   */
+  const updateUserMods = (next: UserModRecord[]): void => {
+    userModsRef.current = next;
+    setUserMods(next);
+    // The TRUE pool is what persists. Never the projection: the pool is shared
+    // across instances, so writing the overlay into it would make one
+    // instance's per-mod switch the global one for every other instance.
+    setPersistWarning(
+      saveUserMods(next)
+        ? null
+        : 'Storage unavailable — mods work this session but will not survive a reload.',
+    );
+    refreshRunningSet();
+  };
+
+  /**
+   * Flip one mod's switch FOR THIS INSTANCE only.
+   *
+   * A different operation from the `disable` button next to it, and the copy
+   * has to keep them apart: `disable` writes `record.enabled` in the shared
+   * pool and turns the mod off everywhere, while this writes one id into this
+   * instance's `disabledModIds` and leaves every other instance alone. Both
+   * must agree for a mod to run, so this one cannot resurrect a mod the pool
+   * switch turned off — the control is only offered on pool-enabled rows.
+   *
+   * The pool is untouched here, so `saveUserMods` is not called; the instance
+   * store is what persists. Only a real change is written — a no-op returns
+   * the same store by identity, so a redundant click costs nothing.
+   */
+  const setInstanceModDisabled = (modId: string, disabled: boolean): void => {
+    const current = instanceRef.current;
+    if (current === null) return;
+    const store = readInstances();
+    const next = setModDisabledInInstance(store, current.id, modId, disabled);
+    if (next === store) return;
+    const updated = findInstance(next, current.id);
+    if (updated === null) return; // unreachable; the id came from `next`
+    instanceRef.current = updated;
+    setInstance(updated);
+    if (!saveInstances(next)) {
+      setPersistWarning(
+        'Storage unavailable — this instance’s mod switches work this session but will not survive a reload.',
+      );
+    }
+    log(`${disabled ? 'switched off' : 'switched on'} '${modId}' for instance '${updated.name}'`);
+    refreshRunningSet();
   };
 
   /**
@@ -1053,10 +1141,10 @@ export default function PlayPage(): ReactElement {
     attachTracksIfReady();
     // Load the user's stored mods via @tspml/loader — a real mod package
     // receives this api and subscribes. Per-mod failure isolation (never
-    // boot-aborts). Reads `userModsRef` (not `userMods` state)
-    // because this handler runs outside React's render cycle; the ref is
-    // populated by the hydration effect, which runs before the SW effect that
-    // gates mounting the iframe, so it is always set by the time a frame loads.
+    // boot-aborts). Reads the REFS (not `userMods`/`instance` state) because
+    // this handler runs outside React's render cycle; both are populated by
+    // mount effects that run before the SW effect that gates mounting the
+    // iframe, so both are set by the time a frame loads.
     if (!modsLoadedRef.current) {
       modsLoadedRef.current = true;
       // Retaining `s.unload` (via applyLoadSummary) is load-bearing (#17): it is
@@ -1065,7 +1153,7 @@ export default function PlayPage(): ReactElement {
       // completely the loader implemented it.
       reloadChainRef.current = reloadChainRef.current.then(async () => {
         try {
-          applyLoadSummary(await loadMods(api, { userMods: userModsRef.current }));
+          applyLoadSummary(await loadMods(api, { userMods: runningMods() }));
         } catch (e) {
           setModsStatus(`✗ ${(e as Error).message.slice(0, 48)}`);
         }
@@ -1194,6 +1282,58 @@ export default function PlayPage(): ReactElement {
       notice: clean ? null : `${notes.join(', ')} — see the Log section for each one.`,
     };
   };
+
+  /**
+   * Where an install from the in-play drawer LANDS.
+   *
+   * Same fetch and same pool as the launcher's target, different ending: here
+   * there is a running game, so both branches finish through `updateUserMods`,
+   * which unloads the current set, re-parks the mixin and physics plans, and
+   * reloads. That is why these messages say the mod is running and the
+   * launcher's say it loads next time — each is true where it is shown, and
+   * neither would be true in the other place.
+   *
+   * The mod branch is `handleImportUrl` with the registry's format hint and the
+   * `registry` analytics method; the pack branch is literally `handleImportPack`,
+   * because a `modpack-txt` entry is a single `.txt` URL and that is precisely
+   * what `classifyModpackInput` already routes to the list fetch. Reimplementing
+   * either would give the drawer its own failure semantics for per-line errors,
+   * which is the bug this shares its way out of.
+   */
+  const drawerInstallTarget: InstallTarget = {
+    mod: async (url, entry) => {
+      log(`installing '${entry.id}' from the catalog…`);
+      const result = await importModFromUrl(url, fetch, { format: entry.format });
+      if (!result.ok) {
+        log(`install failed: ${result.error.slice(0, 120)}`);
+        return { ok: false, error: result.error };
+      }
+      const rec: UserModRecord = {
+        manifest: result.mod.manifest,
+        code: result.mod.code,
+        ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+        ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+        enabled: true,
+        addedAt: new Date().toISOString(),
+        sourceUrl: url,
+      };
+      log(`added mod '${userModId(rec) ?? '(no id)'}' (installed from the catalog)`);
+      trackModAdded(userModId(rec), 'registry');
+      updateUserMods(upsertUserMod(userModsRef.current, rec));
+      return { ok: true, message: 'installed and loaded — the game reloaded its mods' };
+    },
+    pack: async (url) => {
+      const outcome = await handleImportPack(url);
+      if (outcome.error !== null) return { ok: false, error: outcome.error };
+      if (!outcome.installedAny) {
+        return { ok: false, error: outcome.notice ?? 'nothing in that pack installed' };
+      }
+      const detail = outcome.notice === null ? '' : ` (${outcome.notice})`;
+      return { ok: true, message: `installed and loaded${detail}` };
+    },
+  };
+
+  const drawerInstall = useInstall(drawerInstallTarget);
 
   /**
    * "⟳ reload" (the reload-mods feature). Two things at once:
@@ -1388,6 +1528,19 @@ export default function PlayPage(): ReactElement {
                 allowFullScreen
               />
               <div className="stage-controls">
+                {/* Opens the catalog OVER the stage. Deliberately not a link to
+                    /browse: that navigation unmounts this iframe and ends the
+                    run. Lives here rather than in the sidebar because the
+                    sidebar's DOM order is asserted by five smokes. */}
+                <button
+                  type="button"
+                  className="stage-btn browse-btn"
+                  onClick={() => setBrowseOpen((b) => !b)}
+                  aria-expanded={browseOpen}
+                  title="Browse the catalog without leaving the game"
+                >
+                  <Icon name="grid" /> Browse
+                </button>
                 <button
                   type="button"
                   className="stage-btn theater-btn"
@@ -1480,6 +1633,15 @@ export default function PlayPage(): ReactElement {
             </div>
           ) : null}
         </section>
+
+        {/* The catalog, over the stage. A SIBLING of section.stage and inside
+            div.content on purpose: anywhere else means either a route change or
+            a re-parent, and both unmount the iframe and end the run. */}
+        <BrowseDrawer
+          open={browseOpen}
+          onClose={() => setBrowseOpen(false)}
+          install={drawerInstall}
+        />
 
         {/* Drag handle for the stage/sidebar split. A plain div with the
             separator role (not a button — it is not activatable, it is
@@ -1622,6 +1784,17 @@ export default function PlayPage(): ReactElement {
                 </span>
               ) : null}
             </div>
+            {/* Said out loud, because it is the one thing about instances that
+                surprises people: there is ONE mod library, and an instance is a
+                view onto it. Without this line, "skip in this instance" next to
+                "remove" reads as two flavours of delete. */}
+            {instance !== null && userMods.length > 0 ? (
+              <p className="meta">
+                One library, shared by every instance. “skip in this instance” switches a mod off
+                for <strong>{instanceName}</strong> only; “disable” switches it off everywhere and
+                “remove” deletes it from the library.
+              </p>
+            ) : null}
             {/* The built share link: shown in full with its own copy button —
                 the link is the ground truth, the copy is a convenience. */}
             {sharePanel?.url ? (
@@ -1673,12 +1846,21 @@ export default function PlayPage(): ReactElement {
             ) : (
               <ul className="rows mod-cards">
                 {userMods.map((mod, i) => {
-                  const id = userModId(mod) ?? `(no id #${i + 1})`;
+                  const modId = userModId(mod);
+                  const id = modId ?? `(no id #${i + 1})`;
                   const version = typeof mod.manifest.version === 'string' ? mod.manifest.version : null;
                   const homepage = userModHomepage(mod);
                   const docs = userModDocs(mod);
+                  // The two switches, and what they compose to. `mod.enabled` is
+                  // the pool-wide one; `offHere` is this instance's overlay. A
+                  // mod runs only when both say yes, so the card reports the
+                  // EFFECTIVE state and the pill names which switch is holding
+                  // it back — "disabled" and "off here" mean different things to
+                  // anyone with more than one instance.
+                  const offHere = isDisabledInInstance(instance, modId);
+                  const running = mod.enabled && !offHere;
                   return (
-                    <li key={id} className={mod.enabled ? 'mod-card' : 'mod-card mod-card-off'}>
+                    <li key={id} className={running ? 'mod-card' : 'mod-card mod-card-off'}>
                       {/* The tile and body wrapper are <i>/<div> on purpose so a
                           row's FIRST <span> is the status pill — same shape as
                           the Loaded-mods rows the smoke reads. */}
@@ -1692,8 +1874,17 @@ export default function PlayPage(): ReactElement {
                       <div className="mod-card-body">
                         <div className="row-head">
                           <code title={id}>{id}</code>
-                          <span className={mod.enabled ? 'status-pill pill-on' : 'status-pill pill-off'}>
-                            {mod.enabled ? 'enabled' : 'disabled'}
+                          <span
+                            className={running ? 'status-pill pill-on' : 'status-pill pill-off'}
+                            title={
+                              mod.enabled
+                                ? offHere
+                                  ? `On in your library, switched off for '${instanceName}'`
+                                  : 'On in your library and in this instance'
+                                : 'Switched off in your library, for every instance'
+                            }
+                          >
+                            {mod.enabled ? (offHere ? 'off here' : 'enabled') : 'disabled'}
                           </span>
                         </div>
                         {version || mod.mixins || mod.physics ? (
@@ -1735,6 +1926,11 @@ export default function PlayPage(): ReactElement {
                           <button
                             type="button"
                             className="btn btn-small"
+                            title={
+                              mod.enabled
+                                ? 'Switch this mod off in your library — for every instance'
+                                : 'Switch this mod on in your library'
+                            }
                             onClick={() =>
                               updateUserMods(
                                 userModsRef.current.map((m) => (m === mod ? { ...m, enabled: !m.enabled } : m)),
@@ -1743,6 +1939,36 @@ export default function PlayPage(): ReactElement {
                           >
                             {mod.enabled ? 'disable' : 'enable'}
                           </button>
+                          {/* The per-instance switch, deliberately NOT merged
+                              with the library one beside it. Offered only when
+                              there is an instance to scope to and the mod has a
+                              manifest id (the overlay is a list of ids and
+                              cannot address a mod without one), and only while
+                              the library switch is on — a control that promised
+                              to turn on a mod the library has off would be
+                              lying, since both switches must agree.
+
+                              The label says "this instance" in full rather than
+                              pairing "disable"/"off here": the two buttons sit
+                              inches apart and do different things, so the
+                              expensive mistake is reading one as the other. It
+                              also keeps `button:has-text("disable")` — which
+                              smoke-user-mods leg 6 clicks to exercise the
+                              LIBRARY switch — matching exactly one button. */}
+                          {instance !== null && modId !== null && mod.enabled ? (
+                            <button
+                              type="button"
+                              className="btn btn-small btn-instance-toggle"
+                              title={
+                                offHere
+                                  ? `Run this mod in '${instanceName}' again. Your other instances are unaffected either way.`
+                                  : `Stop running this mod in '${instanceName}' only. It stays in your library and keeps running in your other instances.`
+                              }
+                              onClick={() => setInstanceModDisabled(modId, !offHere)}
+                            >
+                              {offHere ? 'use in this instance' : 'skip in this instance'}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="btn btn-small"

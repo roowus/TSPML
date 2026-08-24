@@ -15,7 +15,7 @@ pnpm --filter @tspml/transform build    # build the transform package (the porta
 ```bash
 pnpm -r test
 ```
-Expect **115 passing**: loader 47 + mappings 20 + portal 17 + transform 31. (The 7 real-bundle transform tests run locally; they self-skip on CI.)
+Expect **1,081 passing** across the workspace, 468 of them the portal's. (The real-bundle transform tests run locally; they self-skip on CI.)
 
 ## 2. ★ The big one — does a TRANSFORMED game run in a browser?
 
@@ -59,5 +59,11 @@ Open http://localhost:3000/play. Does the *unmodified* game render and play thro
 ## What this does NOT test yet (honest)
 
 - **Real mods with live hooks** — this manual walkthrough only checks the transform + proxy path. Mod loading (user-added mods via the sidebar) is covered by the headless smokes instead (`scripts/smoke.mjs`, `scripts/smoke-user-mods.mjs`).
+- **The launcher** — instances, `/browse`, installing from the catalog, and the in-play drawer are covered by `smoke:instances`, `smoke:registry`, and `smoke:drawer`. All 11 smokes are listed in `package.json` and run in CI by [`smoke.yml`](../../.github/workflows/smoke.yml); run them with the dev server up:
+  ```bash
+  pnpm --filter @tspml/portal smoke:registry
+  pnpm --filter @tspml/portal smoke:instances
+  pnpm --filter @tspml/portal smoke:drawer
+  ```
 - **Online / leaderboards / multiplayer** through the proxy — one `502` on an online call remains (issue #7, M8). Non-blocking for local gameplay.
 - **Chunks** — only `main.bundle.js` is transformed; 0.6.2 splits more code into numbered chunks (issue #3).
