@@ -4,7 +4,7 @@
  * Rewrites a PolyTrack bundle with the loader-owned bridge patches (the LIVE
  * badge, the six Tier-1 event emits, and the custom-track capture patches) plus
  * whatever Tier-2 mixins the loaded mods declare. Emitted events flow to the Tier-1
- * `EventBus` the portal exposes on the iframe as `window.__tspml` (see app/page.tsx),
+ * `EventBus` the portal exposes on the iframe as `window.__tspml` (see app/play/page.tsx),
  * which mods subscribe to.
  *
  * #98 generalizes "the bundle" to a {@link TransformSurface}: the main bundle OR an
