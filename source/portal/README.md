@@ -52,7 +52,7 @@ keep the two in sync.
 
 **The SW must CONTROL the page before the game mounts.** On a first visit it is
 registered but not yet the controller, so a runtime kodub fetch escapes it and CORS-fails
-("Failed to load track"). `app/page.tsx` therefore mounts the iframe only on
+("Failed to load track"). `app/play/page.tsx` therefore mounts the iframe only on
 `controllerchange`; the smokes reload once for the same reason.
 ([#9](https://github.com/roowus/TSPML/issues/9), closed.)
 
@@ -122,7 +122,9 @@ surface a **restart banner** rather than pretending to apply live.
 
 | Path | Role |
 | --- | --- |
-| `app/page.tsx` | "Play" page: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the user's added mods, and renders the live sidebar (including the "Add a mod" form) plus the draggable stage/sidebar resizer. |
+| `app/play/page.tsx` | The play surface (`/play`), and the only route that mounts the game: registers the SW, mounts the proxied game once controlled, installs the Tier-1 `api` (events · keybinds · tracks · audio) on the iframe window, loads the user's added mods, and renders the live sidebar (including the "Add a mod" form) plus the draggable stage/sidebar resizer. |
+| `app/play/layout.tsx` | Declares the route's `metadata`, which `page.tsx` cannot (it is `'use client'`). Renders no chrome of its own. |
+| `app/page.tsx` | `/` — forwards to `/play`, preserving the query string so existing `?mods=…` share links keep working. Becomes the launcher next. |
 | `app/layout.tsx` | Root layout (App Router). |
 | `app/globals.css` | All page styling (the page used to inline it; hover/fullscreen/media-query rules can't be inline). The smokes assert on rendered text + structure, so presentation-only changes here are safe. |
 | `app/api/proxy/[[...path]]/route.ts` | Server proxy route (GET/POST/OPTIONS) + the three `<head>` injections + the bundle transform. POST is the SW's plan-carrying bundle fetch (#62) — the upstream fetch is always GET, the body never leaves the route. Optional catch-all so the game root (`/api/proxy/?version=…`) also resolves. |
