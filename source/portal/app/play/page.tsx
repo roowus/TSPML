@@ -15,7 +15,6 @@ import { summarizeSafety } from '@tspml/loader';
 import { loadMods } from '@/lib/mod-loader';
 import type { ModLoadSummary } from '@/lib/mod-loader';
 import {
-  parseMixinsJson,
   readUserMods,
   saveUserMods,
   upsertUserMod,
@@ -40,18 +39,20 @@ import {
   planFingerprint,
   REPORT_GLOBAL,
   surfaceReports,
-  USER_PATCH_LIMITS,
 } from '@/lib/user-patches';
 import type { UserMixinReport } from '@/lib/user-patches';
 import {
   asPhysicsReport,
   buildPhysicsPlan,
-  parsePhysicsJson,
   PHYSICS_CACHE,
 } from '@/lib/physics-plan';
 import type { PhysicsExclusion, PhysicsReport } from '@/lib/physics-plan';
 import { teardown } from '@/lib/teardown';
 import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
+import { AddModForm } from '@/components/play/AddModForm';
+import { ModTile } from '@/components/play/ModTile';
+import { ServiceWorkerBadge } from '@/components/play/ServiceWorkerBadge';
+import type { LoadedModRow, SwState } from '@/components/play/types';
 
 /**
  * The play surface, at `/play`.
@@ -95,8 +96,6 @@ import { trackModAdded, trackModsLoaded } from '@/lib/analytics';
  * empty-list placeholder copy) — keep those stable when reshaping the UI.
  */
 
-type SwState = 'idle' | 'registering' | 'active' | 'error';
-
 const GAME_VERSION = process.env.NEXT_PUBLIC_POLYTRACK_VERSION ?? '0.6.2';
 const GAME_FRAME_SRC = `/api/proxy/?version=${GAME_VERSION}`;
 /**
@@ -116,40 +115,6 @@ const SIDEBAR_MAX_WIDTH = 640;
 
 function clampSidebarWidth(w: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(w)));
-}
-
-interface LoadedModRow {
-  id: string;
-  status: 'loaded' | 'failed';
-  reason?: string;
-}
-
-/**
- * The mod card's 30×30 tile: the manifest's icon image when one is set (and
- * loads), the id's first letter otherwise. The element stays an `<i>` — the
- * smoke contract needs each row's FIRST `<span>` to be the status pill, and an
- * `<img>` inside the `<i>` keeps that true.
- *
- * `icon` has already been through {@link userModIcon} (http(s)/data:image
- * only), so this never renders an author-controlled string anywhere scriptable.
- * A broken image (404, wrong type, blocked by the host) swaps back to the
- * letter via onError instead of showing the browser's broken-image glyph;
- * the error state resets when the icon URL changes so a fixed URL retries.
- */
-function ModTile({ id, icon }: { id: string; icon: string | null }): ReactElement {
-  const [failedIcon, setFailedIcon] = useState<string | null>(null);
-  const showImg = icon !== null && icon !== failedIcon;
-  return (
-    <i className="mod-tile" aria-hidden="true">
-      {showImg ? (
-        // eslint-disable-next-line @next/next/no-img-element -- arbitrary
-        // author-hosted origins; next/image needs a domain allowlist.
-        <img src={icon} alt="" onError={() => setFailedIcon(icon)} />
-      ) : (
-        id.replace(/^tspml-/, '').charAt(0).toUpperCase() || 'M'
-      )}
-    </i>
-  );
 }
 
 /**
@@ -288,11 +253,6 @@ export default function PlayPage(): ReactElement {
   const userModsRef = useRef<UserModRecord[]>([]);
   const [mixinsSkipped, setMixinsSkipped] = useState<readonly string[]>([]);
   const [persistWarning, setPersistWarning] = useState<string | null>(null);
-  const [draftManifest, setDraftManifest] = useState('');
-  const [draftCode, setDraftCode] = useState('');
-  const [draftMixins, setDraftMixins] = useState('');
-  const [draftPhysics, setDraftPhysics] = useState('');
-  const [addError, setAddError] = useState<string | null>(null);
   // #62 user-mixin plumbing. The plan must sit in the Cache API BEFORE the game
   // iframe mounts (the SW reads it while serving the bundle), so the mount
   // gates on `planReady` as well as the SW. `parked` = fingerprint of the plan
@@ -337,28 +297,6 @@ export default function PlayPage(): ReactElement {
   // `bootHidden` unmounts the overlay shortly after the fade completes.
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [bootHidden, setBootHidden] = useState(false);
-  // Which add-a-mod method is selected. "paste" and "url" work today; "id"
-  // (mod/modpack ids from a registry backend) is the announced next slice of
-  // #80, so the dropdown already teaches the model of "several ways".
-  const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'pack' | 'id'>('paste');
-  const [draftUrl, setDraftUrl] = useState('');
-  const [importBusy, setImportBusy] = useState(false);
-  // The modpack box (#80): a plain-text list of mod URLs, pasted or linked.
-  // `packNotice` reports the per-line refusals a pack survives — a pack that
-  // installed 4 of 6 must say which two and why, or the player is left
-  // comparing their mod list against a file by hand.
-  const [draftPack, setDraftPack] = useState('');
-  const [packBusy, setPackBusy] = useState(false);
-  const [packNotice, setPackNotice] = useState<string | null>(null);
-  const packInputRef = useRef<HTMLTextAreaElement>(null);
-  // #118: refs on every Add-form control, used ONLY to adopt pre-hydration
-  // input (see the effect below). Nothing else reads them.
-  const addSelectRef = useRef<HTMLSelectElement>(null);
-  const manifestRef = useRef<HTMLTextAreaElement>(null);
-  const codeRef = useRef<HTMLTextAreaElement>(null);
-  const mixinsRef = useRef<HTMLTextAreaElement>(null);
-  const physicsRef = useRef<HTMLTextAreaElement>(null);
-  const urlRef = useRef<HTMLInputElement>(null);
   // "⟳ reload" (the reload-mods feature): busy while URL re-fetches are in
   // flight; the notice reports per-mod re-fetch failures (stored copy kept).
   const [reloadBusy, setReloadBusy] = useState(false);
@@ -501,52 +439,9 @@ export default function PlayPage(): ReactElement {
     return () => window.removeEventListener('keydown', onKey);
   }, [isTheater]);
 
-  /**
-   * Adopt anything typed into the Add form BEFORE React attached (#118).
-   *
-   * The page is server-rendered, so the form is visible and fully usable a few
-   * hundred milliseconds before hydration finishes. Input in that window is
-   * real — it is in the DOM — but React does not know about it, and the first
-   * re-render after hydration (in practice the `swState` flip to `active`,
-   * ~450ms in) renders `value={draftManifest}` over it. Measured on prod: a
-   * dropdown choice made while the SW badge still read "waiting…" was silently
-   * discarded 10 times out of 16; after it read "ready", 0 times out of 10.
-   *
-   * The fix is to READ that input rather than to forbid it. Disabling the form
-   * until hydration would also be correct, but it trades a rare lost keystroke
-   * for a control that is dead every single load — and it would make the one
-   * thing a first-time visitor came to do the one thing that does not respond.
-   *
-   * Why reading the DOM here is sound, and not a race: hydration itself does
-   * NOT rewrite input values — React adopts the server's markup as-is, so the
-   * user's text is still in the field when this effect fires after that first
-   * commit. The overwrite comes from the NEXT render, which cannot happen
-   * before an effect from the previous commit has run. So this always reads the
-   * DOM in the gap between the two. (`useLayoutEffect` would fire marginally
-   * earlier but buys nothing: there is no render in between to lose to.)
-   *
-   * Empty fields are skipped so this can never clobber a real value; the
-   * dependency list is empty, so it happens exactly once per mount.
-   */
-  useEffect(() => {
-    const adoptText = (
-      el: HTMLTextAreaElement | HTMLInputElement | null,
-      set: (v: string) => void,
-    ): void => {
-      const v = el?.value ?? '';
-      if (v.length > 0) set(v);
-    };
-    adoptText(manifestRef.current, setDraftManifest);
-    adoptText(codeRef.current, setDraftCode);
-    adoptText(mixinsRef.current, setDraftMixins);
-    adoptText(physicsRef.current, setDraftPhysics);
-    adoptText(urlRef.current, setDraftUrl);
-    adoptText(packInputRef.current, setDraftPack);
-    // The <select> is the case that actually bit: it is one click, so it is the
-    // control a user is most likely to reach during the pre-hydration window.
-    const picked = addSelectRef.current?.value;
-    if (picked === 'url' || picked === 'pack' || picked === 'id') setAddMethod(picked);
-  }, []);
+  // The #118 pre-hydration adoption effect lives in AddModForm, not here: it
+  // reads the DOM through refs on the Add-form controls, and the fix only holds
+  // while it is a []-dep mount effect in the same component that renders them.
 
   // Restore the dragged stage/sidebar split — client-only (localStorage does
   // not exist during SSR/prerender, and reading it in useState's initializer
@@ -1133,85 +1028,19 @@ export default function PlayPage(): ReactElement {
     }
   };
 
-  /** Parse + add the pasted mod, or explain inline why not. */
-  const handleAddMod = (): void => {
-    // Empty-box checks FIRST: "Unexpected end of JSON input" on a blank
-    // manifest told users nothing about what to do (reported confusion).
-    if (draftManifest.trim().length === 0) {
-      setAddError('box 1 (mod.json) is empty — it is required. Paste the mod’s manifest JSON.');
-      return;
-    }
-    if (draftCode.trim().length === 0) {
-      setAddError('box 2 (entrypoint.js) is empty — it is required. Paste the BUILT entrypoint JS (ES module, default export).');
-      return;
-    }
-    let manifest: unknown;
-    try {
-      manifest = JSON.parse(draftManifest);
-    } catch (e) {
-      setAddError(`manifest is not valid JSON: ${(e as Error).message.slice(0, 80)}`);
-      return;
-    }
-    if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) {
-      setAddError('manifest must be a JSON object (the contents of mod.json)');
-      return;
-    }
-    // Optional third paste (#62): the mod's mixins.json. Validated shallowly
-    // here so the author hears about malformed JSON immediately; caps are
-    // checked at add time too (the same limits the server re-enforces).
-    let mixins: Record<string, unknown>[] | undefined;
-    if (draftMixins.trim().length > 0) {
-      const parsed = parseMixinsJson(draftMixins);
-      if (!parsed.ok) {
-        setAddError(parsed.error);
-        return;
-      }
-      if (parsed.patches.length > USER_PATCH_LIMITS.maxPatchesPerMod) {
-        setAddError(`mixins.json has ${parsed.patches.length} patches — the limit is ${USER_PATCH_LIMITS.maxPatchesPerMod}`);
-        return;
-      }
-      const oversized = parsed.patches.find(
-        (p) => typeof p.inject === 'string' && p.inject.length > USER_PATCH_LIMITS.maxInjectChars,
-      );
-      if (oversized) {
-        setAddError(`a patch's inject exceeds ${USER_PATCH_LIMITS.maxInjectChars.toLocaleString()} characters`);
-        return;
-      }
-      mixins = parsed.patches;
-    }
-    // Optional fourth paste (#43): the mod's physics.json. Validated here for the
-    // same reason as the mixins box and a sharper one — a physics patch ends up as
-    // a float written into the game's compiled binary, so a shape this build cannot
-    // parse must be refused at the door rather than silently excluded from the plan
-    // an hour later. The RAW object is stored, not the parsed plan: the record's
-    // contract is "the file as the author wrote it", re-parsed on every use.
-    let physics: Record<string, unknown> | undefined;
-    if (draftPhysics.trim().length > 0) {
-      const parsed = parsePhysicsJson(draftPhysics);
-      if (!parsed.ok) {
-        setAddError(parsed.error);
-        return;
-      }
-      physics = JSON.parse(draftPhysics) as Record<string, unknown>;
-    }
-    const rec: UserModRecord = {
-      manifest: manifest as Record<string, unknown>,
-      code: draftCode,
-      ...(mixins === undefined ? {} : { mixins }),
-      ...(physics === undefined ? {} : { physics }),
-      enabled: true,
-      addedAt: new Date().toISOString(),
-    };
+  /**
+   * Take a validated record from the Add form's paste boxes into the pool.
+   *
+   * The form decided the paste was well-formed (and said so inline if not);
+   * everything from here — the pool, the log, the loader — is the session's,
+   * which is why the boundary is a built record rather than six draft strings.
+   */
+  const handleAddPasted = (rec: UserModRecord): void => {
     // Same-id adds REPLACE the stored copy (upsertUserMod) — that is how a
     // modder iterates on their mod without a remove/add dance. Deeper
     // validation (required fields, semver, duplicate ids) is the
     // loader's job; its verdict lands in the mod list with a reason.
     const next = upsertUserMod(userModsRef.current, rec);
-    setAddError(null);
-    setDraftManifest('');
-    setDraftCode('');
-    setDraftMixins('');
-    setDraftPhysics('');
     log(`added mod '${userModId(rec) ?? '(no id)'}' (pasted)`);
     trackModAdded(userModId(rec), 'paste');
     updateUserMods(next);
@@ -1222,41 +1051,36 @@ export default function PlayPage(): ReactElement {
    * lib/mod-import.ts never touches /api/proxy; see its header for why that
    * boundary is load-bearing. The result is a plain UserModRecord, so from
    * here on the paste path and the import path are the same code.
+   *
+   * Resolves with the failure reason rather than setting it: the inline error
+   * line belongs to the form, the log and the mod pool belong here.
    */
-  const handleImportUrl = (): void => {
-    const url = draftUrl.trim();
-    if (url.length === 0) {
-      setAddError('paste a URL first — a mod.json link or a single built .js file');
-      return;
-    }
-    setImportBusy(true);
-    setAddError(null);
+  const handleImportUrl = async (
+    url: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
     log(`importing mod from URL…`);
-    void importModFromUrl(url).then((result) => {
-      setImportBusy(false);
-      if (!result.ok) {
-        setAddError(result.error);
-        log(`import failed: ${result.error.slice(0, 120)}`);
-        return;
-      }
-      const rec: UserModRecord = {
-        manifest: result.mod.manifest,
-        code: result.mod.code,
-        ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
-        ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
-        enabled: true,
-        addedAt: new Date().toISOString(),
-        // Remember where it came from — this is what "⟳ reload" re-fetches.
-        sourceUrl: url,
-      };
-      const next = upsertUserMod(userModsRef.current, rec);
-      setDraftUrl('');
-      log(
-        `added mod '${userModId(rec) ?? '(no id)'}' (imported from URL${result.mod.note ? `; ${result.mod.note}` : ''})`,
-      );
-      trackModAdded(userModId(rec), 'url');
-      updateUserMods(next);
-    });
+    const result = await importModFromUrl(url);
+    if (!result.ok) {
+      log(`import failed: ${result.error.slice(0, 120)}`);
+      return { ok: false, error: result.error };
+    }
+    const rec: UserModRecord = {
+      manifest: result.mod.manifest,
+      code: result.mod.code,
+      ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
+      ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+      enabled: true,
+      addedAt: new Date().toISOString(),
+      // Remember where it came from — this is what "⟳ reload" re-fetches.
+      sourceUrl: url,
+    };
+    const next = upsertUserMod(userModsRef.current, rec);
+    log(
+      `added mod '${userModId(rec) ?? '(no id)'}' (imported from URL${result.mod.note ? `; ${result.mod.note}` : ''})`,
+    );
+    trackModAdded(userModId(rec), 'url');
+    updateUserMods(next);
+    return { ok: true };
   };
 
   /**
@@ -1270,76 +1094,60 @@ export default function PlayPage(): ReactElement {
    * the player pasted here and then pressed Import on. The unsandboxed-code
    * warning sits above the button for the same reason it sits above the others.
    */
-  const handleImportPack = (): void => {
-    if (packBusy) return;
-    const text = draftPack.trim();
-    if (text.length === 0) {
-      setAddError('paste a list of mod URLs (one per line), or a link to a .txt list');
-      return;
+  const handleImportPack = async (
+    text: string,
+  ): Promise<{ installedAny: boolean; error: string | null; notice: string | null }> => {
+    const input = classifyModpackInput(text);
+    let parsed: ModpackParseResult;
+    if (input.kind === 'list') {
+      log(`fetching modpack list…`);
+      const listed = await fetchModpackList(input.url);
+      if (!listed.ok) {
+        log(`modpack list failed: ${listed.error.slice(0, 120)}`);
+        return { installedAny: false, error: listed.error, notice: null };
+      }
+      parsed = listed.parsed;
+    } else {
+      parsed = input.parsed;
     }
-    setPackBusy(true);
-    setAddError(null);
-    setPackNotice(null);
-    void (async () => {
-      const input = classifyModpackInput(text);
-      let parsed: ModpackParseResult;
-      if (input.kind === 'list') {
-        log(`fetching modpack list…`);
-        const listed = await fetchModpackList(input.url);
-        if (!listed.ok) {
-          setPackBusy(false);
-          setAddError(listed.error);
-          log(`modpack list failed: ${listed.error.slice(0, 120)}`);
-          return;
-        }
-        parsed = listed.parsed;
-      } else {
-        parsed = input.parsed;
-      }
 
-      // Every refusal is named before anything installs, so the count the user
-      // sees at the end has an explanation attached and they are not left
-      // diffing their mod list against the file by hand.
-      for (const bad of parsed.invalid) {
-        log(`modpack line ${bad.line} skipped: ${bad.error.slice(0, 120)}`);
-      }
-      if (parsed.urls.length === 0) {
-        setPackBusy(false);
-        setAddError(
+    // Every refusal is named before anything installs, so the count the user
+    // sees at the end has an explanation attached and they are not left
+    // diffing their mod list against the file by hand.
+    for (const bad of parsed.invalid) {
+      log(`modpack line ${bad.line} skipped: ${bad.error.slice(0, 120)}`);
+    }
+    if (parsed.urls.length === 0) {
+      return {
+        installedAny: false,
+        error:
           parsed.invalid.length > 0
             ? `no usable mod URLs — all ${parsed.invalid.length} line${parsed.invalid.length === 1 ? '' : 's'} were refused (see the Log section)`
             : 'that list has no mod URLs in it',
-        );
-        return;
-      }
+        notice: null,
+      };
+    }
 
-      log(`importing ${parsed.urls.length} mod${parsed.urls.length === 1 ? '' : 's'} from the modpack…`);
-      const { next, failed } = await importUrlList(parsed.urls, 'modpack', 'from the modpack');
-      setPackBusy(false);
+    log(`importing ${parsed.urls.length} mod${parsed.urls.length === 1 ? '' : 's'} from the modpack…`);
+    const { next, failed } = await importUrlList(parsed.urls, 'modpack', 'from the modpack');
 
-      const notes: string[] = [];
-      const installed = parsed.urls.length - failed.length;
-      notes.push(`installed ${installed} of ${parsed.urls.length}`);
-      if (failed.length > 0) notes.push(`${failed.length} failed to import`);
-      if (parsed.invalid.length > 0) {
-        notes.push(`${parsed.invalid.length} line${parsed.invalid.length === 1 ? '' : 's'} refused`);
-      }
-      if (parsed.dropped > 0) {
-        notes.push(`${parsed.dropped} past the ${MODPACK_LIMITS.maxMods}-mod limit were dropped`);
-      }
-      const clean = failed.length === 0 && parsed.invalid.length === 0 && parsed.dropped === 0;
-      setPackNotice(
-        clean ? null : `${notes.join(', ')} — see the Log section for each one.`,
-      );
-      if (installed > 0) {
-        setDraftPack('');
-        // Clearing the value does not reset the scroll position, and this box
-        // scrolls sideways (long URLs, no wrapping). Left alone, the emptied
-        // box shows its placeholder scrolled off mid-word.
-        packInputRef.current?.scrollTo({ left: 0, top: 0 });
-      }
-      if (next !== userModsRef.current) updateUserMods([...next]);
-    })();
+    const notes: string[] = [];
+    const installed = parsed.urls.length - failed.length;
+    notes.push(`installed ${installed} of ${parsed.urls.length}`);
+    if (failed.length > 0) notes.push(`${failed.length} failed to import`);
+    if (parsed.invalid.length > 0) {
+      notes.push(`${parsed.invalid.length} line${parsed.invalid.length === 1 ? '' : 's'} refused`);
+    }
+    if (parsed.dropped > 0) {
+      notes.push(`${parsed.dropped} past the ${MODPACK_LIMITS.maxMods}-mod limit were dropped`);
+    }
+    const clean = failed.length === 0 && parsed.invalid.length === 0 && parsed.dropped === 0;
+    if (next !== userModsRef.current) updateUserMods([...next]);
+    return {
+      installedAny: installed > 0,
+      error: null,
+      notice: clean ? null : `${notes.join(', ')} — see the Log section for each one.`,
+    };
   };
 
   /**
@@ -1986,199 +1794,15 @@ export default function PlayPage(): ReactElement {
               </p>
             ))}
 
-            <details className="add-form">
-              <summary>
-                <Icon name="plus" /> Add a mod
-              </summary>
-              {/* Smoke contract (smoke-user-mods.mjs): after clicking the summary
-                  it fills THREE textareas by index (0=manifest, 1=code, 2=mixins)
-                  and clicks the "Add mod" button — the paste method must stay the
-                  default so all three exist in the DOM in that order. */}
-              <label className="add-label">
-                Add from
-                <select
-                  ref={addSelectRef}
-                  className="add-select"
-                  value={addMethod}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setAddMethod(
-                      v === 'url' ? 'url' : v === 'pack' ? 'pack' : v === 'id' ? 'id' : 'paste',
-                    );
-                    setAddError(null);
-                    setPackNotice(null);
-                  }}
-                >
-                  <option value="paste">Paste the mod’s files</option>
-                  <option value="url">Import from a URL</option>
-                  <option value="pack">Import a modpack</option>
-                  <option value="id">Modpack ID (coming soon)</option>
-                </select>
-              </label>
-              {addMethod === 'paste' ? (
-                <p className="meta">
-                  Paste each file into its box — only 1 and 2 are required.
-                  Box 4 rewrites constants in the game’s physics binary.
-                </p>
-              ) : null}
-              {addMethod === 'url' ? (
-                <>
-                  <p className="meta">
-                    A direct link to the mod’s <code>mod.json</code> or to a single
-                    built <code>.js</code> file. Raw GitHub/gist links and CDNs work.
-                  </p>
-                  <label className="add-label">
-                    <span className="field-tag req">required</span> mod URL
-                    <input
-                      ref={urlRef}
-                      type="url"
-                      className="add-input"
-                      spellCheck={false}
-                      placeholder="https://raw.githubusercontent.com/you/your-mod/main/mod.json"
-                      value={draftUrl}
-                      onChange={(e) => setDraftUrl(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !importBusy) handleImportUrl();
-                      }}
-                    />
-                  </label>
-                  <p className="warn">
-                    Mod code runs unsandboxed in your browser — only import from
-                    authors you trust.
-                  </p>
-                  {addError ? (
-                    <p className="warn">
-                      <Icon name="error" /> {addError}
-                    </p>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={importBusy}
-                    onClick={handleImportUrl}
-                  >
-                    {importBusy ? 'Importing…' : 'Import mod'}
-                  </button>
-                </>
-              ) : null}
-              {addMethod === 'pack' ? (
-                <p className="meta">
-                  One mod URL per line, or a link to a <code>.txt</code> list. Lines
-                  starting with <code>#</code> are comments. Up to{' '}
-                  {MODPACK_LIMITS.maxMods} mods; a line that fails is skipped and
-                  named, the rest still install.
-                </p>
-              ) : null}
-              {addMethod === 'id' ? (
-                <p className="meta">
-                  Not available yet — use <strong>Import a modpack</strong> with a
-                  list of URLs, or add mods one at a time, for now.
-                </p>
-              ) : null}
-              <div className={addMethod === 'paste' ? undefined : 'add-hidden'}>
-                <label className="add-label">
-                  <span className="field-tag req">required</span> 1 · mod.json
-                  <textarea
-                    ref={manifestRef}
-                    rows={5}
-                    spellCheck={false}
-                    placeholder='{"schemaVersion": 1, "id": "my-mod", "version": "1.0.0", "environment": "web", "entrypoint": "index.js"}'
-                    value={draftManifest}
-                    onChange={(e) => setDraftManifest(e.target.value)}
-                  />
-                </label>
-                <label className="add-label">
-                  <span className="field-tag req">required</span> 2 · entrypoint.js (built
-                  ES module, default export)
-                  <textarea
-                    ref={codeRef}
-                    rows={7}
-                    spellCheck={false}
-                    placeholder="export default (api) => { /* ... */ };"
-                    value={draftCode}
-                    onChange={(e) => setDraftCode(e.target.value)}
-                  />
-                </label>
-                <label className="add-label">
-                  <span className="field-tag opt">optional</span> 3 · mixins.json
-                  <textarea
-                    ref={mixinsRef}
-                    rows={5}
-                    spellCheck={false}
-                    placeholder='{"patches": [{"op": "after", "symbol": "Car", "inject": "..."}]}'
-                    value={draftMixins}
-                    onChange={(e) => setDraftMixins(e.target.value)}
-                  />
-                </label>
-                {/* #43. Deliberately LAST: the smoke fills textareas by index
-                    (0=manifest, 1=code, 2=mixins), so a new box may only be
-                    appended, never inserted. */}
-                <label className="add-label">
-                  <span className="field-tag opt">optional</span> 4 · physics.json
-                  <textarea
-                    ref={physicsRef}
-                    rows={5}
-                    spellCheck={false}
-                    placeholder='{"wasmHash": "d4ef…", "patches": [{"name": "grip", "signature": "…", "oldValue": 1.05, "newValue": 1.4}]}'
-                    value={draftPhysics}
-                    onChange={(e) => setDraftPhysics(e.target.value)}
-                  />
-                </label>
-                <p className="warn">
-                  Mod code runs unsandboxed in your browser — only add code you
-                  trust or wrote.
-                </p>
-                {addError ? (
-                    <p className="warn">
-                      <Icon name="error" /> {addError}
-                    </p>
-                  ) : null}
-                <button type="button" className="btn btn-primary" onClick={handleAddMod}>
-                  Add mod
-                </button>
-              </div>
-              {/* The modpack box (#80). AFTER the paste boxes on purpose: the
-                  smokes fill the paste textareas BY INDEX (0=manifest, 1=code,
-                  2=mixins, 3=physics), so a new textarea may only be appended. */}
-              <div className={addMethod === 'pack' ? 'pack-box' : 'pack-box add-hidden'}>
-                <label className="add-label">
-                  <span className="field-tag req">required</span> mod URLs, one per line
-                  <textarea
-                    ref={packInputRef}
-                    className="pack-input"
-                    rows={6}
-                    spellCheck={false}
-                    placeholder={
-                      'https://raw.githubusercontent.com/you/mod-a/main/mod.json\nhttps://raw.githubusercontent.com/you/mod-b/main/dist/index.js\n\n# or a single link to a .txt list of these'
-                    }
-                    value={draftPack}
-                    onChange={(e) => setDraftPack(e.target.value)}
-                  />
-                </label>
-                <p className="warn">
-                  Every mod in a pack runs unsandboxed in your browser — only import
-                  packs from people you trust.
-                </p>
-                {packNotice ? (
-                  <p className="warn">
-                    <Icon name="warn" /> {packNotice}
-                  </p>
-                ) : null}
-                {addError && addMethod === 'pack' ? (
-                  <p className="warn">
-                    <Icon name="error" /> {addError}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={packBusy}
-                  onClick={handleImportPack}
-                >
-                  {packBusy ? 'Importing…' : 'Import modpack'}
-                </button>
-              </div>
-            </details>
+            {/* The Add form owns its drafts and nothing else; see its header for
+                the DOM contracts the smokes hold it to. It must stay HERE — the
+                aside's first <summary> — and server-rendered, or #118's
+                pre-hydration adoption has no markup to adopt from. */}
+            <AddModForm
+              onAddPasted={handleAddPasted}
+              onImportUrl={handleImportUrl}
+              onImportPack={handleImportPack}
+            />
           </section>
 
           {mixinNotice || (mixinReport && mixinReport.mods.length > 0) ? (
@@ -2460,26 +2084,3 @@ export default function PlayPage(): ReactElement {
   );
 }
 
-function ServiceWorkerBadge({
-  state,
-  error,
-}: {
-  state: SwState;
-  error: string | null;
-}): ReactElement {
-  const label =
-    state === 'active'
-      ? 'ready'
-      : state === 'registering'
-        ? 'starting…'
-        : state === 'error'
-          ? 'service worker unavailable'
-          : 'waiting…';
-  const color = state === 'active' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--amber)';
-  return (
-    <p className="sw-badge" style={{ color }}>
-      <Icon name="dot" /> {label}
-      {error ? <span className="sw-error"> — {error}</span> : null}
-    </p>
-  );
-}
