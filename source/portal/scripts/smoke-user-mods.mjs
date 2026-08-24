@@ -129,8 +129,25 @@ const sidebarText = () =>
     const aside = /** @type {HTMLElement | null} */ (
       document.querySelector('aside[aria-label="Mods"]')
     );
-    return aside?.innerText ?? "";
+    // textContent: the Mods menu overlay is closed by default (`hidden` but
+    // mounted) and innerText of a hidden element reads as "".
+    return aside?.textContent ?? "";
   });
+
+/**
+ * Open the Mods menu. The aside is an OVERLAY now — closed by default, opened
+ * from the stage's "Mods" button. Every interaction below (clicks, fills,
+ * selectOption) needs it visible; pure queries do not.
+ */
+async function openModsMenu() {
+  const hidden = await page.evaluate(
+    () => /** @type {HTMLElement | null} */ (document.querySelector('aside[aria-label="Mods"]'))?.hidden ?? false,
+  );
+  if (hidden) {
+    await page.click('.mods-btn');
+    await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
+  }
+}
 
 /** Wait until the main frame matches (or timeout → false). */
 async function waitForSidebar(predicateSource, timeout = 60000) {
@@ -161,6 +178,7 @@ async function waitForGameFrame(timeout = 45000) {
  * stuck row from stretching the run.
  */
 async function removeMods(ids) {
+  await openModsMenu();
   for (const id of ids) {
     await page
       .click(`aside[aria-label="Mods"] li:has(code:text-is("${id}")) button:has-text("remove")`, {
@@ -172,6 +190,7 @@ async function removeMods(ids) {
 
 /** Fill the Add form's three textareas and click Add mod. */
 async function addMod(manifest, code, mixins) {
+  await openModsMenu();
   const areas = page.locator('aside[aria-label="Mods"] textarea');
   await areas.nth(0).fill(manifest);
   await areas.nth(1).fill(code);
@@ -203,19 +222,20 @@ const out = { frameMounted: !!frameEl };
 // empty store and honestly reported nothing).
 step("wait for the initial (empty) load to settle at 'mods: none'");
 out.initialLoadSettled = await waitForSidebar(
-  () => /mods:\s*none/.test(document.body.innerText),
+  () => /mods:\s*none/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   90000,
 );
 
 // 1+2. Add the mod through the real form — WITHOUT its mixins.json first, so
 // the declared-but-unpasted skip warning has its moment.
 step("open the Add form and paste the mod (no mixins.json yet)");
+await openModsMenu();
 await page.click('aside[aria-label="Mods"] summary');
 await addMod(MANIFEST, CODE);
 
 step("wait for the user mod to load");
 out.addedLoaded = await waitForSidebar(
-  () => /mods:\s*✓ .*smoke-user-mod/.test(document.body.innerText),
+  () => /mods:\s*✓ .*smoke-user-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 out.entrypointRuns = await page
@@ -229,7 +249,7 @@ out.modsRowListsMod = new RegExp(`mods:\\s*✓ .*${MOD_ID}`).test(afterAdd);
 // The declared mixin must be surfaced as skipped, by id ("manifest declares
 // mixins but no mixins.json was pasted — … not applied").
 out.mixinSkippedSurfaced = await waitForSidebar(
-  () => /smoke-user-mod[^]{0,80}manifest declares mixins/.test(document.body.innerText),
+  () => /smoke-user-mod[^]{0,80}manifest declares mixins/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   15000,
 );
 
@@ -237,13 +257,14 @@ out.mixinSkippedSurfaced = await waitForSidebar(
 // warning must clear and the restart banner must appear (the plan changed but
 // the running frame keeps the bundle it was served).
 step("re-add the mod with its mixins.json");
+await openModsMenu();
 await addMod(MANIFEST, CODE, MIXINS);
 out.reAddClearsSkipped = await waitForSidebar(
-  () => !/manifest declares mixins/.test(document.body.innerText),
+  () => !/manifest declares mixins/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   15000,
 );
 out.restartBannerShown = await waitForSidebar(
-  () => /need a restart/.test(document.body.innerText),
+  () => /need a restart/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   15000,
 );
 
@@ -255,7 +276,7 @@ await page.click('aside[aria-label="Mods"] button:has-text("reload now")');
 await nav;
 
 out.persistedLoaded = await waitForSidebar(
-  () => /mods:\s*✓ /.test(document.body.innerText) && window.__smokeUserModRuns === 1,
+  () => /mods:\s*✓ /.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")) && window.__smokeUserModRuns === 1,
   90000,
 );
 out.persistedListed = (await sidebarText()).includes(MOD_ID);
@@ -273,7 +294,7 @@ out.mixinAppliedInGame = gameFrame
 // Case-insensitive: the row's status span renders with text-transform:
 // uppercase, and innerText reflects RENDERED casing ("1/1 APPLIED").
 out.mixinReportRow = await waitForSidebar(
-  () => /Your mixins[^]*smoke-user-mod[^]{0,80}1\/1 applied/i.test(document.body.innerText),
+  () => /Your mixins[^]*smoke-user-mod[^]{0,80}1\/1 applied/i.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 
@@ -283,22 +304,23 @@ out.mixinReportRow = await waitForSidebar(
 step("add the bogus-symbol mod and reload");
 // The reload collapsed the Add form's <details>; re-open it or fill() times
 // out on the hidden textareas.
+await openModsMenu();
 await page.click('aside[aria-label="Mods"] summary');
 await addMod(BOGUS_MANIFEST, BOGUS_CODE, BOGUS_MIXINS);
 out.bogusRestartBanner = await waitForSidebar(
-  () => /need a restart/.test(document.body.innerText),
+  () => /need a restart/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   15000,
 );
 await page.reload({ waitUntil: "domcontentloaded" });
 
 out.bogusReportRow = await waitForSidebar(
   () =>
-    /smoke-bogus-mod[^]{0,80}0\/1 applied/i.test(document.body.innerText) &&
-    /symbol-unresolved/.test(document.body.innerText),
+    /smoke-bogus-mod[^]{0,80}0\/1 applied/i.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")) &&
+    /symbol-unresolved/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   90000,
 );
 out.goodRowSurvives = await waitForSidebar(
-  () => /smoke-user-mod[^]{0,80}1\/1 applied/i.test(document.body.innerText),
+  () => /smoke-user-mod[^]{0,80}1\/1 applied/i.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 gameFrame = await waitForGameFrame();
@@ -326,18 +348,20 @@ await page.screenshot({ path: SHOT });
 // fails) survives the reload of the set — and the restart banner returns,
 // because its patch set left the plan while the frame keeps the patched bundle.
 step("disable the mod");
+// The reload above closed the menu; every interaction below needs it visible.
+await openModsMenu();
 await page.click(`aside[aria-label="Mods"] li:has(code:text-is("${MOD_ID}")) button:has-text("disable")`);
 out.disabledUnloaded = await page
   .waitForFunction(() => window.__smokeUserModDisposed === true, undefined, { timeout: 20000 })
   .then(() => true)
   .catch(() => false);
 out.disabledDropped = await waitForSidebar(
-  () => /mods:\s*✓ /.test(document.body.innerText) && !/mods:.*smoke-user-mod/.test(document.body.innerText),
+  () => /mods:\s*✓ /.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")) && !/mods:.*smoke-user-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   20000,
 );
 out.otherModSurvives = new RegExp(`mods:\\s*✓ .*${BOGUS_ID}`).test(await sidebarText());
 out.disableRestartBanner = await waitForSidebar(
-  () => /need a restart/.test(document.body.innerText),
+  () => /need a restart/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   15000,
 );
 
@@ -373,12 +397,13 @@ out.rowGone = await page.evaluate((ids) => {
 step("import the sample mod from a URL");
 // Leg 5's reload collapsed the Add form's <details>; the Add form summary is
 // the FIRST summary in the aside (the Log section's comes later).
+await openModsMenu();
 await page.click('aside[aria-label="Mods"] summary');
 await page.selectOption('aside[aria-label="Mods"] select.add-select', "url");
 await page.fill('aside[aria-label="Mods"] input.add-input', `${BASE_URL}/sample-mod/mod.json`);
 await page.click('aside[aria-label="Mods"] button:has-text("Import mod")');
 out.urlModLoaded = await waitForSidebar(
-  () => /mods:\s*✓ .*tspml-sample-url-mod/.test(document.body.innerText),
+  () => /mods:\s*✓ .*tspml-sample-url-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 out.urlModListed = (await sidebarText()).includes(URL_MOD_ID);
@@ -418,8 +443,8 @@ await page.fill(
 await page.click('aside[aria-label="Mods"] button:has-text("Import modpack")');
 out.packGoodLinesLoaded = await waitForSidebar(
   () =>
-    /mods:\s*✓ .*tspml-sample-url-mod/.test(document.body.innerText) &&
-    /mods:\s*✓ .*tspml-sample-pack-mod/.test(document.body.innerText),
+    /mods:\s*✓ .*tspml-sample-url-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")) &&
+    /mods:\s*✓ .*tspml-sample-pack-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 // The failure is REPORTED, not swallowed: the pack box's own notice counts it.
@@ -450,8 +475,8 @@ await page.fill('aside[aria-label="Mods"] textarea.pack-input', `${BASE_URL}/sam
 await page.click('aside[aria-label="Mods"] button:has-text("Import modpack")');
 out.packFromLinkLoaded = await waitForSidebar(
   () =>
-    /mods:\s*✓ .*tspml-sample-url-mod/.test(document.body.innerText) &&
-    /mods:\s*✓ .*tspml-sample-pack-mod/.test(document.body.innerText),
+    /mods:\s*✓ .*tspml-sample-url-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")) &&
+    /mods:\s*✓ .*tspml-sample-pack-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   30000,
 );
 out.packFromLinkListed = await sidebarText().then(

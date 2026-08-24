@@ -14,8 +14,11 @@ await page.screenshot({ path: '/tmp/tspml-launcher.png' });
 await page.goto('http://localhost:3000/play', { waitUntil: 'domcontentloaded' });
 await page.screenshot({ path: '/tmp/tspml-boot.png' });
 await page.waitForSelector('.boot-overlay', { state: 'detached', timeout: 90000 }).catch(() => {});
+// The Mods menu is an overlay closed by default; open it before the shots.
+await page.click('.mods-btn').catch(() => {});
+await page.waitForTimeout(400);
 await page.click('aside[aria-label="Mods"] summary');
 await page.waitForTimeout(400);
-await page.locator('.sidebar').screenshot({ path: '/tmp/tspml-sidebar.png' });
+await page.locator('.mods-menu').screenshot({ path: '/tmp/tspml-sidebar.png' });
 await page.screenshot({ path: '/tmp/tspml-form.png' });
 await browser.close();

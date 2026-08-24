@@ -59,6 +59,16 @@ const MOD_ID = "tspml-sample-url-mod";
 
 const step = (msg) => process.stderr.write(`smoke:drawer · ${msg}\n`);
 
+/** The Mods menu's full text. The aside is an overlay closed by default but
+ *  always mounted — `hidden`, not unrendered — so queries see through it while
+ *  innerText would not. textContent + whitespace collapse keeps the status-row
+ *  regexes working against a closed menu. */
+const modsText = () =>
+  page.evaluate(() =>
+    (document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")
+      .replace(/\s+/g, " "),
+  );
+
 const browser = await chromium.launch({
   headless: true,
   args: [
@@ -118,7 +128,7 @@ out.frameMounted = !!frame;
 // Wait for the loader to settle before stamping: a stamp set during boot could
 // be wiped by a remount that was always going to happen, and would then read as
 // a drawer-caused remount later.
-out.startsWithNoMods = await waitFor(() => /mods:\s*none/.test(document.body.innerText));
+out.startsWithNoMods = await waitFor(() => /mods:\s*none/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")));
 
 /**
  * Mark the CURRENT game document, so a later check can tell "same document" from
@@ -191,7 +201,7 @@ await card.locator("button", { hasText: "Install anyway" }).click({ timeout: 100
 // target would have written storage and said "loads next time you play", which
 // would leave this line reading `mods: none` forever.
 out.bLoadedLive = await waitFor(
-  () => /mods:\s*✓[^\n]*tspml-sample-url-mod/.test(document.body.innerText),
+  () => /mods:\s*✓[^\n]*tspml-sample-url-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   60000,
 );
 // THE OTHER leg: same document. A remount would have re-booted the game, which
@@ -222,9 +232,7 @@ out.dDrawerHidden = await drawer
   .then(() => true)
   .catch(() => false);
 // Closing is not unloading: the mod the player just installed is still running.
-out.dModStillLoaded = await page.evaluate(
-  () => /mods:\s*✓[^\n]*tspml-sample-url-mod/.test(document.body.innerText),
-);
+out.dModStillLoaded = /mods:\s*✓[^\n]*tspml-sample-url-mod/.test(await modsText());
 out.dSameFrameAfterClose = await frameStillStamped();
 // It landed in the shared library too, so it survives to the next launch. Read
 // from storage rather than inferred from the UI.
