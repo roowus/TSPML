@@ -9,6 +9,16 @@
 > byte-patching), a capability **we do not have**. Row 4's "PML has no API" needs the
 > qualifier that they have an official API mod — it is just a year-stale stub that no
 > longer runs. Read that doc before quoting this table anywhere public.
+>
+> **Framing note (2026-08-24).** This is an internal engineering audit written to find
+> work for TSPML to do, and it reads like one. It is **not** the project's public posture
+> toward PML, and it should not be quoted as one. The public position is in
+> [`docs/project/decision-log.md`](../project/decision-log.md) (ADR-017) and on the docs
+> site: PML pioneered PolyTrack modding, the two loaders made different architectural
+> bets, and TSPML intends to eventually **run PML-format mods** natively or through an
+> adapter. Nothing below is in tension with that — a list of things worth improving is a
+> reason to interoperate, not a reason not to. Where a row reads as a verdict on the
+> project rather than on a mechanism, treat the mechanism as the content.
 
 ## Summary table
 
@@ -45,7 +55,9 @@
 
 The shortcomings list is well-grounded in the source. TSPML's value proposition is **not** "PML can't do X" — it is: **(a) a stable, mappings-backed API so mods survive updates** (PML's single biggest pain), **(b) far better DX** (types, scaffold, scoped HMR, real tests), **(c) honest, diagnostic failure modes** (no boot-aborts, no silent mis-targets), and **(d) a cleaner legal/online posture** (no game redistribution).
 
-**Sharpened 2026-08-03:** the durable core of that is **the failure mode, not the frequency.** When the game moves, PML finds out by breaking — and may mis-patch silently; TSPML finds out by hash mismatch and falls back to vanilla. Everything else on the list is execution quality, which is copyable, and on two axes (physics WASM patching, and having any users at all) they are ahead. Physics is now a capability **PML has and we lack** — the earlier "DX+architecture win, not a capability gap" line is obsolete.
+**Sharpened 2026-08-03:** the durable core of that is **the failure mode, not the frequency.** When the game moves, PML finds out by breaking — and may mis-patch silently; TSPML finds out by hash mismatch and falls back to vanilla. Everything else on the list is execution quality, which is copyable.
+
+**Corrected 2026-08-24 — physics is no longer a gap, and this section said otherwise.** The line above used to end "on two axes (physics WASM patching, and having any users at all) they are ahead. Physics is now a capability **PML has and we lack**." That was written before [#43](https://github.com/roowus/TSPML/issues/43) shipped and closed on 2026-08-22, which the audit-corrections bullet six lines up already recorded. Both statements were in the same file at once, which is exactly the kind of drift this document exists to catch elsewhere. The accurate version: **both loaders can patch physics WASM constants**, by different location strategies — PML by byte offset, TSPML by a structural fingerprint of the containing function. The remaining axis where they are genuinely ahead is **having users and an ecosystem**, which is not a capability and is the actual argument for the compatibility work in ADR-017.
 
 ## Sources
 
