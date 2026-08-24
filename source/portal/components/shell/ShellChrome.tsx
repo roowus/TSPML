@@ -28,6 +28,15 @@ export function ShellChrome({
 }): ReactElement {
   return (
     <div className="shell">
+      {/* First tab stop on every launcher route. Without it, a keyboard user
+          tabs through the brand, Docs, and both rail items before reaching
+          anything that changes with the route — on every page load. Visible
+          only while focused: it exists for keyboards, and painting a permanent
+          "skip" banner over the header would spend the design's one piece of
+          chrome on people who never need it. */}
+      <a className="skip-link" href="#shell-main">
+        Skip to content
+      </a>
       <header className="topbar shell-topbar">
         <div className="brand">
           {/* eslint-disable-next-line @next/next/no-img-element -- a 22px
@@ -64,7 +73,12 @@ export function ShellChrome({
             <Icon name="search" /> Browse
           </Link>
         </nav>
-        <main className="shell-main">{children}</main>
+        {/* tabIndex={-1}: without a focus target the skip link only scrolls,
+            and the next Tab starts back at the top of the nav the user just
+            asked to bypass. Negative so it is not itself in the tab order. */}
+        <main className="shell-main" id="shell-main" tabIndex={-1}>
+          {children}
+        </main>
       </div>
     </div>
   );

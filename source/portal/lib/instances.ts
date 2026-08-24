@@ -43,6 +43,7 @@
  */
 
 import { DEFAULT_GAME_VERSION, resolveGameVersion } from './game-versions';
+import { normalizeInstanceIcon } from './instance-icon';
 
 /** Where the instance store lives. Distinct from the mod pool, by design. */
 export const INSTANCES_STORAGE_KEY = 'tspml.instances.v1';
@@ -72,6 +73,17 @@ export interface Instance {
   readonly gameVersion: string;
   readonly createdAt: string;
   readonly lastPlayedAt?: string;
+  /**
+   * The picture on this instance's tile: a `data:image/*` URI from the upload
+   * path, or an http(s) URL the user pasted. Absent means the letter tile.
+   *
+   * Validated through {@link normalizeInstanceIcon} on READ rather than trusted
+   * from storage, because the store is user-editable and this string goes
+   * straight into an `<img src>`. Uploads are downscaled before they get here —
+   * see `lib/instance-icon.ts` for why storing one verbatim would silently eat
+   * the budget the shared mod pool depends on.
+   */
+  readonly icon?: string;
   /**
    * Mods from the shared pool this instance turns OFF.
    *
@@ -135,17 +147,22 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  */
 function coerceInstance(raw: unknown): Instance | null {
   if (!isRecord(raw)) return null;
-  const { id, name, gameVersion, createdAt, lastPlayedAt, disabledModIds } = raw;
+  const { id, name, gameVersion, createdAt, lastPlayedAt, disabledModIds, icon } = raw;
   if (typeof id !== 'string' || id.length === 0) return null;
   if (typeof name !== 'string' || name.length === 0) return null;
   const disabled =
     Array.isArray(disabledModIds) ? disabledModIds.filter((m): m is string => typeof m === 'string') : [];
+  // A bad icon drops the FIELD, not the row: an instance is still perfectly
+  // launchable without its picture, and losing someone's profile over a
+  // decoration would be the wrong trade every time.
+  const validIcon = normalizeInstanceIcon(icon);
   return {
     id,
     name: name.slice(0, INSTANCE_LIMITS.maxNameChars),
     gameVersion: resolveGameVersion(gameVersion),
     createdAt: typeof createdAt === 'string' ? createdAt : '',
     ...(typeof lastPlayedAt === 'string' ? { lastPlayedAt } : {}),
+    ...(validIcon === null ? {} : { icon: validIcon }),
     disabledModIds: disabled,
   };
 }
@@ -263,6 +280,7 @@ export function addInstance(
   store: InstanceStore,
   name: string,
   gameVersion: string,
+  icon?: string,
 ): { ok: true; store: InstanceStore; instance: Instance } | { ok: false; error: string } {
   const trimmed = name.trim();
   if (trimmed.length === 0) return { ok: false, error: 'give the instance a name' };
@@ -276,11 +294,13 @@ export function addInstance(
     slugifyInstanceName(trimmed),
     store.instances.map((i) => i.id),
   );
+  const validIcon = normalizeInstanceIcon(icon);
   const instance: Instance = {
     id,
     name: trimmed,
     gameVersion: resolveGameVersion(gameVersion),
     createdAt: new Date().toISOString(),
+    ...(validIcon === null ? {} : { icon: validIcon }),
     disabledModIds: [],
   };
   return {
@@ -308,6 +328,41 @@ export function renameInstance(
       ...store,
       instances: store.instances.map((i) => (i.id === id ? { ...i, name: trimmed } : i)),
     },
+  };
+}
+
+/**
+ * Set or clear an instance's icon. Pure; returns the next store.
+ *
+ * Passing null CLEARS the icon, and so does passing a string that fails
+ * validation — but those two arrive by different routes and only one is a
+ * mistake, so the caller validates first (with
+ * `instanceIconFromUrl`/`fileToInstanceIcon`, which return a reason) and this
+ * function is the last line of defence rather than the only one.
+ *
+ * Like {@link setModDisabledInInstance}, a no-op returns the SAME store so
+ * change-detecting callers do not write to localStorage for nothing.
+ */
+export function setInstanceIcon(
+  store: InstanceStore,
+  id: string,
+  icon: string | null,
+): InstanceStore {
+  const target = store.instances.find((i) => i.id === id);
+  if (target === undefined) return store;
+  const next = icon === null ? null : normalizeInstanceIcon(icon);
+  if ((target.icon ?? null) === next) return store;
+  return {
+    ...store,
+    instances: store.instances.map((i) => {
+      if (i.id !== id) return i;
+      // Rebuilt without the key rather than set to undefined: the store is
+      // JSON.stringified, and `{icon: undefined}` and a missing key serialize
+      // identically, but only the rebuild keeps the in-memory object matching
+      // what a subsequent read will produce.
+      const { icon: _dropped, ...rest } = i;
+      return next === null ? rest : { ...rest, icon: next };
+    }),
   };
 }
 

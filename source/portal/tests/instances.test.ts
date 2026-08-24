@@ -13,6 +13,7 @@ import {
   removeInstance,
   renameInstance,
   saveInstances,
+  setInstanceIcon,
   setModDisabledInInstance,
   slugifyInstanceName,
   touchInstance,
@@ -116,6 +117,48 @@ describe('readInstances — migration is a lazy read', () => {
     });
     const store = readInstances(fakeStorage(raw).storage);
     expect(store.instances.map((i) => i.id)).toEqual(['good']);
+  });
+
+  it('drops a bad icon field without dropping the instance', () => {
+    // An instance is perfectly launchable without its picture. Losing someone's
+    // whole profile over a decoration would be the wrong trade every time.
+    const raw = JSON.stringify({
+      schemaVersion: 1,
+      activeId: 'a',
+      instances: [
+        {
+          id: 'a',
+          name: 'A',
+          gameVersion: '0.6.2',
+          createdAt: '',
+          disabledModIds: [],
+          icon: 'javascript:alert(1)',
+        },
+      ],
+    });
+    const store = readInstances(fakeStorage(raw).storage);
+    expect(store.instances).toHaveLength(1);
+    expect(store.instances[0]!.icon).toBeUndefined();
+  });
+
+  it('keeps a valid icon through a round trip', () => {
+    const raw = JSON.stringify({
+      schemaVersion: 1,
+      activeId: 'a',
+      instances: [
+        {
+          id: 'a',
+          name: 'A',
+          gameVersion: '0.6.2',
+          createdAt: '',
+          disabledModIds: [],
+          icon: 'https://example.com/i.png',
+        },
+      ],
+    });
+    expect(readInstances(fakeStorage(raw).storage).instances[0]!.icon).toBe(
+      'https://example.com/i.png',
+    );
   });
 
   it('repairs a missing disabledModIds and an unselectable gameVersion', () => {
@@ -323,6 +366,66 @@ describe('setModDisabledInInstance', () => {
 
   it('an unknown instance id changes nothing', () => {
     expect(setModDisabledInInstance(base, 'nope', 'a', true)).toBe(base);
+  });
+});
+
+describe('setInstanceIcon', () => {
+  const base = defaultInstanceStore();
+
+  it('sets a validated icon', () => {
+    const next = setInstanceIcon(base, DEFAULT_INSTANCE_ID, 'https://example.com/i.png');
+    expect(findInstance(next, DEFAULT_INSTANCE_ID)?.icon).toBe('https://example.com/i.png');
+  });
+
+  it('clears the icon on null, dropping the key rather than setting undefined', () => {
+    // `{icon: undefined}` and a missing key serialize identically, but only the
+    // rebuild keeps the in-memory object matching what a later read produces.
+    const set = setInstanceIcon(base, DEFAULT_INSTANCE_ID, 'https://example.com/i.png');
+    const cleared = setInstanceIcon(set, DEFAULT_INSTANCE_ID, null);
+    const row = findInstance(cleared, DEFAULT_INSTANCE_ID)!;
+    expect(row.icon).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(row, 'icon')).toBe(false);
+  });
+
+  it('is the last line of defence: an invalid icon clears rather than stores', () => {
+    const set = setInstanceIcon(base, DEFAULT_INSTANCE_ID, 'https://example.com/i.png');
+    const bad = setInstanceIcon(set, DEFAULT_INSTANCE_ID, 'javascript:alert(1)');
+    expect(findInstance(bad, DEFAULT_INSTANCE_ID)?.icon).toBeUndefined();
+  });
+
+  it('returns the SAME store for a no-op, so callers do not write for nothing', () => {
+    const set = setInstanceIcon(base, DEFAULT_INSTANCE_ID, 'https://example.com/i.png');
+    expect(setInstanceIcon(set, DEFAULT_INSTANCE_ID, 'https://example.com/i.png')).toBe(set);
+    // Clearing an already-absent icon is a no-op too.
+    expect(setInstanceIcon(base, DEFAULT_INSTANCE_ID, null)).toBe(base);
+  });
+
+  it('an unknown instance id changes nothing', () => {
+    expect(setInstanceIcon(base, 'nope', 'https://example.com/i.png')).toBe(base);
+  });
+
+  it('touches only the named instance', () => {
+    const two = addInstance(base, 'Other', '0.6.2');
+    expect(two.ok).toBe(true);
+    if (!two.ok) return;
+    const next = setInstanceIcon(two.store, DEFAULT_INSTANCE_ID, 'https://example.com/i.png');
+    expect(findInstance(next, two.instance.id)?.icon).toBeUndefined();
+  });
+});
+
+describe('addInstance — icon', () => {
+  it('stores a validated icon given at creation', () => {
+    const made = addInstance(defaultInstanceStore(), 'Iconic', '0.6.2', 'https://example.com/i.png');
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    expect(made.instance.icon).toBe('https://example.com/i.png');
+  });
+
+  it('drops an invalid icon rather than refusing the instance', () => {
+    const made = addInstance(defaultInstanceStore(), 'Iconic', '0.6.2', 'javascript:alert(1)');
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    expect(made.instance.icon).toBeUndefined();
   });
 });
 

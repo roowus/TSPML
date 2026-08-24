@@ -22,7 +22,7 @@ export function BrowseList(): ReactElement {
       <div className="browse-head">
         <h2>Browse</h2>
         {install.installedAny ? (
-          <Link className="btn-play" href="/play">
+          <Link className="btn btn-play" href="/play">
             <Icon name="play" /> Play
           </Link>
         ) : null}

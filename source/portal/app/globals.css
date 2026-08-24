@@ -35,6 +35,18 @@
   --accent: #ff8a3d;
   --accent-2: #46d3ff;
   --accent-quiet: rgba(255, 138, 61, 0.14);
+
+  /* Corner radii. Three steps, not eleven. The file had grown 4/6/7/8/10px in
+     roughly the order the sections were written, which reads as inconsistency
+     rather than hierarchy; these name the three jobs a radius actually does
+     here. `--r-lg` stays 10px because the sidebar and the stage already share
+     it and they are the page's two big slabs.
+     Deliberately NOT a pill scale: the visual language is instrument panel, so
+     the one 999px radius left in the file is the status pill, where the shape
+     is the point. */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
 }
 
 * {
@@ -115,8 +127,20 @@ body {
   font-size: 13px;
 }
 
+/* The launching instance's picture sits immediately before its name, tighter
+   than the brand's own 9px gap so the two read as one label rather than as a
+   third top-level item beside the logo and the wordmark. */
+.brand > .inst-tile {
+  margin-left: -3px;
+  margin-right: -3px;
+}
+
 @media (max-width: 560px) {
-  .brand-sub {
+  /* The tile goes with the name it labels. A picture alone would identify the
+     instance to someone who already knows which picture they picked, and to
+     nobody else. */
+  .brand-sub,
+  .brand > .inst-tile {
     display: none;
   }
 }
@@ -137,6 +161,43 @@ body {
 
 .docs-link:hover {
   text-decoration: underline;
+}
+
+/* The keyboard skip link. Off-canvas at rest, in the flow while focused —
+   `position: absolute` would overlap the header text it jumps over, and a
+   focused control that paints over unrelated copy is its own confusion.
+   `:focus-visible` rather than `:focus` so a mouse click on the link (which is
+   possible, if odd) does not flash it either. */
+.skip-link {
+  position: absolute;
+  z-index: 100; /* above the drawer (60), the only overlay that could cover it */
+  left: 14px;
+  top: 6px;
+  padding: 7px 12px;
+  background: var(--panel);
+  border: 1px solid var(--accent-2);
+  border-radius: var(--r-md);
+  color: var(--accent-2);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:not(:focus-visible) {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Same reason the tabpanel gets `outline: none` above: the skip link hands
+   focus to this container, and ringing the entire page body on arrival reads
+   as an error state rather than a landing. */
+.shell-main:focus {
+  outline: none;
 }
 
 .sw-badge {
@@ -185,7 +246,7 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   /* Nearly opaque rather than solid: the running game stays faintly visible
      behind it, which is the whole difference between this and a page. */
   background: color-mix(in srgb, var(--bg) 94%, transparent);
@@ -248,7 +309,7 @@ body {
 .content-resizer {
   flex: none;
   width: 8px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   cursor: col-resize;
   touch-action: none; /* pointer events drive the drag; don't scroll instead */
   background: transparent;
@@ -284,7 +345,7 @@ body {
   flex: 1;
   min-width: 0;
   background: #000;
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   overflow: hidden;
 }
 
@@ -321,7 +382,7 @@ body {
   background: rgba(13, 17, 23, 0.72);
   color: var(--text-body);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 5px 11px;
   font-size: 12.5px;
   font-weight: 600;
@@ -449,11 +510,22 @@ body {
     animation: none;
   }
 
-  /* Hover/focus tweens on the stage controls and the sidebar grip. The end
-     states (opacity 1, the accent grip) are unchanged — they arrive at once. */
+  /* Hover/focus tweens across every surface: the stage controls, the sidebar
+     grip, the mod shelf rows, and the launcher's buttons, nav, tabs, chips and
+     cards. Every end state (opacity 1, the accent grip, a darker row, a lit
+     border) is unchanged — they arrive at once instead of over 140ms.
+     Listed by name rather than swept with `*` for the reason above the block:
+     two transitions on this page carry information and must survive. */
   .stage-btn,
   .content-resizer::before,
-  .boot-overlay {
+  .boot-overlay,
+  .rows.mod-shelf li,
+  .btn,
+  .nav-item,
+  .browse-tab,
+  .tag-chip,
+  .inst-card,
+  .entry-card {
     transition: none;
   }
 }
@@ -501,7 +573,7 @@ body {
   padding: 8px 10px;
   background: rgba(13, 17, 23, 0.6);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
   color: var(--muted);
@@ -538,7 +610,7 @@ body {
   padding: 8px 10px;
   background: var(--panel-deep);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
   line-height: 1.6;
@@ -586,7 +658,7 @@ body {
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   padding: 16px;
 }
 
@@ -711,7 +783,7 @@ body {
   gap: 12px;
   background: var(--panel-deep);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 
 .mod-card-off,
@@ -730,7 +802,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--r-md);
   background: linear-gradient(135deg, #1f6feb33, #23863633);
   border: 1px solid var(--border-strong);
   color: var(--text);
@@ -849,6 +921,161 @@ body {
   margin-top: 10px;
 }
 
+/* ---- The mod shelf (Your mods) ----
+
+   A shelf of switches, not a stack of cards: one line per mod, the two
+   switches leading, everything referential behind the row's "details" button.
+   The rows keep the mod-card DOM contract (first <span> is the status pill)
+   but drop the card chrome — six bordered boxes in a 340px column was most of
+   what made the old list feel heavy. */
+
+.shelf-count {
+  margin-top: 0;
+}
+
+.shelf-filter {
+  margin-top: 10px;
+}
+
+/* The bulk bar. Sticky so a long shelf cannot scroll the actions for the
+   current selection out of view; z-index 10 is the bottom of the app's scale
+   (10 chrome / 20 overlay / 50 theater) and stays under the boot overlay. */
+.shelf-bulk {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  background: var(--panel-deep);
+  border: 1px solid var(--accent-2);
+  border-radius: var(--r-sm);
+}
+
+.shelf-bulk-count {
+  color: var(--accent-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Undo, not a confirm dialog: removing a mod is cheap to reverse (the record
+   is still in memory) and the modal would land on every single removal. */
+.shelf-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border-strong);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-sm);
+}
+
+.shelf-undo-text {
+  color: var(--text-body);
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rows.mod-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 10px;
+}
+
+/* `.rows li` sets the separators and outranks a bare `.shelf-row`, so the
+   row's own padding has to live on this selector to survive. */
+.rows.mod-shelf li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 8px;
+  border-top: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  transition: background 120ms ease;
+}
+
+.rows.mod-shelf li:first-child {
+  border-top: 0;
+}
+
+.rows.mod-shelf li:hover {
+  background: var(--panel-deep);
+}
+
+/* A mod that is not running is dimmed rather than restyled — the row must
+   still be fully readable, because "why is this off" is exactly the question
+   being asked of it. */
+.shelf-row-off {
+  opacity: 0.72;
+}
+
+.shelf-row-off .mod-tile {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.shelf-row-off .mod-tile img {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.shelf-check {
+  flex: none;
+  /* Nudged down to the id's optical center rather than the row's top. */
+  margin-top: 9px;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-2);
+  cursor: pointer;
+}
+
+.shelf-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.shelf-facts {
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-switches {
+  margin-top: 7px;
+}
+
+/* Destructive, and coloured as such — but only on hover, so a shelf of six
+   mods is not six red buttons shouting at rest. */
+.btn-danger:hover {
+  border-color: rgba(248, 81, 73, 0.55);
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--red);
+}
+
+.shelf-details {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.shelf-details > .row-buttons {
+  margin-top: 6px;
+}
+
 /* Inside a card the meta lines share one rhythm: 5px between every line,
    10px before the action row (set above) — the uneven 4/9px mix read as
    part of the unpolished feel. */
@@ -868,7 +1095,7 @@ body {
   padding: 10px 12px;
   background: var(--panel-deep);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 
 .share-panel-row {
@@ -886,7 +1113,7 @@ body {
   padding: 5px 8px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   font-size: 11px;
   white-space: nowrap;
   overflow-x: auto;
@@ -922,7 +1149,7 @@ body {
   overflow: auto;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
   line-height: 1.5;
@@ -938,7 +1165,7 @@ body {
   padding: 12px;
   background: rgba(31, 111, 235, 0.08);
   border: 1px solid rgba(31, 111, 235, 0.5);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 12.5px;
   line-height: 1.6;
 }
@@ -962,7 +1189,7 @@ body {
   padding: 5px 8px;
   background: var(--panel-deep);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-md);
 }
 
 .share-url-list code {
@@ -993,7 +1220,7 @@ body {
   padding: 10px 12px;
   background: rgba(210, 153, 34, 0.12);
   border: 1px solid rgba(210, 153, 34, 0.55);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--amber);
   font-size: 12.5px;
   line-height: 1.6;
@@ -1003,22 +1230,49 @@ body {
 
 /* inline-flex so an icon and its label share one centered line — baseline
    layout dropped SVGs visibly low inside buttons (the reported centering
-   jank in the mods menu). */
+   jank in the mods menu).
+ *
+ * `.btn` carries its own padding and font size now. It did not, and the two
+ * launcher controls that took `.btn-play` WITHOUT it (the catalog's Install,
+ * Browse's Play) inherited neither — they rendered as a 21px-tall full-bleed
+ * orange slab, which is why Install looked like a progress bar rather than a
+ * button. Every filled variant below layers onto this rather than replacing it. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
+  padding: 5px 11px;
   background: #21262d;
   color: var(--text-body);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
   cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .btn:hover {
   background: #2b313a;
   border-color: #3d444d;
+}
+
+/* Every disabled control reads the same way, rather than each variant
+   inventing its own. `cursor: default` and not `not-allowed`: the button is
+   busy or inapplicable, which is not the user doing something forbidden. */
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  background: #21262d;
+  border-color: var(--border-strong);
 }
 
 /* .btn also dresses anchors (the mod card's "docs" link) — kill the default
@@ -1046,6 +1300,11 @@ a.btn {
 
 .btn-primary:hover {
   background: #2ea043;
+}
+
+.btn-primary:disabled:hover {
+  background: #238636;
+  border-color: #2ea043;
 }
 
 /* ---- Add-a-mod form ---- */
@@ -1083,18 +1342,13 @@ a.btn {
   background: var(--panel-deep);
   color: var(--text-body);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   font-size: 12.5px;
 }
 
 .add-input {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11.5px;
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 /* The paste boxes stay in the DOM when the URL method is selected (the smoke
@@ -1109,7 +1363,7 @@ a.btn {
   display: inline-block;
   margin-right: 6px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1134,7 +1388,7 @@ a.btn {
   background: var(--panel-deep);
   color: var(--text-body);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--r-md);
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
   resize: vertical;
@@ -1218,11 +1472,14 @@ a.btn {
   gap: 8px;
   padding: 7px 10px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--muted);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
 }
 
 .nav-item:hover {
@@ -1287,11 +1544,20 @@ a.btn {
   padding: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 
-.inst-card:hover {
+.inst-card {
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+/* Not the skeleton: a placeholder that lights up under the pointer invites a
+   click on a card that is not there yet. */
+.inst-card:not(.inst-card-skeleton):hover {
   border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--panel) 82%, var(--text));
 }
 
 /* Reserves the card's height before the mount read lands, so the grid does not
@@ -1308,13 +1574,22 @@ a.btn {
   );
 }
 
+/* Center, not baseline: the picture has no text baseline to align to, and
+   baseline-aligning the name against it dropped the version code low. */
 .inst-card-link {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 8px;
   color: var(--text);
   text-decoration: none;
+}
+
+/* The name takes the leftover width so the version code stays pinned right
+   however long the name is — space-between cannot do that once a third,
+   fixed-width child sits at the head of the row. */
+.inst-card-link .inst-name {
+  flex: 1;
+  min-width: 0;
 }
 
 .inst-card-link:hover .inst-name {
@@ -1357,12 +1632,113 @@ a.btn {
   border-color: #ffa163;
 }
 
+.btn-play:disabled:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .inst-new {
   margin-top: 14px;
   padding: 12px;
   background: var(--panel);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
+}
+
+/* ---- Instance pictures ---- */
+
+/* Sized by a custom property rather than a class per scale: the tile appears at
+   22px (the play topbar), 40px (grid card), 52px (detail header) and 56px (the
+   picker preview), and four variant classes would be four rules free to drift.
+   Square with a 4px radius, matching the launcher's angular language — the mod
+   sidebar's .mod-tile is rounder on purpose, since these are different objects
+   and looking alike would suggest they are interchangeable. */
+.inst-tile {
+  flex: none;
+  width: var(--tile-size, 44px);
+  height: var(--tile-size, 44px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  background: var(--panel-deep);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-weight: 700;
+  /* Scales with the tile so one rule covers every size. */
+  font-size: calc(var(--tile-size, 44px) * 0.42);
+  line-height: 1;
+  overflow: hidden;
+}
+
+.inst-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* The rule separates the picture from the fields above it in the create dialog.
+   On the detail page the picker is a panel on its own, so there is nothing to
+   separate it from and the line reads as a stray divider. */
+.icon-picker {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.icon-picker:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.icon-picker-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.icon-picker-controls {
+  min-width: 0;
+}
+
+.icon-picker-controls .add-label {
+  margin-top: 0;
+}
+
+/* The real input is driven by the Upload button beside the preview. Hidden with
+   position rather than display:none so it stays focusable and keeps announcing
+   itself to assistive tech; display:none would take it out of the a11y tree and
+   leave the button pointing at nothing. */
+.icon-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.icon-url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.icon-url-row .add-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The detail header gains a picture, so its h2 takes the leftover width and the
+   version code stays pinned right. */
+.inst-head > h2 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .version-note {
@@ -1384,7 +1760,7 @@ a.btn {
   margin-top: 10px;
   padding: 14px;
   border: 1px dashed var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 
 /* An empty note that carries a way forward (Retry) is a <div> of paragraphs,
@@ -1429,6 +1805,15 @@ a.btn {
   color: var(--text);
 }
 
+/* The tab's underline slides in rather than blinking. `border-bottom-color`
+   animates cleanly because the border is already 2px at rest, just
+   transparent — animating the width would reflow the tab strip. */
+.browse-tab {
+  transition:
+    color 140ms ease,
+    border-bottom-color 140ms ease;
+}
+
 .browse-tab[aria-selected='true'] {
   color: var(--text);
   border-bottom-color: var(--accent);
@@ -1449,7 +1834,7 @@ a.btn {
   flex: 1 1 260px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--panel);
   color: var(--muted);
 }
@@ -1486,6 +1871,13 @@ a.btn {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+}
+
+.tag-chip {
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .tag-chip:hover {
@@ -1525,8 +1917,16 @@ a.btn {
   gap: 8px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--panel);
+  transition: border-color 140ms ease;
+}
+
+/* The card is not itself a link — the name and the Install button are. So the
+   hover lifts the border only, without the background change the instance
+   cards get: those ARE clickable across their whole face. */
+.entry-card:hover {
+  border-color: var(--border-strong);
 }
 
 .entry-head {
@@ -1542,7 +1942,7 @@ a.btn {
   display: grid;
   place-items: center;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: var(--panel-deep);
   color: var(--muted);
   font-style: normal;
@@ -1614,7 +2014,7 @@ a.btn {
   margin: 0;
   padding: 9px 10px;
   border: 1px solid var(--amber);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.5;
@@ -1625,7 +2025,7 @@ a.btn {
   margin: 0;
   padding: 9px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.5;
@@ -1724,16 +2124,26 @@ a.btn {
   border: 0;
 }
 
-/* Visible focus in the shell, and in the in-play drawer.
+/* Visible focus in the shell, in the in-play drawer, and in the sidebar.
    The drawer is on the play page and therefore NOT inside `.shell`, but it
    renders the same <Catalog> — tabs, tag chips, search, install buttons. Left to
    the UA default those controls would have a visible ring on /browse and a
    near-invisible one over the dark stage, which is the worst possible split:
-   the same component, keyboard-usable in one place and not the other. */
+   the same component, keyboard-usable in one place and not the other.
+
+   The sidebar is here for the same reason: the mod shelf is a keyboard surface
+   (a filter field, a checkbox per row, four buttons per row), and tabbing
+   through it against #0d1117 with the UA default ring is guesswork. */
 .shell a:focus-visible,
 .shell button:focus-visible,
 .shell input:focus-visible,
 .shell select:focus-visible,
+.sidebar a:focus-visible,
+.sidebar button:focus-visible,
+.sidebar input:focus-visible,
+.sidebar select:focus-visible,
+.sidebar textarea:focus-visible,
+.sidebar summary:focus-visible,
 .browse-drawer a:focus-visible,
 .browse-drawer button:focus-visible,
 .browse-drawer input:focus-visible,
@@ -1750,6 +2160,71 @@ a.btn {
 .browse-drawer [role='tabpanel']:focus,
 .shell [role='tabpanel']:focus {
   outline: none;
+}
+
+/* ---- Touch ----
+ *
+ * Keyed to the POINTER, not to the width. A 1440px tablet needs finger-sized
+ * targets and a 375px browser window on a laptop does not, so a `max-width`
+ * rule would grow the buttons for exactly the wrong people. `pointer: coarse`
+ * asks the question that actually matters.
+ *
+ * 40px rather than the 44px the guidelines name: the shelf packs four controls
+ * per row inside a 340px sidebar, and 44 forces every row to three lines.
+ * 40 with a real gap between neighbours is the honest trade, and the gap is
+ * what stops a mis-tap from hitting `remove` instead of `details`.
+ *
+ * `min-height` and padding, never a fixed height — a wrapped label must still
+ * be able to make its button taller. */
+@media (pointer: coarse) {
+  .btn,
+  .nav-item,
+  .browse-tab,
+  .tag-chip:not(.tag-static):not(.tag-warn),
+  .stage-btn,
+  .docs-link {
+    min-height: 40px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .btn-small {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  /* Adjacent targets need air between them or the size buys nothing. */
+  .row-buttons,
+  .install-actions,
+  .tag-row,
+  .inst-actions {
+    gap: 10px;
+  }
+
+  /* The row checkbox is the one control a finger cannot grow into by padding:
+     it has no label box to expand. Scale the control itself instead, and
+     re-center it against the id line it belongs to. */
+  .shelf-check {
+    width: 20px;
+    height: 20px;
+    margin-top: 6px;
+  }
+
+  /* Text inputs at 16px, because iOS Safari zooms the page when a field under
+     16px takes focus and never zooms back out. Monospace fields included: the
+     mod-json textareas are the ones most likely to be tapped into. The single-
+     line fields also get the 40px treatment — they were the last controls on
+     the measured pages that a finger could still miss. */
+  .add-input,
+  .add-select,
+  .add-form textarea {
+    font-size: 16px;
+  }
+
+  .add-input,
+  .add-select {
+    min-height: 40px;
+  }
 }
 
 @media (max-width: 720px) {
