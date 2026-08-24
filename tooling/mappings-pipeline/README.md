@@ -235,12 +235,18 @@ buffer is never mutated, and the success report always carries
 `leaderboardRisk: 'warn'` — physics tuning is exactly the category the warn-only
 classifier exists to label. The player decides; nothing blocks.
 
-What remains for M11 is the *plumbing*, not the mechanism: a mod-facing manifest
-surface for physics plans and the portal serving the patched bytes.
+The plumbing this section once listed as outstanding has shipped. A manifest declares
+`physics: "physics.json"` (`@tspml/loader`'s `manifest.ts`), authors derive one with
+`pnpm --filter @tspml/wasm find-constant`, the portal merges every enabled mod's file
+into one capped plan (`portal/lib/physics-plan.ts`), parks it in the Cache API, and the
+service worker replays the wasm request as a POST so `portal/lib/wasm-serve.ts` can
+answer with patched bytes. `smoke:physics` drives that whole carriage in CI.
 
-Also found: the physics binary is **byte-identical across 0.6.0/0.6.1/0.6.2**, so
-there is no second version to cross-validate against yet — the first real test is the
-next PolyTrack release. Full write-up:
+What genuinely remains is the thing no amount of code can supply: the physics binary is
+**byte-identical across 0.6.0/0.6.1/0.6.2**, so there is no second version to
+cross-validate against. Whether a fingerprint survives a real recompile is untested
+against a real recompile, and the first evidence either way arrives with the next
+PolyTrack release. Full write-up:
 [`docs/research/wasm-structural-location.md`](../../docs/research/wasm-structural-location.md).
 
 ## Cross-version identity (why the diff keys by `sourceModuleId`)
