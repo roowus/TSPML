@@ -23,6 +23,9 @@
 import { chromium } from 'playwright';
 
 const BASE_URL = process.env.SMOKE_URL ?? 'http://localhost:3000';
+// The play surface. `/` is the launcher now; BASE_URL stays an origin because
+// other requests in this file are origin-relative.
+const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? '/tmp/tspml-ui-smoke.png';
 
 const step = (msg) => process.stderr.write(`smoke:ui · ${msg}\n`);
@@ -33,8 +36,8 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
-step(`goto ${BASE_URL}`);
-await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+step(`goto ${PLAY_URL}`);
+await page.goto(PLAY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
 const out = {};
 
@@ -74,25 +77,38 @@ const theaterBtn = page.locator('button.theater-btn');
 out.fsButtonVisible = await fsBtn.isVisible().catch(() => false);
 out.theaterButtonVisible = await theaterBtn.isVisible().catch(() => false);
 
+// Poll, never sleep. The label is React state driven by a `fullscreenchange`
+// listener, so it lands one or two frames AFTER the browser has already
+// entered fullscreen — a fixed wait is a coin flip on a loaded machine, and
+// this leg used to fail roughly 1 run in 12 for that reason alone. Each wait
+// still ends in a bounded timeout, so a real regression fails as a false
+// assertion rather than hanging.
+const settle = (fn, timeout = 8000) =>
+  page
+    .waitForFunction(fn, undefined, { timeout, polling: 100 })
+    .then(() => true)
+    .catch(() => false);
+
 step('enter fullscreen');
 await fsBtn.click().catch(() => {});
-await page.waitForTimeout(500);
-out.enteredFullscreen = await page.evaluate(
+out.enteredFullscreen = await settle(
   () => document.fullscreenElement?.classList?.contains('stage') === true,
 );
+// Wait for the label separately: the flip is the thing under test, so a miss
+// has to read as "the label never flipped", not as "we looked too early".
+out.labelFlipped = await settle(() =>
+  /exit/i.test(document.querySelector('button.fs-btn')?.textContent ?? ''),
+);
 out.labelInFs = (await fsBtn.textContent().catch(() => '')) ?? '';
-out.labelFlipped = /exit/i.test(out.labelInFs);
 
 step('exit fullscreen');
 await fsBtn.click().catch(() => {});
-await page.waitForTimeout(500);
-out.exitedFullscreen = await page.evaluate(() => document.fullscreenElement === null);
+out.exitedFullscreen = await settle(() => document.fullscreenElement === null);
 
 // 5. Theater mode: stage covers the viewport, fullscreen API NOT engaged.
 step('enter theater (expand) mode');
 await theaterBtn.click().catch(() => {});
-await page.waitForTimeout(300);
-out.theaterCoversTab = await page.evaluate(() => {
+out.theaterCoversTab = await settle(() => {
   const stage = document.querySelector('.stage');
   if (!stage) return false;
   const r = stage.getBoundingClientRect();
@@ -105,13 +121,14 @@ out.theaterCoversTab = await page.evaluate(() => {
     r.height >= window.innerHeight - 2
   );
 });
+out.theaterLabelFlipped = await settle(() =>
+  /shrink/i.test(document.querySelector('button.theater-btn')?.textContent ?? ''),
+);
 out.theaterLabel = (await theaterBtn.textContent().catch(() => '')) ?? '';
-out.theaterLabelFlipped = /shrink/i.test(out.theaterLabel);
 
 step('exit theater mode');
 await theaterBtn.click().catch(() => {});
-await page.waitForTimeout(300);
-out.theaterExited = await page.evaluate(
+out.theaterExited = await settle(
   () => document.querySelector('main.app')?.classList.contains('theater') === false,
 );
 
