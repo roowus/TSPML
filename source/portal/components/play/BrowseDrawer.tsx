@@ -44,6 +44,8 @@ export function BrowseDrawer({
 }): ReactElement {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  // Whatever had focus when the drawer opened, so closing can hand it back.
+  const openerRef = useRef<HTMLElement | null>(null);
 
   // Esc closes, matching the theater-mode handler this page already has. Bound
   // only while open so it cannot swallow a key the game wants: the game runs in
@@ -60,9 +62,26 @@ export function BrowseDrawer({
 
   // Focus moves into the panel on open so the keyboard lands somewhere useful
   // and a screen reader announces the dialog rather than leaving the user on a
-  // button that is now behind an overlay.
+  // button that is now behind an overlay — and comes BACK to the opener on
+  // close. Without the return trip, Esc drops a keyboard user on
+  // `document.body` and the next Tab restarts at the top of the page, which for
+  // this page means tabbing through the whole sidebar to get back to Browse.
+  //
+  // The opener is captured rather than assumed to be `.browse-btn`: the trigger
+  // is the play page's, not ours, and a ref reaching across that boundary would
+  // make the drawer wrong the moment a second trigger appears.
   useEffect(() => {
-    if (open) closeRef.current?.focus();
+    if (!open) return;
+    const opener = document.activeElement;
+    openerRef.current = opener instanceof HTMLElement ? opener : null;
+    closeRef.current?.focus();
+    return () => {
+      // `isConnected` because an install can rerender the trigger away; focusing
+      // a detached node silently moves focus to the body, which is the bug this
+      // effect exists to avoid.
+      const back = openerRef.current;
+      if (back !== null && back.isConnected) back.focus();
+    };
   }, [open]);
 
   return (

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
 import {
   listRegistry,
@@ -13,6 +13,13 @@ import {
 } from '@/lib/registry';
 import { InstallButton } from './InstallButton';
 import type { UseInstall } from './useInstall';
+
+/**
+ * Tab order, and the arrow-key ring. `satisfies` rather than a plain annotation
+ * so a typo here is a compile error AND the array stays a literal tuple, which
+ * is what lets `KINDS.indexOf(k)` narrow instead of widening to `string`.
+ */
+const KINDS = ['mod', 'modpack'] as const satisfies readonly RegistryKind[];
 
 /**
  * The catalog itself: tabs for Mods and Modpacks, a search box, a tag filter,
@@ -45,14 +52,21 @@ export function Catalog({
   /** False in the in-play drawer: navigating away would stop the game. */
   linkEntries?: boolean;
 }): ReactElement {
+  // The drawer and /browse can both be mounted in one document, so the tab and
+  // panel ids have to be per-instance or the two tablists cross-wire.
+  const idPrefix = useId();
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState<RegistryKind>('mod');
   const [query, setQuery] = useState('');
   const [tag, setTag] = useState<string | null>(null);
+  // Bumped by Retry. The fetch effect depends on it, so incrementing re-runs it
+  // — which is the whole mechanism, and why the failure state is not a dead end.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
+    setError(null);
     void listRegistry().then((r) => {
       if (!live) return;
       if (r.ok) setRegistry(r.registry);
@@ -61,7 +75,7 @@ export function Catalog({
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
 
   const all = registry?.entries ?? [];
   const ofKind = useMemo(() => all.filter((e) => e.kind === kind), [all, kind]);
@@ -78,15 +92,43 @@ export function Catalog({
 
   return (
     <>
+      {/*
+        A real tablist, not two buttons wearing the role. `role="tab"` is a
+        promise about keyboard behaviour — one tab stop for the whole set, arrows
+        to move between them — and a screen-reader user who hears "tab, 1 of 2"
+        and then cannot arrow to the second one is worse off than if these had
+        stayed plain buttons.
+
+        Roving tabindex: only the selected tab is tabbable, so Tab enters the set
+        and then leaves it, rather than making the user step through every tab to
+        reach the search box.
+      */}
       <div className="browse-tabs" role="tablist" aria-label="Content type">
-        {(['mod', 'modpack'] as const).map((k) => (
+        {KINDS.map((k) => (
           <button
             key={k}
             type="button"
             role="tab"
+            id={`${idPrefix}-tab-${k}`}
             aria-selected={kind === k}
+            aria-controls={`${idPrefix}-panel`}
+            tabIndex={kind === k ? 0 : -1}
             className="browse-tab"
             onClick={() => setKind(k)}
+            onKeyDown={(e) => {
+              const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+              if (delta === 0) return;
+              e.preventDefault();
+              // Wraps, per the tabs pattern. Two entries today, so this is
+              // mostly a toggle — written as arithmetic so a third kind needs
+              // no keyboard change.
+              const next = KINDS[(KINDS.indexOf(k) + delta + KINDS.length) % KINDS.length];
+              if (next === undefined) return;
+              setKind(next);
+              // Selection follows focus, and focus has to actually move or the
+              // arrow key silently changes the panel under a stationary cursor.
+              document.getElementById(`${idPrefix}-tab-${next}`)?.focus();
+            }}
           >
             {k === 'mod' ? 'Mods' : 'Modpacks'}
           </button>
@@ -130,26 +172,56 @@ export function Catalog({
         ) : null}
       </div>
 
-      {error !== null ? (
-        <p className="empty-note">{error}</p>
-      ) : registry === null ? (
-        <ul className="browse-grid" aria-hidden="true">
-          <li className="entry-card inst-card-skeleton" />
-          <li className="entry-card inst-card-skeleton" />
-        </ul>
-      ) : shown.length === 0 ? (
-        <p className="empty-note">
-          {ofKind.length === 0
-            ? `No ${kind === 'mod' ? 'mods' : 'modpacks'} in the catalog yet.`
-            : 'Nothing matches that search.'}
-        </p>
-      ) : (
-        <ul className="browse-grid">
-          {shown.map((e) => (
-            <EntryCard key={e.id} entry={e} install={install} link={linkEntries} />
-          ))}
-        </ul>
-      )}
+      {/*
+        The panel the tabs control. `tabIndex={-1}` without `role="tabpanel"`
+        would be a focusable div with no meaning; with it, the panel is the
+        landing spot when a screen-reader user moves past the tab, and its
+        aria-labelledby names which tab put it there.
+
+        aria-live so a search that empties the list ANNOUNCES that, rather than
+        leaving someone typing into a box whose result they cannot see. Polite,
+        because it changes on every keystroke.
+      */}
+      <div
+        id={`${idPrefix}-panel`}
+        role="tabpanel"
+        aria-labelledby={`${idPrefix}-tab-${kind}`}
+        tabIndex={-1}
+        aria-live="polite"
+      >
+        {error !== null ? (
+          // A dead end here would be wrong: the catalog is one same-origin GET
+          // of a static file, so the overwhelmingly likely cause is a dropped
+          // connection rather than anything a reload would fix better than a
+          // retry. In the drawer a reload is not even available — it would
+          // restart the game.
+          <div className="empty-note">
+            <p>{error}</p>
+            <button type="button" className="btn btn-small" onClick={() => setAttempt((a) => a + 1)}>
+              <Icon name="refresh" /> Try again
+            </button>
+          </div>
+        ) : registry === null ? (
+          <ul className="browse-grid" aria-hidden="true">
+            <li className="entry-card inst-card-skeleton" />
+            <li className="entry-card inst-card-skeleton" />
+          </ul>
+        ) : shown.length === 0 ? (
+          <p className="empty-note">
+            {ofKind.length === 0
+              ? `No ${kind === 'mod' ? 'mods' : 'modpacks'} in the catalog yet.`
+              : `Nothing matches that search. ${
+                  tag === null ? '' : `The ${tag} filter is on — clear it with All.`
+                }`}
+          </p>
+        ) : (
+          <ul className="browse-grid">
+            {shown.map((e) => (
+              <EntryCard key={e.id} entry={e} install={install} link={linkEntries} />
+            ))}
+          </ul>
+        )}
+      </div>
     </>
   );
 }
