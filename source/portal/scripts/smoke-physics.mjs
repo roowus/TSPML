@@ -221,18 +221,33 @@ async function waitForSidebar(predicateSource, timeout = 60000) {
     .catch(() => false);
 }
 
-/** Open the Add form if it is closed. It is a <details>, so an unconditional
- *  click on the summary CLOSES it when it is already open — and fill() then
- *  times out on textareas that are in the DOM but not visible. */
+/** Open the Add-a-mod popover if it is closed. The old <details>/<summary>
+ *  disclosure is gone — the form lives in a native popover opened by the
+ *  shelf's `.add-opener` button, which TOGGLES, so an unguarded click on an
+ *  already-open popover would close it and fill() would time out. */
 async function openAddForm() {
   // The menu overlay is closed by default; open it before anything inside.
   if (await page.evaluate(() => /** @type {HTMLElement | null} */ (document.querySelector('aside[aria-label="Mods"]'))?.hidden ?? false)) {
     await page.click('.mods-btn');
     await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 10000 });
   }
-  const first = page.locator('aside[aria-label="Mods"] textarea').first();
-  if (!(await first.isVisible().catch(() => false))) {
-    await page.click('aside[aria-label="Mods"] summary');
+  // Open-state is the POPOVER's own (:popover-open), never a field's
+  // visibility — this smoke always runs on the paste method so a textarea
+  // would work, but the same helper must not learn the bad habit from
+  // smoke-user-mods' url/pack legs (method persists across closes).
+  if (
+    !(await page.evaluate(
+      () => document.getElementById('add-mod-popover')?.matches(':popover-open') ?? false,
+    ))
+  ) {
+    await page.click('aside[aria-label="Mods"] .add-opener');
+    await page
+      .waitForFunction(
+        () => document.getElementById('add-mod-popover')?.matches(':popover-open') ?? false,
+        undefined,
+        { timeout: 10000, polling: 100 },
+      )
+      .catch(() => {});
   }
 }
 

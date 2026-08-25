@@ -12,13 +12,14 @@
 // than stopping at "the button said installed".
 //
 // PASS requires, in order:
-//   1. browse   — /browse lists the catalog: the seeded sample mod is on the
-//                 Mods tab, by name, with its author;
+//   1. browse   — /browse lists the catalog: poly-to-track (the real, currently
+//                 only entry) is on the Mods tab, by name, with its author;
 //   2. search   — typing a term that matches nothing empties the list, and
 //                 clearing it brings the entry back (proving the filter is
 //                 filtering, not that the list happened to be short);
-//   3. tabs     — the Modpacks tab shows the seeded pack and NOT the mods, so
-//                 the two content types are actually separated;
+//   3. tabs     — the Modpacks tab shows NO entries (the catalog has no packs
+//                 right now) and NOT the mod, so the two content types are
+//                 actually separated;
 //   4. detail   — /browse/<id> is a real, directly-navigable URL (opened cold,
 //                 not clicked) showing the entry and its source URL;
 //   5. confirm  — Install does NOT install on the first click: it reveals the
@@ -30,17 +31,22 @@
 //   7. loads    — /play, opened fresh, shows that mod under "Your mods" and
 //                 reports it LOADED. This is the leg that proves the install
 //                 path and the play path agree about storage.
+//
+// The catalog's single entry is poly-to-track, hosted on GitHub raw by its
+// author — so legs 6-7 do hit the network (the same fetch a real player makes).
+// That is deliberate: a same-origin fixture would prove the wiring but not the
+// promise ("install from the catalog works"), and the fixture samples remain in
+// public/ for smoke-user-mods' URL-import legs instead.
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const BROWSE_URL = `${BASE_URL}/browse`;
 const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-registry-smoke.png";
-// Seeded in public/registry/index.json, served by the portal itself, so this
-// smoke needs no network beyond the dev server.
-const ENTRY_ID = "tspml-sample-url-mod";
-const ENTRY_NAME = "TSPML sample URL mod";
-const PACK_NAME = "TSPML sample modpack";
+// The real catalog entry (public/registry/index.json). Kept in sync with it:
+// tests/registry.test.ts validates the file's shape, this file its behaviour.
+const ENTRY_ID = "poly-to-track";
+const ENTRY_NAME = "Poly To Track";
 
 const step = (msg) => process.stderr.write(`smoke:registry · ${msg}\n`);
 
@@ -115,14 +121,16 @@ out.searchRestores = await waitFor(
 );
 
 // ---- 3. Tabs separate mods from modpacks ------------------------------------
-step("modpacks tab shows packs, not mods");
+// The catalog currently holds no packs (the sample pack was removed from the
+// listing — it is a smoke fixture, not player content), so the honest
+// assertion is that the pack tab is EMPTY and shows no mods: the two content
+// types are separated, and the empty state says so rather than faking content.
+step("modpacks tab is empty and shows no mods");
 await page.locator('button[role="tab"]', { hasText: "Modpacks" }).click();
-out.packTabShowsPack = await waitFor(
-  (name) => document.body.innerText.includes(name),
-  PACK_NAME,
-  10000,
-);
-out.packTabHidesMods = !(await bodyText()).includes(ENTRY_NAME);
+await page.waitForTimeout(400);
+const packPanel = await bodyText();
+out.packTabHidesMods = !packPanel.includes(ENTRY_NAME);
+out.packTabEmptyState = /no modpack|nothing here yet/i.test(packPanel);
 
 // ---- 4. The detail page is a real URL ---------------------------------------
 // Navigated to COLD rather than clicked: a shareable deep link is the whole
@@ -134,7 +142,7 @@ out.detailShowsEntry = await waitFor(
   ENTRY_NAME,
   30000,
 );
-out.detailShowsSource = (await bodyText()).includes("/sample-mod/mod.json");
+out.detailShowsSource = (await bodyText()).includes("raw.githubusercontent.com/roowus/poly-to-track");
 
 // ---- 5. The first Install click confirms, it does not install ---------------
 step("first Install click discloses rather than installing");
@@ -218,8 +226,8 @@ const PASS =
   out.saysCurated === true &&
   out.searchEmpties === true &&
   out.searchRestores === true &&
-  out.packTabShowsPack === true &&
   out.packTabHidesMods === true &&
+  out.packTabEmptyState === true &&
   out.detailShowsEntry === true &&
   out.detailShowsSource === true &&
   out.disclosureShown === true &&

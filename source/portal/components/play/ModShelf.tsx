@@ -48,8 +48,9 @@ import { ModTile } from './ModTile';
  * - `"use in this instance"` / `"skip in this instance"` are matched
  *   unscoped and counted, so exactly one row may offer one at a time in the
  *   smokes' single-mod library — and the labels must stay spelled out.
- * - No `<details>` element anywhere in here. The aside's FIRST `<summary>`
- *   belongs to the Add form, and three smokes click it blind.
+ * - No `<details>` element anywhere in here. The Add form is a popover now and
+ *   carries no `<summary>`; the Log section's details (Diagnostics tab) is the
+ *   aside's only one, and nothing may precede it blind-clicking.
  * - The undo notice must not be an `<li>` carrying a `<code>` of the removed
  *   id: `smoke-user-mods` proves a removed row is gone by looking for exactly
  *   that shape.
@@ -151,33 +152,49 @@ export function ModShelf({
     <>
       <div className="section-head shelf-head">
         <h2>Your mods</h2>
-        {/* Reload = re-fetch URL-imported mods from their source, then re-run
-            the whole set through the loader. Entrypoint changes apply live;
-            mixin changes raise the restart banner as usual. Rendered only with
-            mods present — a reload of nothing is noise, and the smokes'
-            empty-store boot stays button-free. */}
-        {mods.length > 0 ? (
-          <span className="row-buttons">
-            <button
-              type="button"
-              className="btn btn-small"
-              title="Build a link that carries your enabled URL-imported mods (links only, never code) — whoever opens it is asked before anything imports"
-              onClick={onShare}
-            >
-              <Icon name="share" /> share
-            </button>
-            <button
-              type="button"
-              className="btn btn-small"
-              disabled={reloadBusy}
-              title="Re-fetch URL-imported mods from their source and reload every mod"
-              onClick={onReload}
-            >
-              <Icon name="refresh" className={reloadBusy ? 'icon-spin' : undefined} />{' '}
-              {reloadBusy ? 'reloading…' : 'reload'}
-            </button>
-          </span>
-        ) : null}
+        <span className="row-buttons">
+          {/* The Add-a-mod opener: a real button opening a native popover via
+              `popovertarget` — zero JS in the open path, so it works before
+              hydration exactly like the #118 controls inside the form it
+              reveals. Primary styling: adding a mod is THE action this shelf
+              exists for, not a third small text button. */}
+          {/* Label says "Add a mod", NOT "Add mod": the smokes click the
+              form's submit with `button:has-text("Add mod")`, which is a
+              SUBSTRING match that would hit this opener first if this also
+              said "Add mod" — toggling the popover shut instead of
+              submitting. The two labels must stay one word apart. */}
+          <button type="button" className="btn btn-primary btn-small add-opener" popoverTarget="add-mod-popover">
+            <Icon name="plus" /> Add a mod
+          </button>
+          {/* Reload = re-fetch URL-imported mods from their source, then re-run
+              the whole set through the loader. Entrypoint changes apply live;
+              mixin changes raise the restart banner as usual. Rendered only with
+              mods present — a reload of nothing is noise, and the smokes'
+              empty-store boot stays button-free. Share likewise needs something
+              to share. */}
+          {mods.length > 0 ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-small"
+                title="Build a link that carries your enabled URL-imported mods (links only, never code) — whoever opens it is asked before anything imports"
+                onClick={onShare}
+              >
+                <Icon name="share" /> share
+              </button>
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={reloadBusy}
+                title="Re-fetch URL-imported mods from their source and reload every mod"
+                onClick={onReload}
+              >
+                <Icon name="refresh" className={reloadBusy ? 'icon-spin' : undefined} />{' '}
+                {reloadBusy ? 'reloading…' : 'reload'}
+              </button>
+            </>
+          ) : null}
+        </span>
       </div>
 
       {/* The count, as a fact rather than a paragraph. "running here" is the
@@ -247,8 +264,8 @@ export function ModShelf({
 
       {mods.length === 0 ? (
         <p className="meta empty-note">
-          Nothing on the shelf yet. Add a mod below — paste one you are writing, import a URL, or
-          open Browse for the curated list.
+          Nothing on the shelf yet. Add a mod with the button above — paste one
+          you are writing, import a URL — or open Browse for the curated list.
         </p>
       ) : (
         <>

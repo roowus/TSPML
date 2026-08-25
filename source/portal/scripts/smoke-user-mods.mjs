@@ -189,6 +189,38 @@ async function removeMods(ids) {
 }
 
 /**
+ * Open the Add-a-mod POPOVER, from closed, idempotently.
+ *
+ * The old <details>/<summary> disclosure is gone: the form now lives in a
+ * native popover (#add-mod-popover) opened by the shelf's `.add-opener`
+ * button. That button TOGGLES, so an unguarded click on an already-open
+ * popover closes it and the next fill() times out — hence the visibility
+ * check. "Open" here means the first paste textarea is visible; the popover
+ * API needs no JS, so this works pre- and post-hydration alike.
+ */
+async function openAddDialog() {
+  await openModsMenu();
+  // "Is it open" must be the POPOVER's own state, not any field inside it:
+  // after a url/pack leg the method stays selected, the paste boxes are
+  // .add-hidden, and a textarea-visibility proxy would read "closed" while
+  // the popover is open — then toggle it shut with the next opener click.
+  const isOpen = () =>
+    page.evaluate(
+      () => document.getElementById('add-mod-popover')?.matches(':popover-open') ?? false,
+    );
+  if (!(await isOpen())) {
+    await page.click('aside[aria-label="Mods"] .add-opener');
+    await page
+      .waitForFunction(
+        () => document.getElementById('add-mod-popover')?.matches(':popover-open') ?? false,
+        undefined,
+        { timeout: 10000, polling: 100 },
+      )
+      .catch(() => {});
+  }
+}
+
+/**
  * Switch the Add form's method by clicking the radio card whose label names
  * it. The chooser is a set of `.add-method` labels wrapping native radios
  * (`input[name="add-method"]`, values paste/url/pack) — the old bare
@@ -196,6 +228,7 @@ async function removeMods(ids) {
  * clicks here are what a real user does.
  */
 async function pickAddMethod(value) {
+  await openAddDialog();
   await page.click(
     `aside[aria-label="Mods"] .add-method:has(input[name="add-method"][value="${value}"])`,
   );
@@ -203,7 +236,7 @@ async function pickAddMethod(value) {
 
 /** Fill the Add form's three textareas and click Add mod. */
 async function addMod(manifest, code, mixins) {
-  await openModsMenu();
+  await openAddDialog();
   const areas = page.locator('aside[aria-label="Mods"] textarea');
   await areas.nth(0).fill(manifest);
   await areas.nth(1).fill(code);
@@ -242,8 +275,6 @@ out.initialLoadSettled = await waitForSidebar(
 // 1+2. Add the mod through the real form — WITHOUT its mixins.json first, so
 // the declared-but-unpasted skip warning has its moment.
 step("open the Add form and paste the mod (no mixins.json yet)");
-await openModsMenu();
-await page.click('aside[aria-label="Mods"] summary');
 await addMod(MANIFEST, CODE);
 
 step("wait for the user mod to load");
@@ -315,10 +346,7 @@ out.mixinReportRow = await waitForSidebar(
 // have. Per-mod isolation is the contract — its row fails, the first mod's
 // row and the base transform survive.
 step("add the bogus-symbol mod and reload");
-// The reload collapsed the Add form's <details>; re-open it or fill() times
-// out on the hidden textareas.
-await openModsMenu();
-await page.click('aside[aria-label="Mods"] summary');
+// A reload light-dismisses the popover; addMod re-opens it idempotently.
 await addMod(BOGUS_MANIFEST, BOGUS_CODE, BOGUS_MIXINS);
 out.bogusRestartBanner = await waitForSidebar(
   () => /need a restart/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
@@ -408,10 +436,6 @@ out.rowGone = await page.evaluate((ids) => {
 // the DOM (.add-hidden collapses them visually), so switching back to paste
 // afterwards is hygiene, not a rescue.
 step("import the sample mod from a URL");
-// Leg 5's reload collapsed the Add form's <details>; the Add form summary is
-// the FIRST summary in the aside (the Log section's comes later).
-await openModsMenu();
-await page.click('aside[aria-label="Mods"] summary');
 await pickAddMethod("url");
 await page.fill('aside[aria-label="Mods"] input.add-input', `${BASE_URL}/sample-mod/mod.json`);
 await page.click('aside[aria-label="Mods"] button:has-text("Import mod")');
@@ -461,9 +485,16 @@ out.packGoodLinesLoaded = await waitForSidebar(
   30000,
 );
 // The failure is REPORTED, not swallowed: the pack box's own notice counts it.
+// textContent, not innerText — a successful pack CLOSES the popover (the
+// portal closes it on any install), and innerText of a closed popover reads
+// as "" while the notice it rendered is still in the DOM.
 out.packFailureReported = await page
-  .locator('aside[aria-label="Mods"] .pack-box')
-  .innerText()
+  .evaluate(() => {
+    const box = /** @type {HTMLElement | null} */ (
+      document.querySelector('aside[aria-label="Mods"] .pack-box')
+    );
+    return box instanceof HTMLElement ? box.textContent ?? "" : "";
+  })
   .then((t) => /installed 2 of 3/.test(t) && /1 failed to import/.test(t))
   .catch(() => false);
 
@@ -484,6 +515,9 @@ out.packCleared = await page.evaluate((ids) => {
 // lines are RELATIVE, so this also pins base-relative resolution — the lines
 // only reach a mod if they resolved against the list's URL.
 step("import the sample modpack from a .txt link");
+// Leg 9's install closed the popover; pickAddMethod re-opens it (idempotently)
+// and the box is still on the pack method.
+await pickAddMethod("pack");
 await page.fill('aside[aria-label="Mods"] textarea.pack-input', `${BASE_URL}/sample-pack.txt`);
 await page.click('aside[aria-label="Mods"] button:has-text("Import modpack")');
 out.packFromLinkLoaded = await waitForSidebar(

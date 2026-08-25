@@ -17,7 +17,7 @@ await page.waitForSelector('.boot-overlay', { state: 'detached', timeout: 90000 
 // The Mods menu is an overlay closed by default; open it before the shots.
 await page.click('.mods-btn').catch(() => {});
 await page.waitForTimeout(400);
-await page.click('aside[aria-label="Mods"] summary');
+await page.click('aside[aria-label="Mods"] .add-opener');
 await page.waitForTimeout(400);
 await page.locator('.mods-menu').screenshot({ path: '/tmp/tspml-sidebar.png' });
 await page.screenshot({ path: '/tmp/tspml-form.png' });
