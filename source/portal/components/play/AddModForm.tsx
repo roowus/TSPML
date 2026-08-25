@@ -11,8 +11,9 @@ import type { UserModRecord } from '@/lib/user-mods';
 
 /**
  * The "Add a mod" form: three ways in — paste the files, import a URL, or
- * import a modpack — behind one `<details>`, chosen through a set of labeled
- * RADIO CARDS rather than the bare dropdown this used to be.
+ * import a modpack — chosen through a set of labeled RADIO CARDS, living
+ * inside the page's add-mod POPOVER (the popover element itself belongs to
+ * play/page.tsx; this component is its content).
  *
  * It owns its DRAFT state and nothing else. Everything that touches the mod
  * pool, the loader, the log, or the network is a callback into the page —
@@ -37,25 +38,25 @@ import type { UserModRecord } from '@/lib/user-mods';
  * this works — vitest runs in node here, so there is no DOM unit test to catch
  * a regression first.
  *
- * 1. **This `<summary>` must be the aside's FIRST**, and closed by default.
- * 2. **Textarea index order is 0 mod.json, 1 entrypoint.js, 2 mixins.json,
+ * 1. **Textarea index order is 0 mod.json, 1 entrypoint.js, 2 mixins.json,
  *    3 physics.json, then `.pack-input`.** The smokes fill by index, so a new
  *    box may only be APPENDED, never inserted.
- * 3. **Document order is chooser → URL branch → paste div → pack div.**
+ * 2. **Document order is chooser → URL branch → paste div → pack div.**
  *    Playwright's `:has-text("Import mod")` is a case-insensitive SUBSTRING
  *    match, so "Import mod" must precede "Import modpack" or the wrong button
  *    is clicked.
- * 4. **The collapsed boxes stay MOUNTED** (`.add-hidden`, which is
+ * 3. **The collapsed boxes stay MOUNTED** (`.add-hidden`, which is
  *    `visibility: hidden` and not `display: none`) — `smoke-hydration` fills
  *    them while collapsed.
- * 5. **Server-rendered and never disabled.** The page is not lazy for this
- *    subtree; see the adoption effect below for why that is load-bearing.
- * 6. **The method cards are `.add-method` labels wrapping
+ * 4. **Server-rendered and never disabled.** The page is not lazy for this
+ *    subtree; see the adoption effect below for why that is load-bearing. The
+ *    enclosing popover is opened by a native `popovertarget` attribute, NOT by
+ *    React state, precisely so it works before hydration too.
+ * 5. **The method cards are `.add-method` labels wrapping
  *    `input[name="add-method"]` radios whose values are exactly
- *    `paste`/`url`/`pack`, with card names "Paste files" / "From a URL" /
- *    "A modpack".** `smoke-user-mods` switches methods by clicking those
- *    labels and `smoke-hydration` proves an adopted pick reached React through
- *    the checked input and the pack box's visibility. The old bare
+ *    `paste`/`url`/`pack`.** `smoke-user-mods` switches methods by clicking
+ *    those labels and `smoke-hydration` proves an adopted pick reached React
+ *    through the checked input and the pack box's visibility. The old bare
  *    `<select class="add-select">` dropdown is GONE (the class itself survives
  *    on the version picker); a hidden mirror select was considered and
  *    rejected — Playwright's `selectOption` demands a visible target, and a
@@ -281,12 +282,9 @@ export function AddModForm({
   };
 
   return (
-    <details className="add-form">
-      <summary>
-        <Icon name="plus" /> Add a mod
-      </summary>
-      {/* Smoke contract (smoke-user-mods.mjs): after clicking the summary
-          it fills THREE textareas by index (0=manifest, 1=code, 2=mixins)
+    <div className="add-form">
+      {/* Smoke contract (smoke-user-mods.mjs): after clicking the opener it
+          fills THREE textareas by index (0=manifest, 1=code, 2=mixins)
           and clicks the "Add mod" button — the paste method must stay the
           default so all three exist in the DOM in that order. */}
       {/* The method chooser: three radio cards. Each card is a real
@@ -522,6 +520,6 @@ export function AddModForm({
           {packBusy ? 'Importing…' : 'Import modpack'}
         </button>
       </div>
-    </details>
+    </div>
   );
 }

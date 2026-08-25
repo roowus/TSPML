@@ -2359,3 +2359,61 @@ instances, drawer, hydration, user-mods); the full CI matrix runs the rest.
 
 Portal unit tests 506 green. One pre-existing `tsc` error in
 `tests/modpack.test.ts:229` predates this work and is untouched.
+
+## 2026-08-25 — the Add form becomes a popup; the menu becomes tabs; the catalog stops advertising demos ✅
+
+Three owner notes on the #129 UI, all pointing the same way — "the arrow is
+just ASCII", "add mod should be a popup", "each section should be a tab, not a
+divider" — plus a fourth: "remove the demo mods and mod packs, then add the
+ones that exist."
+
+**The `<details>` disclosure is gone.** The Add-a-mod form now lives in a
+NATIVE POPOVER (`[popover]`), opened by the shelf's "Add a mod" button via its
+`popoverTarget` attribute. That attribute is the whole trick: the browser
+opens the popover with ZERO JavaScript, which is what keeps #118 intact — the
+pre-hydration user can still open the form and type into it before React
+exists, exactly as they could through the old `<summary>`. `smoke-hydration`
+proves it end to end (form usable pre-hydration, text and a card pick both
+adopted). The browser also gives top-layer rendering, Esc, and light-dismiss
+for free; the portal's one imperative touch is closing the popover after a
+SUCCESSFUL add/import (a failure keeps it open with its inline error, because
+the fix is usually editing what's still in the boxes).
+
+**The ASCII arrow and the plus-on-a-caret are gone with it** — a disclosure
+marker was never going to style into something intentional.
+
+**The menu body is tabs.** Two: **Mods** (shelf, the popover, the mixin and
+physics reports, loaded mods) and **Diagnostics** (the bridge/status rows and
+the session log), same real-tablist pattern as the browse catalog — roving
+tabindex, arrows wrap, selection follows focus. The restart banner and the
+incoming-share prompt stay above the tab strip: they are session alerts, not
+content of any tab. The `section.side-section` wrappers survive inside the
+panels, so scoped textContent queries (smoke-physics' Physics panel,
+smoke.mjs' Loaded-mods rows) still resolve — textContent reads through
+`hidden`, which is what let the tab conversion happen without touching a
+single read-side assertion.
+
+**Smoke contracts ported, again.** The blind `aside summary` clicks (three in
+smoke-user-mods, one each in physics/hydration/shot-check) became a guarded
+`.add-opener` click. The guard matters twice over: the button TOGGLES, and —
+the bug the first run found — "is the first textarea visible" is NOT an
+open-proxy, because the method persists across closes (after a URL leg the
+paste boxes are `.add-hidden` even inside an open popover, so the proxy read
+"closed", clicked the toggle shut, and timed out). The correct check is the
+popover's own `:popover-open`. Also renamed the opener to "Add a mod" —
+`button:has-text("Add mod")` is a substring match and would have hit the
+opener first, toggling the popover instead of submitting.
+
+**The catalog lists real things.** The three sample entries
+(`tspml-sample-url-mod`, `-pack-mod`, `-pack`) are gone from
+`public/registry/index.json`; the files stay in `public/` as same-origin
+fixtures for the URL-import and pack legs that never touch the catalog. The
+one entry now listed is **poly-to-track** — a real mod, hosted by its author
+on GitHub raw, so `smoke-registry` and `smoke-drawer` now install the real
+thing over the network, proving the same path a player's click takes. The
+Modpacks tab is honestly empty until a real pack exists.
+
+All 11 smokes verified green locally, 506 unit tests green, and a layout
+probe asserted the geometry the screenshots couldn't be read for: popover
+centered to 0px on both axes at 560×680, tabs toggling their panels, method
+cards rendering.

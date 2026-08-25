@@ -52,10 +52,12 @@ import { chromium } from "playwright";
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
 const PLAY_URL = `${BASE_URL}/play`;
 const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-drawer-smoke.png";
-// Seeded in public/registry/index.json and served by the portal itself, so this
-// smoke needs no network beyond the dev server.
-const ENTRY_NAME = "TSPML sample URL mod";
-const MOD_ID = "tspml-sample-url-mod";
+// The catalog's real entry (public/registry/index.json) — poly-to-track,
+// hosted on GitHub raw, so the drawer install here does hit the network the
+// same way a player's click does. The old same-origin sample fixture was
+// removed from the catalog (it remains in public/ for smoke-user-mods).
+const ENTRY_NAME = "Poly To Track";
+const MOD_ID = "poly-to-track";
 
 const step = (msg) => process.stderr.write(`smoke:drawer · ${msg}\n`);
 
@@ -201,7 +203,7 @@ await card.locator("button", { hasText: "Install anyway" }).click({ timeout: 100
 // target would have written storage and said "loads next time you play", which
 // would leave this line reading `mods: none` forever.
 out.bLoadedLive = await waitFor(
-  () => /mods:\s*✓[^\n]*tspml-sample-url-mod/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
+  () => /mods:\s*✓[^\n]*poly-to-track/.test((document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "")),
   60000,
 );
 // THE OTHER leg: same document. A remount would have re-booted the game, which
@@ -232,7 +234,7 @@ out.dDrawerHidden = await drawer
   .then(() => true)
   .catch(() => false);
 // Closing is not unloading: the mod the player just installed is still running.
-out.dModStillLoaded = /mods:\s*✓[^\n]*tspml-sample-url-mod/.test(await modsText());
+out.dModStillLoaded = /mods:\s*✓[^\n]*poly-to-track/.test(await modsText());
 out.dSameFrameAfterClose = await frameStillStamped();
 // It landed in the shared library too, so it survives to the next launch. Read
 // from storage rather than inferred from the UI.
