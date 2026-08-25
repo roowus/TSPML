@@ -122,16 +122,18 @@ pnpm --filter @tspml/api-bridge build
 TSPML_TRANSFORM=1 pnpm --filter @tspml/portal dev
 ```
 
-Open **http://localhost:3000**. The game loads with the TSPML bridge active. Your mod's events fire during a race; your keybind fires on key press.
+Open **http://localhost:3000**, press **Play** on an instance, then click the
+**Mods** button over the game stage. The game loads with the TSPML bridge active.
+Your mod's events fire during a race; your keybind fires on key press.
 
-Watch the sidebar for:
+Watch the Mods menu for:
 - `bridge: car.control × N` — events firing.
 - `mods: ✓ tspml-example-hud` — the demo mod loaded.
 - `safety: ✓ vanillaSafe · 1 warn` — the safety classification.
 
 ### Load YOUR mod — no fork needed
 
-In the sidebar, open **“+ Add a mod”** and paste:
+In the Mods menu, expand **“+ Add a mod”**, pick **Paste files**, and paste:
 
 1. **mod.json** — the manifest, verbatim.
 2. **entrypoint.js (built)** — the contents of `dist/src/entrypoint.js` (the compiled
@@ -151,7 +153,7 @@ Three things to know:
   level as the bundled mods. Only add code you wrote or trust.
 - **Mixins apply on the next game load, not live** ([#62](https://github.com/roowus/TSPML/issues/62)).
   The served bundle is immutable once loaded, so after adding or changing mixins the
-  sidebar shows a restart banner — click **reload now**. After the reload, the **Your
+  Mods menu shows a restart banner — click **reload now**. After the reload, the **Your
   mixins** section reports exactly what applied, per mod (`1/1 applied`, or the failure
   reason: an unknown `symbol`, a target the map can't find, a `replace` that collides
   with TSPML's own bridge patches). Your mixins can never break the bridge: a failing
@@ -168,7 +170,8 @@ https://raw.githubusercontent.com/you/mod-a/main/mod.json
 https://raw.githubusercontent.com/you/mod-b/main/dist/index.js
 ```
 
-Switch the Add form's dropdown to **Import a modpack**, then either paste those
+Switch the Add form's method chooser (the card row under "Add a mod") to **A
+modpack**, then either paste those
 lines directly or paste a single link to the `.txt` file. Each line is one
 ordinary URL import, so every host rule and size cap applies per mod, and a line
 that fails is named and skipped while the rest still install. Lines in a fetched

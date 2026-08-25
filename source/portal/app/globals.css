@@ -116,6 +116,35 @@ body {
   gap: 9px;
 }
 
+/* The play page's wordmark is a link home to the launcher. Styled to be
+   invisible as chrome at rest — same text, same logo, no underline — and to
+   say "clickable" only on approach (underline + tint), so it never competes
+   with the Launcher link beside it. */
+.brand-home {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--r-sm);
+}
+
+.brand-home:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--muted);
+}
+
+.brand-home:hover h1,
+.brand-home:hover .brand-logo {
+  opacity: 0.85;
+}
+
+.brand-home:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .brand-logo {
   width: 22px;
   height: 22px;
@@ -1311,6 +1340,87 @@ a.btn {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px dashed var(--border);
+}
+
+/* The method chooser: three labeled radio cards replacing the bare dropdown.
+   Each card is ONE <label> wrapping its radio, so the whole tile clicks and
+   the native input keeps every pre-hydration property (#118). The checked
+   state paints via :has() on the label — no JS class juggling — with the
+   accent border + quiet fill saying "this one" the same way nav-current
+   already does. */
+.add-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Narrow overlay width (the mods menu goes full-viewport under 900px): three
+   columns of description text become cramped lines; stack instead. */
+@media (max-width: 900px) {
+  .add-methods {
+    grid-template-columns: 1fr;
+  }
+}
+
+.add-method {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px;
+  background: var(--panel-deep);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+  min-height: 40px; /* touch-target floor */
+}
+
+.add-method:hover {
+  border-color: var(--accent);
+}
+
+/* The radio itself: visually reset to a small dot marker rather than hidden,
+   so keyboard focus lands somewhere visible and screen readers announce a
+   real control. */
+.add-method input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.add-method:has(input[type='radio']:checked) {
+  border-color: var(--accent);
+  background: var(--accent-quiet);
+}
+
+.add-method:has(input[type='radio']:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.add-method-icon {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.add-method:has(input[type='radio']:checked) .add-method-icon {
+  color: var(--accent);
+}
+
+.add-method-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+
+.add-method-desc {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 .add-form summary {

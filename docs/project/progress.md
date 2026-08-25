@@ -2288,3 +2288,74 @@ map lands.
 
 Repo 1,081 tests, portal 468, **11 CI smokes** (three new: registry,
 per-instance overlay, drawer).
+
+## 2026-08-24 — instance pictures, the mod shelf, and the Mods menu (#127, #128) ✅
+
+Three PRs of portal polish, backfilled here because the entries were skipped at
+merge time — this section is the catch-up, and the reason the conventions doc
+now says a progress entry ships IN the PR, not after it.
+
+**#127 — instances got pictures.** An `IconPicker` (a deterministic emoji grid
+seeded by the instance name) writes `instance.icon`; `InstanceTile` renders it
+wherever an instance is named — the grid card, the detail header, and the play
+topbar, so the launcher's identity for a profile follows it into the game.
+`lib/instance-icon.ts` is pure and unit-tested (288 lines of tests).
+
+**#127 — "Your mods" became a shelf.** The old list gave every mod six buttons
+and three text lines; the shelf gives one line per mod — tile, id, state pill,
+facts — with switches leading, reference material behind a per-row disclosure,
+checkboxes once there are two mods to select between, and remove as
+undo-not-confirm (`shelf-undo` notice). See ModShelf's header for the smoke
+contracts that pinned the shape.
+
+**#128 — the split-screen sidebar is gone.** Every mod-management surface moved
+into ONE overlay panel (`aside[aria-label="Mods"]`) opened from a stage "Mods"
+button, same pattern as the browse drawer: sibling of `section.stage`, `hidden`
+when closed so its DOM stays present for the smokes and #118's server-rendered
+adoption still has markup to adopt from. A running game keeps its whole surface;
+mod management is something you open, use, and close.
+
+The lesson both PRs re-confirmed: **screenshot UI changes**. DOM assertions
+stayed green across all three while the panel looked broken or cramped — the
+smokes prove structure, not appearance, so every visual change needs eyes (or a
+screenshot check) on top of them.
+
+Repo tests unchanged in count; smokes edited in place (#128 touched eleven of
+them) and green.
+
+## 2026-08-24 — the wordmark goes home; the Add form becomes choice cards ✅
+
+Two owner requests on top of #128, one small and one structural.
+
+**Logo → launcher.** On `/play` the brand block is now `.brand-home`, a plain
+`<a href="/">` wrapping logo + wordmark — deliberately NOT next/link, for the
+same reason the Launcher link beside it isn't: leaving the game is a real
+navigation and should tear the iframe down honestly. Styled invisible-as-chrome
+at rest, underline + tint on hover, focus ring for keyboards.
+
+**The method dropdown became three radio cards.** The bare
+`<select class="add-select">` ("Paste files / Import from a URL / Import a
+modpack / Modpack ID (coming soon)") read as preproduction — and its fourth
+option taught every visitor the form was unfinished. It is now a `radiogroup`
+of three labeled cards (`.add-method`), each one `<label>` wrapping a native
+radio: icon, name, one-line description, accent border when checked via
+`:has()`. The dead "coming soon" option is gone; it returns as a working peer
+card if #80's ID registry ever lands.
+
+**Why radios and not buttons/tabs:** the method choice participates in #118's
+pre-hydration adoption — the mount effect must be able to read what the user
+picked before React attached, and native radios hold their checked state with
+zero JavaScript. A JS-driven tab bar would reintroduce the exact bug #118 fixed
+for the control users reach first. This was not theoretical: the ported
+`smoke-hydration` proves typed text AND a pre-hydration card pick both survive.
+
+**Smoke contracts were ported, not worked around.** A hidden mirror select was
+considered and rejected — Playwright's `selectOption` demands a visible target,
+and a control kept alive only for tests is a lie in the accessibility tree. So:
+`smoke-user-mods` clicks `.add-method:has(input[value=…])` labels instead of
+selecting options; `smoke-hydration` reads `input[name="add-method"]:checked`
+instead of the select's value. Six smokes verified green locally (boot, ui,
+instances, drawer, hydration, user-mods); the full CI matrix runs the rest.
+
+Portal unit tests 506 green. One pre-existing `tsc` error in
+`tests/modpack.test.ts:229` predates this work and is untouched.

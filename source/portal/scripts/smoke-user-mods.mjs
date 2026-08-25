@@ -188,6 +188,19 @@ async function removeMods(ids) {
   }
 }
 
+/**
+ * Switch the Add form's method by clicking the radio card whose label names
+ * it. The chooser is a set of `.add-method` labels wrapping native radios
+ * (`input[name="add-method"]`, values paste/url/pack) — the old bare
+ * `<select class="add-select">` dropdown was replaced by these cards, and the
+ * clicks here are what a real user does.
+ */
+async function pickAddMethod(value) {
+  await page.click(
+    `aside[aria-label="Mods"] .add-method:has(input[name="add-method"][value="${value}"])`,
+  );
+}
+
 /** Fill the Add form's three textareas and click Add mod. */
 async function addMod(manifest, code, mixins) {
   await openModsMenu();
@@ -399,7 +412,7 @@ step("import the sample mod from a URL");
 // the FIRST summary in the aside (the Log section's comes later).
 await openModsMenu();
 await page.click('aside[aria-label="Mods"] summary');
-await page.selectOption('aside[aria-label="Mods"] select.add-select', "url");
+await pickAddMethod("url");
 await page.fill('aside[aria-label="Mods"] input.add-input', `${BASE_URL}/sample-mod/mod.json`);
 await page.click('aside[aria-label="Mods"] button:has-text("Import mod")');
 out.urlModLoaded = await waitForSidebar(
@@ -430,7 +443,7 @@ out.urlModCleared = await page.evaluate((id) => {
 // "two mods loaded" would pass just as well if the pack aborted after a
 // silent success, so the notice is checked too.
 step("import a pasted modpack whose middle line 404s");
-await page.selectOption('aside[aria-label="Mods"] select.add-select', "pack");
+await pickAddMethod("pack");
 await page.fill(
   'aside[aria-label="Mods"] textarea.pack-input',
   [
@@ -494,7 +507,7 @@ out.packFromLinkCleared = await page.evaluate((ids) => {
     return false;
   }
 }, [URL_MOD_ID, PACK_MOD_ID]);
-await page.selectOption('aside[aria-label="Mods"] select.add-select', "paste");
+await pickAddMethod("paste");
 
 const PASS =
   out.frameMounted === true &&
