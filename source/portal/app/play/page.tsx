@@ -1398,10 +1398,15 @@ export default function PlayPage(): ReactElement {
     <main className={isTheater ? 'app theater' : 'app'}>
       <header className="topbar">
         <div className="brand">
-          {/* eslint-disable-next-line @next/next/no-img-element -- a 22px
-              static SVG; next/image adds nothing here. */}
-          <img src="/logo.svg" alt="" className="brand-logo" />
-          <h1>TSPML</h1>
+          {/* The wordmark is the way home: same plain <a> (not next/link) as
+              the Launcher link beside it, for the same reason — leaving the
+              game is a real navigation that tears the iframe down honestly. */}
+          <a className="brand-home" href="/" title="Back to the launcher">
+            {/* eslint-disable-next-line @next/next/no-img-element -- a 22px
+                static SVG; next/image adds nothing here. */}
+            <img src="/logo.svg" alt="" className="brand-logo" />
+            <h1>TSPML</h1>
+          </a>
           {/* The instance name replaces the tagline rather than joining it:
               once you have launched something, which thing you launched is the
               more useful label, and the topbar wraps on narrow screens. Its
