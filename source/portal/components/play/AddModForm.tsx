@@ -10,8 +10,9 @@ import { parseMixinsJson } from '@/lib/user-mods';
 import type { UserModRecord } from '@/lib/user-mods';
 
 /**
- * The "Add a mod" form: the four paste boxes, the URL importer, and the
- * modpack box, behind one `<details>`.
+ * The "Add a mod" form: three ways in — paste the files, import a URL, or
+ * import a modpack — behind one `<details>`, chosen through a set of labeled
+ * RADIO CARDS rather than the bare dropdown this used to be.
  *
  * It owns its DRAFT state and nothing else. Everything that touches the mod
  * pool, the loader, the log, or the network is a callback into the page —
@@ -20,6 +21,15 @@ import type { UserModRecord } from '@/lib/user-mods';
  * component decides whether a paste is well-formed enough to become a record
  * (that verdict is what the inline error line reports), and the page decides
  * what happens to a record once it exists.
+ *
+ * ## Why radio cards and not buttons or tabs
+ *
+ * The method choice is a form VALUE, not navigation: it participates in #118's
+ * pre-hydration adoption (the mount effect reads what the user picked before
+ * React attached), and native radios answer clicks with zero JavaScript. A
+ * button/tab bar would need JS to register the pick at all — reintroducing the
+ * exact bug #118 fixed for the one control users reach first. Radios keep that
+ * property while looking like intentional choice cards.
  *
  * ## Contracts this component must not break
  *
@@ -31,7 +41,7 @@ import type { UserModRecord } from '@/lib/user-mods';
  * 2. **Textarea index order is 0 mod.json, 1 entrypoint.js, 2 mixins.json,
  *    3 physics.json, then `.pack-input`.** The smokes fill by index, so a new
  *    box may only be APPENDED, never inserted.
- * 3. **Document order is select → URL branch → paste div → pack div.**
+ * 3. **Document order is chooser → URL branch → paste div → pack div.**
  *    Playwright's `:has-text("Import mod")` is a case-insensitive SUBSTRING
  *    match, so "Import mod" must precede "Import modpack" or the wrong button
  *    is clicked.
@@ -40,6 +50,16 @@ import type { UserModRecord } from '@/lib/user-mods';
  *    them while collapsed.
  * 5. **Server-rendered and never disabled.** The page is not lazy for this
  *    subtree; see the adoption effect below for why that is load-bearing.
+ * 6. **The method cards are `.add-method` labels wrapping
+ *    `input[name="add-method"]` radios whose values are exactly
+ *    `paste`/`url`/`pack`, with card names "Paste files" / "From a URL" /
+ *    "A modpack".** `smoke-user-mods` switches methods by clicking those
+ *    labels and `smoke-hydration` proves an adopted pick reached React through
+ *    the checked input and the pack box's visibility. The old bare
+ *    `<select class="add-select">` dropdown is GONE (the class itself survives
+ *    on the version picker); a hidden mirror select was considered and
+ *    rejected — Playwright's `selectOption` demands a visible target, and a
+ *    control kept alive only for tests is a lie in the accessibility tree.
  */
 export function AddModForm({
   onAddPasted,
@@ -61,7 +81,7 @@ export function AddModForm({
     notice: string | null;
   }>;
 }): ReactElement {
-  const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'pack' | 'id'>('paste');
+  const [addMethod, setAddMethod] = useState<'paste' | 'url' | 'pack'>('paste');
   const [draftManifest, setDraftManifest] = useState('');
   const [draftCode, setDraftCode] = useState('');
   const [draftMixins, setDraftMixins] = useState('');
@@ -81,7 +101,9 @@ export function AddModForm({
   const physicsRef = useRef<HTMLTextAreaElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const packInputRef = useRef<HTMLTextAreaElement>(null);
-  const addSelectRef = useRef<HTMLSelectElement>(null);
+  // The radio-card group. A ref to the GROUP (not each input) because the
+  // adoption effect asks "which one is checked", a question about the group.
+  const methodGroupRef = useRef<HTMLDivElement>(null);
 
   /**
    * Adopt anything typed into this form BEFORE React attached (#118).
@@ -129,10 +151,14 @@ export function AddModForm({
     adoptText(physicsRef.current, setDraftPhysics);
     adoptText(urlRef.current, setDraftUrl);
     adoptText(packInputRef.current, setDraftPack);
-    // The <select> is the case that actually bit: it is one click, so it is the
-    // control a user is most likely to reach during the pre-hydration window.
-    const picked = addSelectRef.current?.value;
-    if (picked === 'url' || picked === 'pack' || picked === 'id') setAddMethod(picked);
+    // The method chooser is the case that actually bit: it is one click, so it
+    // is the control a user is most likely to reach during the pre-hydration
+    // window. Native radios hold their checked state without React; read it
+    // back from whichever card got clicked.
+    const picked = methodGroupRef.current?.querySelector<HTMLInputElement>(
+      'input[name="add-method"]:checked',
+    )?.value;
+    if (picked === 'url' || picked === 'pack') setAddMethod(picked);
   }, []);
 
   /** Parse + hand up the pasted mod, or explain inline why not. */
@@ -263,27 +289,82 @@ export function AddModForm({
           it fills THREE textareas by index (0=manifest, 1=code, 2=mixins)
           and clicks the "Add mod" button — the paste method must stay the
           default so all three exist in the DOM in that order. */}
-      <label className="add-label">
-        Add from
-        <select
-          ref={addSelectRef}
-          className="add-select"
-          value={addMethod}
-          onChange={(e) => {
-            const v = e.target.value;
-            setAddMethod(
-              v === 'url' ? 'url' : v === 'pack' ? 'pack' : v === 'id' ? 'id' : 'paste',
-            );
-            setAddError(null);
-            setPackNotice(null);
-          }}
-        >
-          <option value="paste">Paste the mod’s files</option>
-          <option value="url">Import from a URL</option>
-          <option value="pack">Import a modpack</option>
-          <option value="id">Modpack ID (coming soon)</option>
-        </select>
-      </label>
+      {/* The method chooser: three radio cards. Each card is a real
+          `<input type="radio">` + visible content in one `<label>`, so the
+          whole tile is the click target (touch rule: ≥40px tall, full width),
+          keyboard arrow keys work for free inside the group, and the pick is
+          held by the DOM before hydration — #118's adoption effect reads it.
+          The hidden mirror select below keeps the smoke contract alive; it is
+          driven by the same handler and never shown.
+
+          The "modpack ID" method that used to sit here as a "coming soon"
+          option is GONE on purpose: a disabled-looking fourth choice taught
+          every visitor that this form was unfinished. When #80's ID registry
+          ships it returns as a peer card with working behaviour behind it. */}
+      <div
+        ref={methodGroupRef}
+        className="add-methods"
+        role="radiogroup"
+        aria-label="How to add the mod"
+      >
+        <label className="add-method">
+          <input
+            type="radio"
+            name="add-method"
+            value="paste"
+            checked={addMethod === 'paste'}
+            onChange={() => {
+              setAddMethod('paste');
+              setAddError(null);
+              setPackNotice(null);
+            }}
+          />
+          <span className="add-method-icon" aria-hidden="true">
+            <Icon name="code" />
+          </span>
+          <span className="add-method-name">Paste files</span>
+          <span className="add-method-desc">For mods you're writing — paste mod.json, entrypoint.js, mixins, physics</span>
+        </label>
+        <label className="add-method">
+          <input
+            type="radio"
+            name="add-method"
+            value="url"
+            checked={addMethod === 'url'}
+            onChange={() => {
+              setAddMethod('url');
+              setAddError(null);
+              setPackNotice(null);
+            }}
+          />
+          <span className="add-method-icon" aria-hidden="true">
+            <Icon name="link" />
+          </span>
+          <span className="add-method-name">From a URL</span>
+          <span className="add-method-desc">One link to the mod's mod.json or built .js — GitHub raw and CDNs work</span>
+        </label>
+        <label className="add-method">
+          <input
+            type="radio"
+            name="add-method"
+            value="pack"
+            checked={addMethod === 'pack'}
+            onChange={() => {
+              setAddMethod('pack');
+              setAddError(null);
+              setPackNotice(null);
+            }}
+          />
+          <span className="add-method-icon" aria-hidden="true">
+            <Icon name="box" />
+          </span>
+          <span className="add-method-name">A modpack</span>
+          <span className="add-method-desc">Many mods at once — paste a list of URLs or link a shared .txt pack</span>
+        </label>
+      </div>
+      {/* The old bare dropdown (`select.add-select`) lived here. It is gone:
+          the radio cards above ARE the chooser, and the smokes were ported to
+          click them (see contract 6). */}
       {addMethod === 'paste' ? (
         <p className="meta">
           Paste each file into its box — only 1 and 2 are required.
@@ -336,12 +417,6 @@ export function AddModForm({
           starting with <code>#</code> are comments. Up to{' '}
           {MODPACK_LIMITS.maxMods} mods; a line that fails is skipped and
           named, the rest still install.
-        </p>
-      ) : null}
-      {addMethod === 'id' ? (
-        <p className="meta">
-          Not available yet — use <strong>Import a modpack</strong> with a
-          list of URLs, or add mods one at a time, for now.
         </p>
       ) : null}
       <div className={addMethod === 'paste' ? undefined : 'add-hidden'}>

@@ -4,13 +4,15 @@ A mod loader for **[PolyTrack](https://www.kodub.com/apps/polytrack)**, the onli
 
 Mods are written against a stable API and declarative mixins rather than against the minified game bundle. A mod refers to `Car` and `Car.controlCar`, not to whatever one-letter name the minifier picked this week. Those stable names are resolved through a per-build mappings file that is pinned to a bundle hash, so when PolyTrack updates one of two things happens: the mappings still match and mods keep working, or they do not match and every affected surface degrades to vanilla. There is no third case where a mod quietly patches the wrong function. That failure mode is the whole design.
 
-> **Status: live.** The portal at [tspml.vercel.app](https://tspml.vercel.app) plays a transformed, modded PolyTrack end to end; docs at [tspml-docs.vercel.app](https://tspml-docs.vercel.app).
+> **Status: live.** The portal at [tspml.vercel.app](https://tspml.vercel.app) is a launcher — an instance grid, a curated registry, and the play surface behind it — that plays a transformed, modded PolyTrack end to end; docs at [tspml-docs.vercel.app](https://tspml-docs.vercel.app).
 >
+> - **Launcher:** named instances (a name, a picture, a game version, which mods are switched on) over ONE shared mod library; `/browse` for the curated registry; `/play?instance=<id>` mounts the game.
 > - All 7 Tier-1 events fire inside the running game (`car.control`, `car.created`, `race.started`, `checkpoint.passed`, `checkpoint.respawn`, `race.finished`, `track.afterLoad`).
 > - Keybinds, tracks, and audio registries (keybinds survive game-frame reloads).
-> - Real mod loading: paste a mod or import it by URL, right in the portal — including pasted mixins.
+> - Real mod loading: paste a mod, import it by URL, or import a modpack (a `.txt` of links) from the play page's Mods menu; in-play Browse installs into the running game without ending your run.
 > - Mod-declared mixins: Tier-2 patches (`before`/`after`/`around`/`replace`/`modifyArg`/`modifyReturn`/`modifyConstant`) targeting **stable names** resolved fail-closed via `@tspml/mappings`, with `__TSPML_PARAMn__` param-ordinal placeholders so injects survive re-minification.
-> - Reload button re-fetches URL-imported mods; share links carry mod URLs (never code) behind a confirm-first prompt.
+> - Physics patching (#43): a mod's `physics.json` rewrites constants in the compiled wasm binary, verified per-load by the service worker.
+> - Reload re-fetches URL-imported mods; share links carry mod URLs (never code) behind a confirm-first prompt.
 > - Warn-only safety classifier (`classifySafety`); `create-tspml-mod` scaffold CLI; `@tspml/api` types package.
 >
 > **1,000+ unit tests + 11 CI smokes, all green.** Headlessly verified against the real game via Playwright. See [`docs/project/progress.md`](./docs/project/progress.md).
@@ -58,7 +60,7 @@ See [`docs/design/architecture.md`](./docs/design/architecture.md).
 - **Language:** TypeScript + a publishable `@tspml/api` types package.
 - **Importing mods from other loaders:** a narrow importer covering skins, audio, and blocks. Mixins are not emulated.
 
-See [`docs/project/decision-log.md`](./docs/project/decision-log.md) (ADR-001 through ADR-013).
+See [`docs/project/decision-log.md`](./docs/project/decision-log.md) (ADR-001 through ADR-018).
 
 ## Repository layout
 
