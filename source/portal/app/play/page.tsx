@@ -295,6 +295,10 @@ export default function PlayPage(): ReactElement {
   // never re-parent or unmount the game iframe. `hidden` when closed keeps its
   // DOM (and therefore every smoke selector) present at all times.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Which tab of the Mods menu is showing. Session state only — reopening the
+  // menu lands on "Mods", where the shelf is; nobody reopens a manager to read
+  // the log they left it for last time.
+  const [menuTab, setMenuTab] = useState<'mods' | 'diagnostics'>('mods');
   // Boot progress plumbing: the stage shows a step list until every TSPML boot
   // stage lands (SW controls the page → mixin plan parked → game bundle loaded
   // → mods loaded), then fades. `frameLoaded` flips in handleFrameLoad;
@@ -1090,6 +1094,19 @@ export default function PlayPage(): ReactElement {
    * everything from here — the pool, the log, the loader — is the session's,
    * which is why the boundary is a built record rather than six draft strings.
    */
+  /**
+   * Close the Add-a-mod popover after a SUCCESSFUL add/import. The popover's
+   * open state is otherwise entirely the browser's (popoverTarget button,
+   * light-dismiss, Esc) — this is the one imperative touch, and only on
+   * success: a failure keeps the popup up with its inline error, because the
+   * fix is usually an edit of what is still in the boxes. `hidePopover` throws
+   * on an element that is not showing, so guard with :popover-open.
+   */
+  const closeAddPopover = (): void => {
+    const el = document.getElementById('add-mod-popover');
+    if (el !== null && el.matches(':popover-open')) el.hidePopover();
+  };
+
   const handleAddPasted = (rec: UserModRecord): void => {
     // Same-id adds REPLACE the stored copy (upsertUserMod) — that is how a
     // modder iterates on their mod without a remove/add dance. Deeper
@@ -1099,6 +1116,7 @@ export default function PlayPage(): ReactElement {
     log(`added mod '${userModId(rec) ?? '(no id)'}' (pasted)`);
     trackModAdded(userModId(rec), 'paste');
     updateUserMods(next);
+    closeAddPopover();
   };
 
   /**
@@ -1135,6 +1153,7 @@ export default function PlayPage(): ReactElement {
     );
     trackModAdded(userModId(rec), 'url');
     updateUserMods(next);
+    closeAddPopover();
     return { ok: true };
   };
 
@@ -1198,6 +1217,10 @@ export default function PlayPage(): ReactElement {
     }
     const clean = failed.length === 0 && parsed.invalid.length === 0 && parsed.dropped === 0;
     if (next !== userModsRef.current) updateUserMods([...next]);
+    // A pack that installed ANYTHING did its job — close the popover on that,
+    // with the partial-failure notice carried out in `notice` (the popover is
+    // gone but the notice has already been set by the form above).
+    if (installed > 0) closeAddPopover();
     return {
       installedAny: installed > 0,
       error: null,
@@ -1683,8 +1706,10 @@ export default function PlayPage(): ReactElement {
             </div>
           ) : null}
 
-          {/* The restart banner leads the sidebar: it is the one thing here that
-              asks the user to act, and it must not hide below the fold. */}
+          {/* The restart banner leads the menu: it is the one thing here that
+              asks the user to act, and it must not hide behind a tab. Same for
+              the share prompt above — both are alerts about the session as a
+              whole, not content of any one tab. */}
           {/* Smoke contract: the /need a restart/ text and the "reload now"
               button label are both asserted by smoke-user-mods. */}
           {needsRestart ? (
@@ -1696,6 +1721,55 @@ export default function PlayPage(): ReactElement {
             </div>
           ) : null}
 
+          {/*
+            The menu's body is TABS, not stacked sections under hairline
+            dividers: "Your mods" is what you came for; "Diagnostics" (the
+            bridge/status rows and the session log) is something you open when
+            something looks wrong. Same real-tablist pattern as the browse
+            catalog's tab strip (Catalog.tsx): roving tabindex, arrows move and
+            wrap, selection follows focus.
+          */}
+          <div className="menu-tabs" role="tablist" aria-label="Mod manager sections">
+            {(
+              [
+                ['mods', 'Mods'],
+                ['diagnostics', 'Diagnostics'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                id={`mods-menu-tab-${key}`}
+                aria-selected={menuTab === key}
+                aria-controls={`mods-menu-panel-${key}`}
+                tabIndex={menuTab === key ? 0 : -1}
+                className="browse-tab menu-tab"
+                onClick={() => setMenuTab(key)}
+                onKeyDown={(e) => {
+                  // Wraps, per the tabs pattern. Two tabs today; arithmetic so
+                  // a third needs no keyboard change.
+                  const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+                  if (delta === 0) return;
+                  e.preventDefault();
+                  const next =
+                    menuTab === 'mods' && delta === 1 ? 'diagnostics' : delta === -1 ? 'diagnostics' : 'mods';
+                  setMenuTab(next);
+                  document.getElementById(`mods-menu-tab-${next}`)?.focus();
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            id="mods-menu-panel-mods"
+            role="tabpanel"
+            aria-labelledby="mods-menu-tab-mods"
+            tabIndex={-1}
+            hidden={menuTab !== 'mods'}
+          >
           <section className="side-section">
             {/* The shelf owns the library's presentation and nothing else:
                 every switch below calls back into the session cluster here,
@@ -1824,17 +1898,35 @@ export default function PlayPage(): ReactElement {
                 ({x.reason}) — {x.detail}.
               </p>
             ))}
+          </section>
 
-            {/* The Add form owns its drafts and nothing else; see its header for
-                the DOM contracts the smokes hold it to. It must stay HERE — the
-                aside's first <summary> — and server-rendered, or #118's
-                pre-hydration adoption has no markup to adopt from. */}
+          {/* The Add-a-mod POPUP. Opened by the native `popovertarget`
+              attribute on the shelf's opener button — NOT React state — so it
+              works in the pre-hydration window exactly like the #118 controls
+              inside it: the browser opens it, the user can type into it, and
+              AddModForm's mount effect adopts everything they did. The browser
+              owns light-dismiss (Esc, clicking outside) and top-layer
+              rendering; nothing here manages open state at all. */}
+          <div id="add-mod-popover" popover="auto" className="add-popover">
+            {/* The form inside keeps every DOM contract listed in
+                AddModForm's header. */}
+            <div className="add-popover-head">
+              <h2>Add a mod</h2>
+              <button
+                type="button"
+                className="btn btn-small"
+                popoverTarget="add-mod-popover"
+                title="Close without adding (Esc works too)"
+              >
+                <Icon name="close" /> Close
+              </button>
+            </div>
             <AddModForm
               onAddPasted={handleAddPasted}
               onImportUrl={handleImportUrl}
               onImportPack={handleImportPack}
             />
-          </section>
+          </div>
 
           {mixinNotice || (mixinReport && mixinReport.mods.length > 0) ? (
             <section className="side-section">
@@ -1972,7 +2064,7 @@ export default function PlayPage(): ReactElement {
                       populated. */}
                   <div className="meta">
                     {modsStatus !== '…'
-                      ? 'none — add a mod above'
+                      ? 'none — add one from the shelf'
                       : swState === 'active'
                         ? 'loading…'
                         : 'waiting for game…'}
@@ -2010,7 +2102,15 @@ export default function PlayPage(): ReactElement {
               )}
             </ul>
           </section>
+          </div>
 
+          <div
+            id="mods-menu-panel-diagnostics"
+            role="tabpanel"
+            aria-labelledby="mods-menu-tab-diagnostics"
+            tabIndex={-1}
+            hidden={menuTab !== 'diagnostics'}
+          >
           <section className="side-section">
             <h2>Status</h2>
             <div className="status-row">
@@ -2103,6 +2203,7 @@ export default function PlayPage(): ReactElement {
               </div>
             </details>
           </section>
+          </div>
 
           <footer className="side-footer">
             TSPML is a fan-made tool and is not affiliated with Kodub. It never

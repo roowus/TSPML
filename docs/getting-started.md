@@ -133,7 +133,8 @@ Watch the Mods menu for:
 
 ### Load YOUR mod — no fork needed
 
-In the Mods menu, expand **“+ Add a mod”**, pick **Paste files**, and paste:
+In the Mods menu, click **Add a mod** (the shelf's primary button — it opens a
+popup), pick **Paste files**, and paste:
 
 1. **mod.json** — the manifest, verbatim.
 2. **entrypoint.js (built)** — the contents of `dist/src/entrypoint.js` (the compiled

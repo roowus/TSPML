@@ -85,13 +85,18 @@ const out = {};
 // and its opener button cannot be used yet — clicking anything requires React.
 // Removing the `hidden` attribute directly is pure DOM, no JS, so the panel
 // (and with it the Add form) becomes visible exactly as it would after a real
-// user opened the menu — without touching hydration timing at all.
+// user opened the menu — without touching hydration timing at all. The Add
+// form itself is now a native POPOVER: the opener button carries a
+// `popovertarget` attribute, which the browser honors with zero JavaScript,
+// so clicking it pre-hydration opens the real form exactly like the old
+// <details>/<summary> did. That is the whole reason this smoke's premise
+// survives the disclosure's removal.
 step('open the Add form from server-rendered HTML');
-await page.waitForSelector(`${ASIDE} summary`, { state: 'attached', timeout: 30000 });
+await page.waitForSelector(`${ASIDE} .add-opener`, { state: 'attached', timeout: 30000 });
 await page.evaluate(() => {
   document.querySelector('aside[aria-label="Mods"]')?.removeAttribute('hidden');
 });
-await page.click(`${ASIDE} summary`);
+await page.click(`${ASIDE} .add-opener`);
 out.formUsableBeforeHydration = !!(await page
   .waitForSelector(METHOD_INPUTS, { timeout: 30000 })
   .catch(() => null));

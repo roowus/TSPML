@@ -1423,15 +1423,64 @@ a.btn {
   color: var(--muted);
 }
 
-.add-form summary {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+/* ---- Add-a-mod popup ----
+ *
+ * The form lives in a native popover ([popover]), opened by the shelf's
+ * popoverTarget button with zero JS so it works pre-hydration (#118). The
+ * browser gives top-layer rendering, light-dismiss and Esc; these rules give
+ * it the menu's panel look instead of UA chrome.
+ *
+ * z-index is only meaningful for browsers without popover support, where the
+ * attribute is inert and this renders as a plain div — there it must still sit
+ * over the mods-menu overlay (z-index 60). With popover support the element is
+ * in the top layer and paints above everything regardless. */
+.add-popover {
+  /* No `inset`/`margin` here: the UA popover sheet already fixes the element
+     with inset:0 + margin:auto + fit-content sizing, which is the centering.
+     Overriding inset (as an earlier draft did with `inset: unset`) drops the
+     element into the top-left corner. Only the size and the look are ours. */
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 48px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--panel);
   color: var(--text-body);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  z-index: 70;
 }
 
-.add-form summary:hover {
-  color: #fff;
+.add-popover::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.add-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.add-popover-head > h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* The Mods menu's body tabs (Mods / Diagnostics) — same underline treatment
+   as the browse catalog's strip (.browse-tab), tighter padding for a narrower
+   host. */
+.menu-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.menu-tab {
+  padding: 8px 12px;
 }
 
 .add-label {
