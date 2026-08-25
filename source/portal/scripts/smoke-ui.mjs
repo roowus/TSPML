@@ -161,6 +161,10 @@ await page.waitForSelector('aside[aria-label="Mods"]:not([hidden])', { timeout: 
 out.menuOpens = true;
 
 step('open the menu Log section');
+// The Log section lives on the menu's Diagnostics tab now (the body is tabs,
+// not stacked sections). Switch tabs first, or the details is hidden and the
+// click below cannot land.
+await page.click('#mods-menu-tab-diagnostics');
 out.logCollapsed = await page.evaluate(() => {
   const d = document.querySelector('details.log-details');
   return d instanceof HTMLDetailsElement && !d.open;
