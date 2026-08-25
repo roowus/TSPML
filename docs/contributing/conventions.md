@@ -51,6 +51,18 @@
 
 - Every non-trivial decision gets an ADR in [../project/decision-log.md](../project/decision-log.md).
 - Update [../project/progress.md](../project/progress.md) at each milestone and at any meaningful discovery.
+- **Docs ship IN the PR, never after it (mandatory).** A PR that changes behaviour
+  must, in the same merge: add its `docs/project/progress.md` entry, touch any
+  design doc whose claims it invalidated (`docs/design/*`), and update the README's
+  feature bullets if the user-facing surface changed. "I'll backfill the progress
+  entry later" is how #127/#128 ended up undocumented for a day — the catch-up cost
+  more than writing them would have. If CI is green but the docs section of the diff
+  is empty on a behavioural change, the PR is not done.
+- **UI changes need eyes as well as smokes.** The Playwright smokes assert DOM
+  structure, not appearance; three consecutive UI PRs shipped with green DOM
+  assertions while the panel looked broken. Any change to what a surface LOOKS like
+  requires a screenshot review (headless Playwright screenshot at minimum) before
+  merge — DOM assertions alone are not proof for visual work.
 
 ## Momentum & autonomy (core practice)
 

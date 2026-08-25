@@ -53,7 +53,12 @@ const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(String(e?.message ?? e).slice(0, 300)));
 
 const ASIDE = 'aside[aria-label="Mods"]';
-const SELECT = `${ASIDE} select.add-select`;
+// The method chooser is a radio-card group (`.add-method` labels wrapping
+// `input[name="add-method"]`) — the bare `<select class="add-select">` it
+// replaced is gone. Native radios are exactly as pre-hydration-capable as the
+// select was, so the property this smoke proves carries over unchanged.
+const PACK_CARD = `${ASIDE} .add-method:has(input[name="add-method"][value="pack"])`;
+const METHOD_INPUTS = `${ASIDE} input[name="add-method"]`;
 const AREAS = `${ASIDE} textarea`;
 
 /** True once React has attached a fiber to the sidebar. */
@@ -88,7 +93,7 @@ await page.evaluate(() => {
 });
 await page.click(`${ASIDE} summary`);
 out.formUsableBeforeHydration = !!(await page
-  .waitForSelector(SELECT, { timeout: 30000 })
+  .waitForSelector(METHOD_INPUTS, { timeout: 30000 })
   .catch(() => null));
 
 // Guard against the failure mode that would make this smoke worthless: if
@@ -100,21 +105,21 @@ out.preHydrationConfirmed = !(await page.evaluate(isHydrated));
 // not a gap in the test: the pack and URL fields are collapsed
 // (`.add-hidden` is visibility:hidden;height:0) until their method is chosen,
 // and choosing it is a React render that by definition has not happened yet.
-// The paste boxes plus the select are exactly the pre-hydration surface.
+// The paste boxes plus the radio cards are exactly the pre-hydration surface.
 step('type into the form while React is not attached');
 await page.locator(`${AREAS} >> nth=0`).fill(MANIFEST);
 await page.locator(`${AREAS} >> nth=1`).fill(CODE);
 // The one-click control, and so the one a user is likeliest to reach first.
-await page.selectOption(SELECT, 'pack');
+await page.click(PACK_CARD);
 
 out.domAcceptedInput = await page.evaluate(() => {
   const a = /** @type {NodeListOf<HTMLTextAreaElement>} */ (
     document.querySelectorAll('aside[aria-label="Mods"] textarea')
   );
-  const s = /** @type {HTMLSelectElement | null} */ (
-    document.querySelector('aside[aria-label="Mods"] select.add-select')
+  const r = /** @type {HTMLInputElement | null} */ (
+    document.querySelector('aside[aria-label="Mods"] input[name="add-method"]:checked')
   );
-  return (a[0]?.value ?? '').length > 0 && (a[1]?.value ?? '').length > 0 && s?.value === 'pack';
+  return (a[0]?.value ?? '').length > 0 && (a[1]?.value ?? '').length > 0 && r?.value === 'pack';
 });
 
 step('wait for hydration, then for a further React render');
@@ -146,14 +151,14 @@ const after = await page.evaluate(() => {
   const a = /** @type {NodeListOf<HTMLTextAreaElement>} */ (
     document.querySelectorAll('aside[aria-label="Mods"] textarea')
   );
-  const s = /** @type {HTMLSelectElement | null} */ (
-    document.querySelector('aside[aria-label="Mods"] select.add-select')
+  const r = /** @type {HTMLInputElement | null} */ (
+    document.querySelector('aside[aria-label="Mods"] input[name="add-method"]:checked')
   );
   const packBox = document.querySelector('aside[aria-label="Mods"] .pack-box');
   return {
     manifest: a[0]?.value ?? '',
     code: a[1]?.value ?? '',
-    method: s?.value ?? '',
+    method: r?.value ?? '',
     packVisible: packBox !== null && !packBox.className.includes('add-hidden'),
   };
 });
@@ -162,10 +167,11 @@ out.after = after;
 // The text survived...
 out.manifestKept = after.manifest === MANIFEST;
 out.codeKept = after.code === CODE;
-// ...and so did the dropdown choice, in BOTH senses: the control still reads
-// "pack", and React genuinely believes it (the pack box is the rendered
-// consequence of addMethod, so a select that merely looks right while the
-// paste boxes are showing would fail here).
+// ...and so did the card choice, in BOTH senses: the radio still reads
+// "pack" (React's controlled `checked` re-rendered it from addMethod), and
+// React genuinely believes it (the pack box is the rendered consequence of
+// addMethod, so an input that merely stayed checked while the paste boxes
+// were showing would fail here).
 out.methodKept = after.method === 'pack';
 out.methodReachedReact = after.packVisible === true;
 
