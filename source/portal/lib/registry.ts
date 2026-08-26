@@ -255,16 +255,39 @@ export function resolveSourceUrl(entry: RegistryEntry, origin: string): string {
 }
 
 /**
+ * What a player should know BEFORE installing this entry, or null when there is
+ * nothing unusual to say. Advisory: it never blocks.
+ *
+ * Only `pml` has anything to say today. A PML mod installs and runs through the
+ * compatibility adapter in `lib/pml/`, and the parts that carry across (hooks,
+ * keybinds, settings, `getMod`) are not the parts that don't (mixins, raw
+ * physics offsets, `eval`-shaped patching). Saying so at install time is the
+ * whole point: the alternative is a mod that installs cleanly, loads cleanly,
+ * reports success, and does nothing — the silence this project exists to end.
+ * What exactly was refused, for the mod actually in front of you, arrives after
+ * it runs (`ModLoadSummary.pml`); this is the part we can say up front.
+ */
+export function installCaveat(entry: RegistryEntry): string | null {
+  if (entry.format !== 'pml') return null;
+  return 'this mod is packaged for PML and installs through TSPML\'s compatibility adapter. Lifecycle hooks, keybinds and settings carry across; mixins do not — PML patches the game by matching minified identifiers at runtime, TSPML patches structurally against a symbol map, so the two are not interchangeable. Each refused call is reported by name once the mod runs, so a mod whose patching was all mixins will load and visibly do less than it claims.';
+}
+
+/**
  * Why an entry cannot be installed, or null when it can.
  *
  * Returns the REASON rather than a boolean so the UI can say it out loud. A
- * greyed-out button with no explanation is the thing this is designed to avoid:
- * for a `pml` entry the honest answer is specific and worth reading, and for a
- * bad source URL it is a bug in our own catalog.
+ * greyed-out button with no explanation is the thing this is designed to avoid.
+ *
+ * Since PML compatibility landed, format is no longer a reason to refuse: both
+ * `tspml` and `pml` install (see {@link installCaveat} for what a PML install
+ * costs). The check stays because {@link SUPPORTED_FORMATS} is what decides,
+ * not this function — a build that ships a third format id before it ships the
+ * code to run it must refuse by name rather than install a mod nothing can
+ * execute.
  */
 export function installBlockedReason(entry: RegistryEntry, origin: string): string | null {
   if (!isSupportedFormat(entry.format)) {
-    return 'this mod is packaged for PML, which TSPML cannot load yet. PML mods patch the game by matching minified identifiers at runtime; TSPML patches structurally against a symbol map, so the two are not interchangeable. Compatibility is planned, and will be partial and clearly labelled when it lands.';
+    return `this entry is packaged for '${entry.format}', which this build cannot load.`;
   }
   // The curated file gets NO exemption from the URL policy. It is ours today;
   // the seam exists so it may not be tomorrow, and this is three comparisons.

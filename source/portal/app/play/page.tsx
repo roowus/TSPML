@@ -13,7 +13,7 @@ import type { TspmlApi } from '@tspml/api';
 import { readEarlyCaptures, TSPML_LOADER_VERSION } from '@tspml/shared';
 import { summarizeSafety } from '@tspml/loader';
 import { loadMods } from '@/lib/mod-loader';
-import type { ModLoadSummary } from '@/lib/mod-loader';
+import type { ModLoadSummary, PmlModEntry } from '@/lib/mod-loader';
 import {
   readUserMods,
   saveUserMods,
@@ -274,6 +274,11 @@ export default function PlayPage(): ReactElement {
   const [physicsExcluded, setPhysicsExcluded] = useState<readonly PhysicsExclusion[]>([]);
   const [physicsSkipped, setPhysicsSkipped] = useState<readonly string[]>([]);
   const [physicsNotice, setPhysicsNotice] = useState<string | null>(null);
+  // What the PML compatibility adapter could not do, per PML mod that loaded.
+  // Empty for every session with no PML mods, which is most of them. It is here
+  // rather than only in the console for the same reason `mixinsSkipped` is: a
+  // mod whose every mixin was refused LOADS, reports success, and does nothing.
+  const [pmlEntries, setPmlEntries] = useState<readonly PmlModEntry[]>([]);
   // The SW's report of what the route actually did to the served binary. Only
   // the SW can see it (a wasm response carries no prelude to report in), so this
   // arrives as a postMessage — until it does, the honest answer is "nothing yet".
@@ -683,6 +688,7 @@ export default function PlayPage(): ReactElement {
         code: result.mod.code,
         ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
         ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+        ...(result.mod.format === undefined ? {} : { format: result.mod.format }),
         enabled: true,
         addedAt: new Date().toISOString(),
         sourceUrl: url,
@@ -756,6 +762,15 @@ export default function PlayPage(): ReactElement {
     setLoadedMods(rows);
     setMixinsSkipped(s.mixinsSkipped);
     setPhysicsSkipped(s.physicsSkipped);
+    setPmlEntries(s.pml);
+    // Also to the log, where the whole session's story already is — the panel
+    // shows what a PML mod could not do, the log shows WHEN it could not.
+    for (const e of s.pml) {
+      for (const r of e.report.refusals) {
+        log(`[pml:${e.id}] ${r.method}${r.target ? ` (${r.target})` : ''} not applied — ${r.reason}`);
+      }
+      for (const w of e.report.warnings) log(`[pml:${e.id}] ${w}`);
+    }
     setModsStatus(
       s.loaded.length > 0
         ? `✓ ${s.loaded.join(', ')}`
@@ -1142,6 +1157,10 @@ export default function PlayPage(): ReactElement {
       code: result.mod.code,
       ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
       ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+      // Which format ran the import. This is what decides how the stored code
+      // is EXECUTED later — a `pml` record goes through the compatibility
+      // adapter, a missing field means the native TSPML path.
+      ...(result.mod.format === undefined ? {} : { format: result.mod.format }),
       enabled: true,
       addedAt: new Date().toISOString(),
       // Remember where it came from — this is what "⟳ reload" re-fetches.
@@ -1258,6 +1277,7 @@ export default function PlayPage(): ReactElement {
         code: result.mod.code,
         ...(result.mod.mixins === undefined ? {} : { mixins: result.mod.mixins }),
         ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+        ...(result.mod.format === undefined ? {} : { format: result.mod.format }),
         enabled: true,
         addedAt: new Date().toISOString(),
         sourceUrl: url,
@@ -1898,6 +1918,35 @@ export default function PlayPage(): ReactElement {
                 ({x.reason}) — {x.detail}.
               </p>
             ))}
+            {/* PML compatibility. A PML mod that loaded but whose patching the
+                adapter could not carry across reports SUCCESS everywhere else
+                on this page — it is in `loaded`, it has a green dot — and then
+                does less than it claims. This is the only place that says so,
+                so it names every refused call rather than counting them. */}
+            {pmlEntries
+              .filter((e) => e.report.refusals.length > 0 || e.report.warnings.length > 0)
+              .map((e) => (
+                <div className="warn pml-report" key={e.id}>
+                  <p>
+                    <Icon name="warn" /> <code>{e.id}</code> is a PML mod running through the
+                    compatibility adapter. It loaded, but the following did not apply:
+                  </p>
+                  <ul>
+                    {e.report.refusals.map((r) => (
+                      <li key={`${r.method}:${r.target ?? ''}`}>
+                        <code>
+                          {r.method}
+                          {r.target ? ` (${r.target})` : ''}
+                        </code>{' '}
+                        — {r.reason}
+                      </li>
+                    ))}
+                    {e.report.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
           </section>
 
           {/* The Add-a-mod POPUP. Opened by the native `popovertarget`

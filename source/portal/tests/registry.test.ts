@@ -2,8 +2,8 @@
  * Two jobs, and the second is the one that earns its keep in CI:
  *
  *  1. `lib/registry.ts` behaves — malformed rows are dropped, author URLs are
- *     sanitized, a `pml` entry is refused BY NAME, dependencies resolve only
- *     through the catalog.
+ *     sanitized, a `pml` entry installs but says what it costs, dependencies
+ *     resolve only through the catalog.
  *  2. The COMMITTED `public/registry/index.json` is valid. A catalog is data,
  *     and data is exactly the thing that gets edited by someone who will not
  *     run the app afterwards. A typo'd `format` or a dropped `source.url`
@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getRegistryEntry,
   installBlockedReason,
+  installCaveat,
   isInstallable,
   listRegistry,
   parseRegistry,
@@ -150,14 +151,13 @@ describe('installBlockedReason', () => {
     expect(isInstallable(e, ORIGIN)).toBe(true);
   });
 
-  it('refuses a pml entry BY NAME rather than letting it fail at load time', () => {
+  it('allows a pml entry — format is no longer a reason to refuse', () => {
+    // PML entries install through the compatibility adapter. What they cost is
+    // said by `installCaveat`, not by blocking the button: a refusal would be
+    // the wrong answer now that the mod runs.
     const e = parsed(entry({ format: 'pml' })).entries[0] as RegistryEntry;
-    const why = installBlockedReason(e, ORIGIN);
-    expect(why).toContain('PML');
-    // The refusal has to explain itself; a greyed button with no reason is the
-    // failure mode this whole function exists to avoid.
-    expect(why).toContain('symbol map');
-    expect(isInstallable(e, ORIGIN)).toBe(false);
+    expect(installBlockedReason(e, ORIGIN)).toBeNull();
+    expect(isInstallable(e, ORIGIN)).toBe(true);
   });
 
   it('applies checkImportUrl to curated entries — a curated file is not a trust upgrade', () => {
@@ -170,6 +170,32 @@ describe('installBlockedReason', () => {
     const e = parsed(entry({ source: { type: 'mod-json', url: 'https://kodub.com/m.json' } }))
       .entries[0] as RegistryEntry;
     expect(installBlockedReason(e, ORIGIN)).toContain('kodub.com');
+  });
+
+  it('still refuses a pml entry whose URL fails the host rules', () => {
+    // The two checks are independent, and the format one passing must not
+    // shortcut the URL one — the curated file gets no exemption either way.
+    const e = parsed(entry({ format: 'pml', source: { type: 'mod-json', url: 'https://kodub.com/m.json' } }))
+      .entries[0] as RegistryEntry;
+    expect(installBlockedReason(e, ORIGIN)).toContain('kodub.com');
+  });
+});
+
+describe('installCaveat', () => {
+  it('says what a PML install costs, next to a button that still works', () => {
+    // The advisory a blocked entry used to carry. It has to explain itself for
+    // the same reason the refusal did — "half of this mod's patching will be
+    // refused" is a fact about what you are getting, and a player who reads it
+    // only after installing has already been misled about what they installed.
+    const e = parsed(entry({ format: 'pml' })).entries[0] as RegistryEntry;
+    const caveat = installCaveat(e);
+    expect(caveat).toContain('PML');
+    expect(caveat).toContain('symbol map');
+    expect(caveat).toContain('mixins');
+  });
+
+  it('has nothing to say about a tspml entry', () => {
+    expect(installCaveat(parsed(entry()).entries[0] as RegistryEntry)).toBeNull();
   });
 });
 

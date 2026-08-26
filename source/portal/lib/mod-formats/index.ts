@@ -29,9 +29,9 @@ export const FORMATS: Readonly<Record<ModFormatId, ModFormat>> = {
   pml: pmlFormat,
 };
 
-/** Formats this build can actually install. A `pml` entry is detected and
- *  refused by name, never installed wrong. */
-export const SUPPORTED_FORMATS: readonly ModFormatId[] = ['tspml'];
+/** Formats this build can install. `pml` installs through the compatibility
+ *  adapter in `lib/pml/` — partially, and labelled as such at install time. */
+export const SUPPORTED_FORMATS: readonly ModFormatId[] = ['tspml', 'pml'];
 
 export function isSupportedFormat(id: string): id is ModFormatId {
   return (SUPPORTED_FORMATS as readonly string[]).includes(id);
@@ -57,9 +57,13 @@ export function sniffManifestFormat(parsed: unknown): ModFormatId | null {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   const m = parsed as Record<string, unknown>;
   // `entrypoint` first, deliberately: a dual-format manifest should resolve to
-  // the format we can run.
+  // the format we can run natively.
   if (typeof m.entrypoint === 'string' && m.entrypoint.length > 0) return 'tspml';
   if (typeof m.polymod === 'object' && m.polymod !== null) return 'pml';
+  // A PML INDEX manifest carries neither — it is a bare `{"latest": {…}}` map
+  // whose job is to name the version manifest that does. Without this the walk
+  // never starts and a mod root URL is misread as a TSPML manifest.
+  if (typeof m.latest === 'object' && m.latest !== null && !Array.isArray(m.latest)) return 'pml';
   return null;
 }
 
@@ -75,12 +79,12 @@ export async function dispatchImport(
   explicit?: ModFormatId,
 ): Promise<ImportResult> {
   if (explicit !== undefined) {
-    return FORMATS[explicit].import(url, makeImportContext(fetchImpl, bust));
+    return stamp(explicit, await FORMATS[explicit].import(url, makeImportContext(fetchImpl, bust)));
   }
 
   // A bare code file needs no probe — only TSPML has that shape.
   if (/\.m?js$/i.test(url.pathname)) {
-    return tspmlFormat.import(url, makeImportContext(fetchImpl, bust));
+    return stamp('tspml', await tspmlFormat.import(url, makeImportContext(fetchImpl, bust)));
   }
 
   // Everything else: fetch once, decide, and pass the bytes on. The manifest
@@ -102,9 +106,25 @@ export async function dispatchImport(
   } catch {
     // Not JSON: a code body. tspml's own sniff handles it from here.
   }
-  const format = sniffed === null ? tspmlFormat : FORMATS[sniffed];
-  return format.import(
-    url,
-    makeImportContext(fetchImpl, bust, { text: probe.text, contentType: probe.contentType }),
+  const id: ModFormatId = sniffed ?? 'tspml';
+  return stamp(
+    id,
+    await FORMATS[id].import(
+      url,
+      makeImportContext(fetchImpl, bust, { text: probe.text, contentType: probe.contentType }),
+    ),
   );
+}
+
+/**
+ * Record which format produced a result.
+ *
+ * Done HERE, once, rather than in each format: `format` is what decides how the
+ * stored code is later EXECUTED, and a format that forgot to set it would ship
+ * mods that install fine and then run down the wrong path — a failure that
+ * surfaces at load time, in someone else's file. The dispatcher already knows
+ * the answer, so it is the only place that should be trusted to say it.
+ */
+function stamp(id: ModFormatId, result: ImportResult): ImportResult {
+  return result.ok ? { ok: true, mod: { ...result.mod, format: id } } : result;
 }

@@ -1,0 +1,11 @@
+{
+  "polymod": {
+    "id": "TSPML.sample.pml",
+    "name": "TSPML sample PML mod",
+    "author": "TSPML",
+    "version": "1.0.0",
+    "description": "A PML-format mod served by the portal itself, so the PML compatibility adapter has a known-good end-to-end target: the CDN walk (this file was reached from ../manifest.json), the PolyModLoader import rewrite, lifecycle hooks, a real keybind, and a mixin that must be refused BY NAME while the mod keeps running.",
+    "main": "main",
+    "targets": [">=0.6.0 <0.7.0"]
+  }
+}

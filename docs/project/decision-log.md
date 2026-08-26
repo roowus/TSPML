@@ -36,7 +36,7 @@
 
 ## Audit correction to the early scope analysis (2026-07-30)
 
-**ADR-010 — Physics modding is not new ground, so don't claim it as one.** An early research draft asserted that reaching the physics sim worker was an open problem no existing tool had solved. Reading the 0.6.1 sources showed that is **wrong** — sim-worker patching is implemented and shipping elsewhere. What TSPML actually offers for physics is a **stable event surface, determinism quarantine, and the authoring experience around them**, not access that was previously unavailable. Corrected in [pml-shortcomings-and-tspml-improvements.md](../research/pml-shortcomings-and-tspml-improvements.md).
+**ADR-010 — Physics modding is not new ground, so don't claim it as one.** An early research draft asserted that reaching the physics sim worker was an open problem no existing tool had solved. Reading the 0.6.1 sources showed that is **wrong** — sim-worker patching is implemented and shipping elsewhere. What TSPML actually offers for physics is a **stable event surface, determinism quarantine, and the authoring experience around them**, not access that was previously unavailable.
 
 ## M3 transform spike result (2026-07-30)
 

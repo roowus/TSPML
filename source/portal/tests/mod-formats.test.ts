@@ -10,13 +10,17 @@
  * The distinction matters. Before the seam, pointing the importer at a PML
  * manifest produced "the manifest has no 'entrypoint'" — true, and useless: it
  * describes a missing TSPML field instead of the real situation, which is a
- * valid mod in a format this loader does not run yet. A test that only asserted
- * `ok === false` would have passed then and would pass now, so these assert on
- * the REASON.
+ * valid mod in another loader's format. A test that only asserted `ok === false`
+ * would have passed then and would pass now, so these assert on the REASON.
+ *
+ * Since the compatibility adapter landed, a PML manifest is no longer refused —
+ * it is walked, translated and stamped `format: 'pml'` so the runtime knows to
+ * execute it through `lib/pml/`. The assertions below moved with it: what they
+ * pin is that the DISPATCH is right (which format ran, what it stamped), not
+ * that the translation is (that is `tests/pml-manifest.test.ts`'s job).
  */
 import { describe, expect, it } from 'vitest';
 import { importModFromUrl } from '@/lib/mod-import';
-import { PML_REFUSAL } from '@/lib/mod-formats/pml';
 import {
   isSupportedFormat,
   sniffManifestFormat,
@@ -91,47 +95,66 @@ describe('sniffManifestFormat', () => {
 });
 
 describe('SUPPORTED_FORMATS', () => {
-  it('is tspml only, and pml is explicitly NOT supported', () => {
-    expect(SUPPORTED_FORMATS).toEqual(['tspml']);
+  it('is tspml and pml — pml through the compatibility adapter', () => {
+    expect(SUPPORTED_FORMATS).toEqual(['tspml', 'pml']);
     expect(isSupportedFormat('tspml')).toBe(true);
-    expect(isSupportedFormat('pml')).toBe(false);
+    expect(isSupportedFormat('pml')).toBe(true);
     expect(isSupportedFormat('nonsense')).toBe(false);
   });
 });
 
 describe('importModFromUrl — PML detection', () => {
-  it('refuses a PML manifest BY NAME, not as a malformed tspml manifest', async () => {
+  it('routes a PML manifest to the pml format and stamps the result', async () => {
     const { impl } = fakeFetch({
       [`${BASE}/manifest.json`]: { body: JSON.stringify(PML_MANIFEST), contentType: 'application/json' },
+      [`${BASE}/main.mod.js`]: { body: 'export const polyMod = {};' },
     });
     const res = await importModFromUrl(`${BASE}/manifest.json`, impl);
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.error).toBe(PML_REFUSAL);
-    expect(res.error).toMatch(/PolyModLoader/);
-    // The regression this guards: the old path's error named a missing TSPML
-    // field, which reads as "this mod is broken" rather than "wrong loader".
-    expect(res.error).not.toMatch(/no 'entrypoint'/);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The stamp is the load-bearing part: it is what decides, later, that this
+    // code runs through `lib/pml/` rather than down the native path. A mod that
+    // imported cleanly and lost its format would fail at load time in someone
+    // else's file.
+    expect(res.mod.format).toBe('pml');
+    expect(res.mod.manifest.id).toBe('somepmlmod');
+    expect(res.mod.code).toBe('export const polyMod = {};');
+    // And the import says what it is, up front, rather than leaving the player
+    // to discover the adapter's limits by wondering why nothing happened.
+    expect(res.mod.note).toMatch(/compatibility adapter/);
   });
 
-  it('refuses it when served as text/plain too (raw hosts do this)', async () => {
+  it('detects it when served as text/plain too (raw hosts do this)', async () => {
     const { impl } = fakeFetch({
       [`${BASE}/manifest.json`]: { body: JSON.stringify(PML_MANIFEST), contentType: 'text/plain' },
+      [`${BASE}/main.mod.js`]: { body: 'export const polyMod = {};' },
     });
     const res = await importModFromUrl(`${BASE}/manifest.json`, impl);
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toBe(PML_REFUSAL);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.mod.format).toBe('pml');
   });
 
-  it('does not fetch the PML entry file after refusing', async () => {
-    // A refusal that still pulled `main.mod.js` would be doing work on behalf
-    // of a format it just said it cannot run.
+  it('fetches the entry named by `main`, resolved against the manifest', async () => {
+    // PML names its code file by stem — `"main": "main"` means `main.mod.js`,
+    // relative to the manifest that named it. Getting this wrong is a 404 the
+    // player reads as "the mod is gone" rather than "we looked in the wrong
+    // place", so the exact request list is the assertion.
     const { impl, requested } = fakeFetch({
       [`${BASE}/manifest.json`]: { body: JSON.stringify(PML_MANIFEST), contentType: 'application/json' },
       [`${BASE}/main.mod.js`]: { body: 'export const polyMod = {};' },
     });
-    await importModFromUrl(`${BASE}/manifest.json`, impl);
-    expect(requested).toEqual([`${BASE}/manifest.json`]);
+    const res = await importModFromUrl(`${BASE}/manifest.json`, impl);
+    expect(res.ok).toBe(true);
+    expect(requested).toEqual([`${BASE}/manifest.json`, `${BASE}/main.mod.js`]);
+  });
+
+  it('reports a missing entry file by name rather than as a broken manifest', async () => {
+    const { impl } = fakeFetch({
+      [`${BASE}/manifest.json`]: { body: JSON.stringify(PML_MANIFEST), contentType: 'application/json' },
+    });
+    const res = await importModFromUrl(`${BASE}/manifest.json`, impl);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/entry \(main\.mod\.js\)/);
   });
 });
 
@@ -146,23 +169,32 @@ describe('importModFromUrl — explicit format option', () => {
     if (res.ok) expect(res.mod.manifest.id).toBe('url-mod');
   });
 
-  it('an explicit pml is refused, even pointed at a valid tspml manifest', async () => {
+  it('an explicit pml fails on a tspml manifest rather than falling back to a sniff', async () => {
     // The caller stating a format is a claim about the mod, not a request to
     // guess — so a wrong claim must fail rather than silently fall back to a
-    // sniff that would have worked.
+    // sniff that would have worked. The reason names both shapes the PML walk
+    // accepts, so an author who mislabelled a catalog entry can see which of
+    // them their file was measured against.
     const { impl } = fakeFetch({
       [`${BASE}/mod.json`]: { body: JSON.stringify(TSPML_MANIFEST), contentType: 'application/json' },
       [`${BASE}/index.js`]: { body: 'export default () => ({});' },
     });
     const res = await importModFromUrl(`${BASE}/mod.json`, impl, { format: 'pml' });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toBe(PML_REFUSAL);
+    if (!res.ok) {
+      expect(res.error).toMatch(/does not look like a PML manifest/);
+      expect(res.error).toMatch(/'polymod'/);
+      expect(res.error).toMatch(/'latest'/);
+    }
   });
 
-  it('an explicit format skips the probe fetch entirely', async () => {
+  it('an explicit format skips the SNIFF fetch — the format does its own', async () => {
+    // The dispatcher's probe exists only to decide which format to run. With
+    // the format already stated there is nothing to decide, so the one request
+    // that happens is the chosen format's own first hop, not a probe plus it.
     const { impl, requested } = fakeFetch({});
     await importModFromUrl(`${BASE}/manifest.json`, impl, { format: 'pml' });
-    expect(requested).toEqual([]);
+    expect(requested).toEqual([`${BASE}/manifest.json`]);
   });
 });
 

@@ -46,3 +46,13 @@ pnpm-debug.log*
 polytrack_physics.wasm
 ammo.wasm.*
 deobfuscated/
+
+# ─────────────────────────────────────────────────────────────
+# Private research. Kept on disk, never published.
+#
+# The PML analysis notes live here: they read another project's source and
+# scope its weaknesses, which is fine as working notes and not something to
+# publish under our name. `docs/concepts/pml-compatibility.md` is the public
+# statement of what the adapter does and why.
+# ─────────────────────────────────────────────────────────────
+docs/private/

@@ -172,7 +172,9 @@ describe('classifyModpackInput', () => {
 
 describe('fetchModpackList', () => {
   function fakeFetch(body: string, init: { status?: number } = {}) {
-    return vi.fn(async () =>
+    // Params are declared though unused: a zero-arg `vi.fn` types `mock.calls`
+    // as `[]`, and the tests below assert on the URL it was CALLED with.
+    return vi.fn(async (_url: string, _init?: RequestInit) =>
       new Response(body, { status: init.status ?? 200, headers: { 'content-type': 'text/plain' } }),
     );
   }

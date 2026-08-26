@@ -2,7 +2,7 @@
 
 import { useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
-import { installBlockedReason, type RegistryEntry } from '@/lib/registry';
+import { installBlockedReason, installCaveat, type RegistryEntry } from '@/lib/registry';
 import type { UseInstall } from './useInstall';
 
 /**
@@ -18,9 +18,16 @@ import type { UseInstall } from './useInstall';
  * One click reveals what is about to happen, the second does it. That is enough
  * friction to be read and little enough to not be dismissed as a habit.
  *
- * A blocked entry (PML format, unimportable URL) shows the REASON in place of
- * the button rather than a greyed-out control. A disabled button with no
- * explanation is the thing this design keeps refusing to ship.
+ * A blocked entry (an unimportable URL, or a format this build cannot run)
+ * shows the REASON in place of the button rather than a greyed-out control. A
+ * disabled button with no explanation is the thing this design keeps refusing
+ * to ship.
+ *
+ * A PML entry is NOT blocked — it installs through the compatibility adapter —
+ * but it carries a caveat, shown next to the button rather than behind the
+ * confirm. The confirm is about trust and gets dismissed by habit; "half of
+ * this mod's patching will be refused" is a fact about what you are getting,
+ * and has to be readable without clicking anything.
  */
 export function InstallButton({
   entry,
@@ -45,16 +52,30 @@ export function InstallButton({
     );
   }
 
+  // Stated before the install and kept after it: what the adapter cannot carry
+  // across does not stop being true once the mod is in the pool.
+  const caveat = installCaveat(entry);
+  const caveatNote =
+    caveat === null ? null : (
+      <p className="install-caveat">
+        <Icon name="warn" /> {caveat}
+      </p>
+    );
+
   if (state.phase === 'done') {
     return (
-      <p className="install-done">
-        <Icon name="check" /> {state.message}
-      </p>
+      <>
+        <p className="install-done">
+          <Icon name="check" /> {state.message}
+        </p>
+        {caveatNote}
+      </>
     );
   }
 
   return (
     <div className="install-box">
+      {caveatNote}
       {state.phase === 'error' ? (
         <p className="install-error">
           <Icon name="error" /> {state.message}
