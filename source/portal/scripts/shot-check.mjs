@@ -17,7 +17,53 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 // The catalog, then its tag row on its own (the chips are unreadable at page
 // scale), then the same grid with the `pml` facet applied.
 await page.goto('http://localhost:3000/browse', { waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(800);
+// Real cards, not skeletons: `.entry-card` alone matches the placeholder `<li>`s
+// the grid shows while the catalog fetches, and every wait keyed on it can pass
+// against a page that has not loaded anything yet.
+await page.waitForSelector('.entry-card:not(.inst-card-skeleton)', { timeout: 15000 }).catch(() => {});
+// Icons load from the authors' CDNs, so wait for the IMAGES too — a shot of
+// empty icon boxes is a shot of a page that has not finished being itself.
+// Non-vacuous: the count is asserted inside the wait, because "every img is
+// complete" is TRUE of a page with no imgs at all.
+await page
+  .waitForFunction(
+    () => {
+      // Cast because the compound selector defeats querySelectorAll's
+      // tag-name inference, and `complete`/`naturalWidth` live on
+      // HTMLImageElement, not Element. Same JSDoc pattern smoke-pml uses.
+      const imgs = /** @type {NodeListOf<HTMLImageElement>} */ (
+        document.querySelectorAll('img.entry-tile')
+      );
+      return imgs.length > 0 && Array.from(imgs).every((i) => i.complete);
+    },
+    undefined,
+    { timeout: 15000 },
+  )
+  .catch(() => {});
+console.log(
+  'icon imgs loaded:',
+  await page.evaluate(() => {
+    const tiles = /** @type {NodeListOf<HTMLImageElement>} */ (
+      document.querySelectorAll('img.entry-tile')
+    );
+    return `${Array.from(tiles).filter((i) => i.naturalWidth > 0).length}/${tiles.length}`;
+  }),
+);
+// The light-backdrop rule is the difference between "loaded" and "visible":
+// the authors' icons are dark art on transparency, so a dark tile background
+// paints them as blank squares even at naturalWidth > 0. This reads what the
+// page actually computed, not what the stylesheet says.
+console.log(
+  'tile computed styles:',
+  await page.evaluate(() => {
+    const i = document.querySelector('img.entry-tile');
+    if (!i) return 'no img tile';
+    const cs = getComputedStyle(i);
+    const r = i.getBoundingClientRect();
+    return `${cs.backgroundColor} ${r.width}x${r.height} object-fit=${cs.objectFit}`;
+  }),
+);
+await page.locator('img.entry-tile').first().screenshot({ path: '/tmp/tspml-icon-tile.png' }).catch(() => {});
 await page.screenshot({ path: '/tmp/tspml-browse.png' });
 await page
   .locator('.tag-row')

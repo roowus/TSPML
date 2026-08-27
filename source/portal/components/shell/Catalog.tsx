@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
 import { DEFAULT_GAME_VERSION } from '@/lib/game-versions';
 import {
+  entryPersons,
   entryTags,
   gameVersionNote,
   listRegistry,
@@ -260,6 +261,10 @@ export function EntryCard({
   gameVersion?: string;
 }): ReactElement {
   const versionNote = gameVersionNote(entry, gameVersion);
+  // Person chips are the third kind: same control, different weight again. A
+  // player scanning the row should sort chips into "what it does", "what
+  // pressing Install runs", and "who made it" without reading any of them.
+  const persons = new Set(entryPersons(entry));
   return (
     <li className="entry-card">
       <div className="entry-head">
@@ -290,7 +295,10 @@ export function EntryCard({
           // the same kind of thing (a tag you can filter by) with a different
           // weight, and a player scanning a grid should be able to see which
           // cards are PML without reading every chip.
-          <span key={t} className={`tag-chip ${t === entry.format ? 'tag-format' : 'tag-static'}`}>
+          <span
+            key={t}
+            className={`tag-chip ${t === entry.format ? 'tag-format' : persons.has(t) ? 'tag-person' : 'tag-static'}`}
+          >
             {t}
           </span>
         ))}

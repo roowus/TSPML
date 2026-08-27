@@ -73,7 +73,8 @@ export interface RegistryEntry {
   /**
    * Content tags — what the entry DOES. The loader-format tag is not in here
    * and must not be written into it; {@link entryTags} derives that from
-   * `format`, so the two cannot disagree.
+   * `format`, so the two cannot disagree. The person chips are likewise
+   * derived, from {@link entryPersons} over `author`.
    */
   readonly tags: readonly string[];
   /**
@@ -400,7 +401,30 @@ export function resolveDependencies(
 }
 
 /**
- * Every tag an entry shows: its loader format first, then its content tags.
+ * The people behind an entry, as one name each.
+ *
+ * `author` is a byline in prose — the committed file carries "Cwcinc + Jakob +
+ * Orangy" and "Hero, Jakob" — and the question a player actually has is
+ * per-person: everything Orangy touched. A whole-byline chip would only ever
+ * match the exact trio, so the byline is split on the two separators that
+ * actually appear in the data (`+` and `,`) into one name per person.
+ *
+ * DERIVED from `author` rather than written into `tags`, for the same reason
+ * the format chip is derived from `format`: a hand-written copy could disagree
+ * with the byline on the first row someone edits in a hurry.
+ */
+export function entryPersons(entry: RegistryEntry): string[] {
+  const seen = new Set<string>();
+  for (const part of entry.author.split(/\s*[+,]\s*/)) {
+    const person = part.trim();
+    if (person.length > 0) seen.add(person);
+  }
+  return [...seen];
+}
+
+/**
+ * Every tag an entry shows: its loader format first, then its content tags,
+ * then the people behind it.
  *
  * The format tag is DERIVED rather than written into each row's `tags` array,
  * and that is the whole design. `format` already decides which walk installs the
@@ -413,12 +437,22 @@ export function resolveDependencies(
  * `car` describe what a mod does, `pml` describes what will happen when you
  * press Install. Grouping it in alphabetically among the content tags would bury
  * the one tag with consequences.
+ *
+ * People sort last, after the content tags, because a byline answers "who"
+ * only after the row has answered "what": a player scanning chips decides
+ * relevance from `car` or `ui` and treats the names as attribution. Both kinds
+ * are real filters — see {@link searchRegistry}, which matches on this array.
  */
 export function entryTags(entry: RegistryEntry): string[] {
-  // Deduped: a row that also hand-wrote its format must not render two chips
-  // whose keys collide. Dropping the duplicate is right — the derived one is
-  // the authoritative copy either way.
-  return [entry.format, ...entry.tags.filter((t) => t !== entry.format)];
+  // Deduped: a row that also hand-wrote its format (or whose author happens to
+  // share a name with a content tag) must not render two chips whose keys
+  // collide. Dropping the duplicate is right — the derived copy is the
+  // authoritative one either way.
+  const chips = [entry.format, ...entry.tags.filter((t) => t !== entry.format)];
+  for (const person of entryPersons(entry)) {
+    if (!chips.includes(person)) chips.push(person);
+  }
+  return chips;
 }
 
 /**
@@ -428,15 +462,22 @@ export function entryTags(entry: RegistryEntry): string[] {
  * rather than being scattered through the content tags. Both are real filters:
  * "show me only what runs natively" is a question a player has, and the answer
  * changes what installing costs them.
+ *
+ * People trail, after the content tags, mirroring their place on a card — and
+ * because with ten names in a twenty-one-row catalog they are the longest
+ * group, and putting the short, meaning-dense chips first keeps the row
+ * scannable past them.
  */
 export function registryTags(entries: readonly RegistryEntry[]): string[] {
   const formats = new Set<string>();
   const content = new Set<string>();
+  const persons = new Set<string>();
   for (const e of entries) {
     formats.add(e.format);
     for (const t of e.tags) if (t !== e.format) content.add(t);
+    for (const p of entryPersons(e)) persons.add(p);
   }
-  return [...[...formats].sort(), ...[...content].sort()];
+  return [...[...formats].sort(), ...[...content].sort(), ...[...persons].sort()];
 }
 
 /**

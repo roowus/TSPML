@@ -2824,3 +2824,68 @@ re-run PASS (Catalog, EntryDetail and globals.css all changed since they last
 ran). Repo-wide `pnpm -r test`: **1,301 green** (portal 688, mappings-pipeline
 153, loader 109, api-bridge 92, mappings 76, shared 64, transform 49, wasm 44,
 dev-harness 14, create-tspml-mod 12).
+
+## 2026-08-27 — persons as tags, and every PML mod's icon ✅
+
+Owner: "also add persons in the tag and also add aimages to teh mod if possibl".
+Two features, one rule applied a third time: anything derivable from a row's
+own fields is derived, never hand-written.
+
+### Persons, from the byline
+
+The committed bylines are prose — "Cwcinc + Jakob + Orangy", "Hero, Jakob" —
+and the question a player actually has is per-person: *everything Orangy
+touched*. A whole-byline chip would only ever match the exact trio, so
+`entryPersons()` splits the byline on the two separators the data really
+contains (`+` and `,`) into one name each, and `entryTags()`/`registryTags()`
+carry the names as chips — after the content tags, because a byline answers
+"who" only after the row has answered "what". Person chips render italic with
+a dashed border (`.tag-person`): a label like the others, but recognisably a
+name rather than a category, and unlike the uppercase format chip it implies
+neither weight nor warning.
+
+Deriving has teeth here that a `tags` copy would not: `smoke:registry` leg 2c
+clicks *Orangy* and asserts the grid narrows to **exactly ten cards** — six
+solo rows plus four collaborations naming other people — and that Poly Library
+(a DoraChad mod Orangy had no hand in) is gone. The leg counts the TOTAL grid,
+not the Orangy-mentioning cards, because those same ten bylines match before
+the chip does anything: counting them would pass against an unfiltered page.
+
+Guards, same shape as the format ones: no row hand-writes a person into
+`tags`, and a unit test pins the exact ten ids the Orangy filter returns.
+
+### Icons: PML ships one per version, and nobody had looked
+
+PML's registry carries **no image field** — but probing every mod's CDN
+directory listing found **`icon.png` inside every version directory of all
+twenty mods** (verified `200 image/png` at the chosen URL before committing
+it). Each row now points at its **newest version's** icon — the one version
+where that failed (`pmlapi` 0.1.2) has no icon, so its row points at 0.1.1,
+the newest version that ships one. `pmlapi` is also why the icon URL is
+committed per row rather than derived `<root>/<latest>/icon.png`: "latest" is
+a claim about a live index, the catalog is a copy, and a derived URL would rot
+silently the day an author publishes a version without an icon.
+
+**The defect the screenshots caught:** 21/21 icons loaded (`naturalWidth > 0`)
+and every tile still painted as a blank dark square. The icons are **dark line
+art on transparency** — PML's whole registry draws black-on-transparent for a
+light UI — and the tile background was `--panel-deep`. Loaded, decoded,
+invisible. Fix: `img.entry-tile` gets a light backdrop (`#f2f2f3`); the letter
+tiles keep the dark one (their glyphs are light). Verified at element scale —
+a 34px light tile with the black car silhouette — and at page scale.
+
+Getting there needed two shot-script fixes worth keeping: the image wait must
+key on `.entry-card:not(.inst-card-skeleton)` (skeletons also match
+`.entry-card`) and assert `imgs.length > 0` **inside** the wait, because
+"every img is complete" is vacuously TRUE of a page with no imgs — the first
+version of that wait returned instantly against an unloaded grid and printed
+`0/0` while the DOM was still skeletons.
+
+### Proof
+
+Portal **695 tests across 27 files** (registry.test.ts 67 → 74; smoke:registry
+gains leg 2c + `personChipsFilter` in the verdict). `tsc --noEmit` clean,
+smoke typecheck clean. `smoke:registry` PASS with all four person legs true.
+Repo-wide `pnpm -r test`: **1,308 green** (portal 695, mappings-pipeline 153,
+loader 109, api-bridge 92, mappings 76, shared 64, transform 49, wasm 44,
+dev-harness 14, create-tspml-mod 12).
