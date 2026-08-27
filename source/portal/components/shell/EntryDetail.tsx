@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
 import {
+  entryTags,
   getRegistryEntry,
   listRegistry,
   resolveDependencies,
@@ -110,8 +111,8 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
       <p className="entry-summary">{entry.summary}</p>
 
       <div className="entry-tags">
-        {entry.tags.map((t) => (
-          <span key={t} className="tag-chip tag-static">
+        {entryTags(entry).map((t) => (
+          <span key={t} className={`tag-chip ${t === entry.format ? 'tag-format' : 'tag-static'}`}>
             {t}
           </span>
         ))}
@@ -132,10 +133,20 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
         <dt>Game versions</dt>
         <dd>{entry.gameVersions.join(', ')}</dd>
 
+        <dt>Format</dt>
+        <dd>
+          {entry.format === 'pml'
+            ? 'PolyModLoader (PML). Installs through TSPML’s compatibility adapter — see the note on the Install button for what carries across and what does not.'
+            : 'TSPML, this launcher’s native format. Runs directly, with nothing translated.'}
+        </dd>
+
         <dt>Source</dt>
         <dd>
           <code className="entry-source">{resolveSourceUrl(entry, origin)}</code>
           <span className="meta">
+            {entry.source.type === 'mod-root'
+              ? 'A mod root. Your browser reads the index there, follows it to the build for this game version, and fetches that build’s code. '
+              : ''}
             Fetched live by your browser when you install, and again when you press reload on the
             play page. There is no version history: whatever is at that URL is what you get.
           </span>

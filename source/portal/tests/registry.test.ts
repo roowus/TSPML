@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  entryTags,
   getRegistryEntry,
   installBlockedReason,
   installCaveat,
@@ -99,6 +100,16 @@ describe('parseRegistry', () => {
     const e = entry();
     delete e.dependencies;
     expect(parsed(e).entries[0]?.dependencies).toEqual([]);
+  });
+
+  it('accepts a mod-root source, which is how PML addresses every one of its mods', () => {
+    // Not a cosmetic third enum value: PML's whole registry is directory URLs
+    // with no trailing slash, and a row that had to call itself a `mod-json` to
+    // be accepted would be lying in our own catalog about what lives there.
+    const r = parsed(
+      entry({ format: 'pml', source: { type: 'mod-root', url: 'https://cdn.example/gh/o/r/main/m' } }),
+    );
+    expect(r.entries[0]?.source.type).toBe('mod-root');
   });
 });
 
@@ -215,6 +226,28 @@ describe('resolveDependencies', () => {
   });
 });
 
+describe('entryTags', () => {
+  it('leads with the loader format, then the content tags', () => {
+    const e = parsed(entry({ format: 'pml', tags: ['ui', 'car'] })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['pml', 'ui', 'car']);
+  });
+
+  it('derives the format tag rather than trusting a hand-written one', () => {
+    // The point of deriving: `format` is what `useInstall` passes to the
+    // importer, so a row whose `tags` disagreed with it would render a chip
+    // that contradicts the code path that actually runs.
+    const e = parsed(entry({ format: 'tspml', tags: ['pml'] })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['tspml', 'pml']);
+  });
+
+  it('renders one chip when a row also hand-wrote its own format', () => {
+    // Duplicate keys in the chip loop would be a React warning at best and a
+    // dropped chip at worst. The derived copy is the authoritative one.
+    const e = parsed(entry({ format: 'pml', tags: ['pml', 'ui'] })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['pml', 'ui']);
+  });
+});
+
 describe('searchRegistry', () => {
   const r = parsed(
     entry({ id: 'hud', name: 'Speedometer', author: 'ada', summary: 'shows speed', tags: ['hud'] }),
@@ -242,8 +275,31 @@ describe('searchRegistry', () => {
     expect(searchRegistry(r.entries, 'grip', 'hud')).toHaveLength(0);
   });
 
-  it('collects tags deduped and sorted', () => {
-    expect(registryTags(r.entries)).toEqual(['hud', 'physics']);
+  it('filters by loader format exactly, because that chip is a real filter', () => {
+    // The chip row renders `pml` and `tspml`; selecting one has to narrow to
+    // exactly that set, or the chip is a control in appearance and decoration
+    // in behaviour. Tag filtering is an equality test on entryTags, so it is.
+    const mixed = parsed(entry({ id: 'native' }), entry({ id: 'adapted', format: 'pml' }));
+    expect(searchRegistry(mixed.entries, '', 'pml').map((e) => e.id)).toEqual(['adapted']);
+    expect(searchRegistry(mixed.entries, '', 'tspml').map((e) => e.id)).toEqual(['native']);
+  });
+
+  it('matches the format tag as a substring in free text, "pml" included', () => {
+    // Typing "pml" also matches `tspml`, and that is the documented behaviour
+    // of every term here rather than a format-specific quirk: substring, no
+    // ranking. Asserted so the looseness is a decision on record and not a
+    // surprise the day someone wonders why both cards came back.
+    const mixed = parsed(entry({ id: 'native' }), entry({ id: 'adapted', format: 'pml' }));
+    expect(searchRegistry(mixed.entries, 'pml', null).map((e) => e.id)).toEqual(['native', 'adapted']);
+    expect(searchRegistry(mixed.entries, 'tspml', null).map((e) => e.id)).toEqual(['native']);
+  });
+
+  it('collects tags deduped and sorted, formats first', () => {
+    // Formats lead so `pml` and `tspml` sit together at the head of the filter
+    // row rather than being scattered alphabetically among the content tags.
+    expect(registryTags(r.entries)).toEqual(['tspml', 'hud', 'physics']);
+    const mixed = parsed(entry({ tags: ['ui'] }), entry({ id: 'b', format: 'pml', tags: ['car'] }));
+    expect(registryTags(mixed.entries)).toEqual(['pml', 'tspml', 'car', 'ui']);
   });
 });
 
@@ -309,10 +365,63 @@ describe('the committed public/registry/index.json', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('points modpack entries at a .txt and mod entries at a mod.json', () => {
+  it('points modpack entries at a .txt, and mod entries at a manifest or a root', () => {
+    // Mods are addressed two ways and both are legitimate: a `mod.json` URL, or
+    // a directory the format's own walk descends. PML uses the latter for every
+    // mod it publishes. Modpacks stay a single shape — a list file is a list
+    // file, and there is no directory form of one to allow.
     if (!result.ok) throw new Error('did not parse');
     for (const e of result.registry.entries) {
-      expect(e.source.type).toBe(e.kind === 'modpack' ? 'modpack-txt' : 'mod-json');
+      if (e.kind === 'modpack') expect(e.source.type).toBe('modpack-txt');
+      else expect(['mod-json', 'mod-root']).toContain(e.source.type);
+    }
+  });
+
+  it('never hand-writes a loader format into a row\'s content tags', () => {
+    // entryTags dedupes, so a stray one would not render twice — it would just
+    // sit in the file as a second, unenforced copy of `format`, waiting to
+    // disagree with it. Catching it here keeps `format` the single source.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.tags).not.toContain('pml');
+      expect(e.tags).not.toContain('tspml');
+    }
+  });
+
+  it('declares dependencies only on ids the catalog actually lists', () => {
+    // A missing dep renders as a named warning rather than breaking the page,
+    // which is right for a third-party id — but inside our OWN file it means a
+    // typo, and a typo should fail the build instead of shipping the warning.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(resolveDependencies(result.registry, e).missing).toEqual([]);
+    }
+  });
+
+  it('gives every entry at least one game version to show', () => {
+    // Shown, not parsed — but an empty list renders as an empty fact row, and
+    // "we do not know" is not something this catalog is ever entitled to say:
+    // the value comes from the mod's own index.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.gameVersions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('routes every pml entry through a mod-root, which is how PML publishes', () => {
+    if (!result.ok) throw new Error('did not parse');
+    const pml = result.registry.entries.filter((e) => e.format === 'pml');
+    expect(pml.length).toBeGreaterThan(0);
+    for (const e of pml) expect(e.source.type).toBe('mod-root');
+  });
+
+  it('lists none of the smoke fixtures, which are not content for players', () => {
+    // /sample-mod and friends exist so the Playwright smokes have same-origin
+    // URLs that cannot rot with someone else's repo. Advertising demo content
+    // in the catalog would be the failure mode this guards.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.source.url).not.toContain('/sample-');
     }
   });
 });

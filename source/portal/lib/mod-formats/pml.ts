@@ -9,20 +9,32 @@
  *
  * ## The walk
  *
- * PML mods are a CDN directory tree, not one file:
+ * PML mods are a CDN directory tree, not one file, and the tree has two live
+ * generations. Current (0.6.x) — identity in the index, flat version manifest:
  *
  * ```
- * <mod>/manifest.json          {"latest": {"0.6.2": "1.2.0"}}   ← INDEX
- * <mod>/1.2.0/version.json     {"polymod": {…, "main": "main"}} ← VERSION
- * <mod>/1.2.0/main.mod.js                                       ← the code
+ * <mod>/manifest.json          {"id":"polyproxy","author":"Orangy",
+ *                               "latest":{"0.6.2":"10.0.0"}}      ← INDEX
+ * <mod>/10.0.0/version.json    {"targets":["0.6.2"],
+ *                               "main":"main.mod.js"}             ← VERSION
+ * <mod>/10.0.0/main.mod.js                                        ← the code
+ * ```
+ *
+ * Legacy (0.5.x) — bare index, identity nested under `polymod`:
+ *
+ * ```
+ * <mod>/latest.json            {"0.5.1":"1.5.0","0.5.2":"1.6.0"}  ← INDEX
+ * <mod>/1.6.0/manifest.json    {"polymod":{"id":"coolcars",…}}    ← VERSION
  * ```
  *
  * Two files carry metadata and BOTH are conventionally named `manifest.json` or
  * `version.json` depending on where in the tree they sit, so the walk is driven
- * by CONTENT, not by filename: a body with a `latest` object is an index (follow
- * it), a body with a `polymod` object is a version manifest (use it). A URL
+ * by CONTENT, not by filename: a body that maps versions to versions is an index
+ * (follow it), a body naming a `main` is a version manifest (use it). A URL
  * pointed straight at a version manifest therefore works without a second fetch,
- * which is what a mod page's "raw" link usually gives you.
+ * which is what a mod page's "raw" link usually gives you — though for a current
+ * mod that skips the file its identity is in, so the walk prefers to start at
+ * the root.
  *
  * The names differ between PML's own docs and its repo template (`latest.json`
  * vs `manifest.json`, `version.json` vs `manifest.json`), which is exactly why
@@ -40,10 +52,11 @@
  */
 import { fail, IMPORT_LIMITS, checkImportUrl } from '../mod-fetch';
 import {
-  isPmlIndexManifest,
   isPmlVersionManifest,
   pickPmlVersion,
+  pmlIndexLatest,
   translatePmlManifest,
+  type PmlIndexIdentity,
 } from '../pml/manifest';
 import type { ImportContext, ImportResult, ModFormat } from './types';
 
@@ -114,8 +127,10 @@ async function probeNames(
 }
 
 /** A URL that names a directory (trailing slash, or no dot in the last path
- *  segment) — the case where the walk has to probe for a filename. */
-function isDirectoryUrl(url: URL): boolean {
+ *  segment) — the case where the walk has to probe for a filename. Exported
+ *  because the dispatcher needs the same test: a directory answers a probe with
+ *  a listing or a 404, neither of which names a format. */
+export function isDirectoryUrl(url: URL): boolean {
   const last = url.pathname.split('/').pop() ?? '';
   return last.length === 0 || !last.includes('.');
 }
@@ -130,18 +145,26 @@ function asDirectory(url: URL): URL {
 }
 
 /**
- * Resolve an index manifest (`{"latest": {…}}`) to its version manifest.
+ * Resolve an index manifest to its version manifest, carrying identity down.
  *
  * The index lives at the mod ROOT and names a mod version; the version manifest
  * lives in `<root>/<version>/`. Both filename spellings are probed there for the
  * same reason they are at the root.
+ *
+ * The identity it returns is not a convenience: a current PML mod states its id,
+ * name and author ONLY here, and its version manifest states only what varies
+ * per version. Dropping it on the floor is the difference between a mod that
+ * installs and one refused for declaring no id.
  */
 async function followIndex(
   ctx: ImportContext,
   indexUrl: URL,
-  parsed: Record<string, unknown>,
-): Promise<{ ok: true; url: URL; value: unknown; note?: string } | { ok: false; error: string }> {
-  const latest = parsed.latest as Record<string, unknown>;
+  latest: Record<string, unknown>,
+  index: Record<string, unknown>,
+): Promise<
+  | { ok: true; url: URL; value: unknown; identity: PmlIndexIdentity; note?: string }
+  | { ok: false; error: string }
+> {
   const picked = pickPmlVersion(latest, GAME_VERSION);
   if (picked === null) {
     const offered = Object.keys(latest).join(', ');
@@ -160,6 +183,16 @@ async function followIndex(
     ok: true,
     url: found.url,
     value: found.value,
+    // `version` is the mod version the index resolved to. PML supplies it the
+    // same way (`{...index, version, ...versionFile}`) because a flat version
+    // manifest does not state its own version.
+    identity: {
+      id: index.id,
+      name: index.name,
+      author: index.author,
+      description: index.description,
+      version: picked.version,
+    },
     ...(picked.exact
       ? {}
       : {
@@ -197,23 +230,31 @@ export const pmlFormat: ModFormat = {
       parsed = json.value;
     }
 
-    // 2. An index manifest is one hop from the real one.
-    if (isPmlIndexManifest(parsed)) {
-      const followed = await followIndex(ctx, manifestUrl, parsed as Record<string, unknown>);
+    // 2. An index manifest is one hop from the real one — and the only place a
+    //    current PML mod states who it is, so its identity travels with it.
+    //    Checked BEFORE the version-manifest test: a legacy index is a bare map
+    //    that names no `main`, so order settles nothing there, but a body that
+    //    somehow matched both is an index first (following it is recoverable;
+    //    running the wrong file is not).
+    let identity: PmlIndexIdentity = {};
+    const latest = pmlIndexLatest(parsed);
+    if (latest !== null) {
+      const followed = await followIndex(ctx, manifestUrl, latest, parsed as Record<string, unknown>);
       if (!followed.ok) return followed;
       manifestUrl = followed.url;
       parsed = followed.value;
+      identity = followed.identity;
       if (followed.note !== undefined) notes.push(followed.note);
     }
 
     if (!isPmlVersionManifest(parsed)) {
       return fail(
-        "this does not look like a PML manifest — it has neither a 'polymod' block (a version manifest) nor a 'latest' map (an index manifest)",
+        "this does not look like a PML manifest — it names no 'main' (a version manifest does, at the top level or inside a 'polymod' block) and maps no game versions to mod versions (an index manifest does)",
       );
     }
 
     // 3. Translate. Pure, and the only place that knows the field mapping.
-    const translated = translatePmlManifest(parsed);
+    const translated = translatePmlManifest(parsed, identity);
     if (!translated.ok) return fail(translated.error);
     const { manifest, entryPath, notes: translationNotes } = translated.value;
     notes.push(...translationNotes);

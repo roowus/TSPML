@@ -2622,3 +2622,103 @@ the confirm step, where it sits above the unsandboxed-code warning rather than
 being replaced by it. That ordering is the intended one: the caveat is a fact
 about what you are getting, the confirm is about trust, and the first must not
 disappear when the second appears.
+
+## 2026-08-26 — the catalog carries PML's whole registry, and the format chip is a real filter ✅
+
+The adapter could run PML mods; the catalog listed none. This closes that gap —
+**all twenty mods from [PML's own registry][modlist] are now `/browse` entries**
+— and adds the facet a mixed catalog needs, since "will this run natively or
+through the adapter?" is now the first thing a player wants to know about a card.
+
+[modlist]: https://raw.githubusercontent.com/polytrackmods/PolyLibrary/refs/heads/main/modlist.json
+
+### The tagging system already existed; the loader-format facet did not
+
+Rows already carried content `tags` (`ui`, `car`, `editor`, …), so the work was
+not a tag system but a **derived** facet:
+
+- `entryTags(entry)` returns `[entry.format, ...entry.tags]`, deduped, format
+  first. **Derived, never hand-written.** `format` is the field `useInstall`
+  passes to the importer, so a row whose `tags` disagreed with it would render a
+  chip that contradicts the code path that actually runs. A test fails the build
+  if a committed row hand-writes `pml` or `tspml` into its own `tags`.
+- `registryTags()` sorts formats to the head of the filter row, so `pml` and
+  `tspml` sit together rather than scattered alphabetically among content tags.
+- `searchRegistry()` routes through `entryTags`, which makes the chip an
+  **exact** filter while free text stays substring — so typing `pml` also matches
+  `tspml`. That looseness is the documented behaviour of every term here, not a
+  format-specific quirk, and it is now asserted so it is a decision on record
+  rather than a surprise.
+- `.tag-format` is deliberately **uncolored** — uppercase and letter-spaced, but
+  not tinted. Beside the amber `physics` chip a second colored chip would read as
+  a second warning, and "this is a PML mod" is not a warning.
+
+### The rows are PML's data and our prose
+
+Names, authors, tags and URLs are verbatim from `modlist.json`. Two things it
+does not contain had to be produced honestly rather than plausibly:
+
+- **Descriptions: PML's registry has none.** Not sparse — *absent*, for all
+  twenty. Every `summary` was therefore written from reading that mod's actual
+  source. `pml-polyproxy` reads "a do-nothing placeholder mod … an empty class
+  with a comment" because that is what its 0.6.2 build is.
+- **`gameVersions` lists what each mod's own index manifest offers**, not a range
+  we wish it supported. **Six of the twenty have no 0.6.2 build.** Their
+  summaries open with `NO BUILD FOR THIS GAME VERSION` and name where the index
+  stops, so the card says it rather than the Install button failing with the
+  player wondering why. Generating those from the name would have been the
+  failure recorded in [[fakes-cannot-falsify-their-own-assumption]]: a
+  description invented from the same belief as the row proves nothing about it.
+
+`source.type` gained a third value, **`mod-root`** — PML addresses every one of
+its mods as a directory. A row that had to call itself a `mod-json` to pass
+validation would be lying in our own catalog about what lives at that URL.
+
+### A real regression the registry work exposed
+
+Adding twenty directory URLs surfaced a bug in `dispatchImport`: the dotless-path
+heuristic sent **every** extension-less URL into the PML walk. But a gist raw and
+a hash-named CDN object are also extension-less, and both are legitimate ways to
+host an ordinary TSPML mod — two existing tests went red, correctly.
+
+Path shape cannot separate those cases, so it must not try. Probing the live CDN
+settled what a mod root actually does:
+
+```
+GET https://cdn.polymodloader.com/gh/0rangy/OrangysPolyMods/main/polyproxy
+→ 200 application/json, 3690 bytes
+  [{"name":"1.0.0","path":"polyproxy/1.0.0","type":"dir",…},…]
+```
+
+A GitHub-style **listing array**. So the decision moved from the path to the
+answer: a trailing slash goes to PML with no fetch (unambiguous), and a dotless
+URL is fetched first and goes to PML only when the body parses as an array or the
+fetch failed. No manifest of either format is an array and no code file parses as
+JSON at all, so nothing that is really a mod is misread. Parsed rather than
+pattern-matched, because a leading `[` could open a code file's array literal.
+
+Both directions are pinned in `tests/mod-formats.test.ts`, the PML one against
+the shape above — verified, not assumed.
+
+### Proof
+
+`smoke:registry` gained **leg 2b**: click the `pml` chip and the native entry
+must disappear while a PML one stays; click `tspml` and the reverse; click `All`
+and the list comes back. Both directions, because a chip that filtered one way
+would look like a working control. The chip locators are **exact-text**, since
+`pml` is a substring of `tspml` and a `hasText` lookup would grab the wrong
+button and assert against it.
+
+Fixed while in there: `verdict.tabsSeparateKinds` named an `out.packTabShowsPack`
+that nothing ever assigned, so it reported `false` on every green run. It was
+never in the `PASS` expression — a misreport, not a failure — and it now reads
+what the run measures (the pack tab is empty **and** shows no mods; the sample
+pack was delisted as a smoke fixture, so "empty" is the honest assertion).
+
+Six new guards on the committed catalog file, because a catalog is *data* and
+data gets edited by someone who will not run the app afterwards: no hand-written
+format tags, no dependency on an id the catalog does not list, at least one game
+version per row, every `pml` row a `mod-root`, mods pointing at a manifest or a
+root, and no smoke fixture advertised as player content.
+
+**678 unit tests across 27 files pass**, `tsc --noEmit` clean.

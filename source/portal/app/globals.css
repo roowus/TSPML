@@ -2076,6 +2076,22 @@ a.btn {
   color: var(--amber);
 }
 
+/*
+  The loader-format chip. A label like the others, so no pointer — but weighted,
+  because it is the one tag on a card that predicts what pressing Install does.
+  Uppercase and tracked rather than colored: amber already means "physics" here,
+  and a second colour that means "different loader" would read as a second
+  warning. PML is not a warning; it is a fact with a caveat attached to it.
+*/
+.tag-format {
+  cursor: default;
+  border-color: var(--border-strong);
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
 .browse-grid {
   list-style: none;
   margin: 0;
@@ -2376,7 +2392,7 @@ a.btn {
   .btn,
   .nav-item,
   .browse-tab,
-  .tag-chip:not(.tag-static):not(.tag-warn),
+  .tag-chip:not(.tag-static):not(.tag-warn):not(.tag-format),
   .stage-btn,
   .docs-link {
     min-height: 40px;

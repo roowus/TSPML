@@ -135,11 +135,33 @@ PML mods are a CDN **directory tree**, not one file:
 Both metadata files are conventionally named `manifest.json` *or* `version.json`
 depending on where in the tree they sit — PML's docs and its repo template
 disagree — so the walk is driven by **content, not filename**: a body with a
-`latest` map is an index (follow it), a body with a `polymod` block is a version
+`latest` map is an index (follow it), a body with a `main` is a version
 manifest (use it). Point the importer at any of the three and it works.
 
 Every hop re-checks the import URL rules. A manifest cannot redirect the walk at
 a kodub host and slip past the entry check.
+
+### Recognising a mod root
+
+PML's registry addresses every mod as a **bare directory** — `.../main/polyproxy`,
+no trailing slash, no extension. That shape cannot be read off the path, because
+it is also how a gist raw and a hash-named CDN object serve a perfectly ordinary
+*TSPML* file. Deciding by path shape alone sent real TSPML URLs into the PML
+walk, which then reported a missing `entrypoint` for something that had one.
+
+So the dispatcher (`lib/mod-formats/index.ts`) decides from the **answer**:
+
+- a **trailing slash** is unambiguous — no fetch, straight to the PML walk;
+- anything else is fetched once, and a dotless URL goes to PML only when the
+  body is a **JSON array** (PML's CDN answers a directory with a GitHub-style
+  listing) or the fetch failed outright. No manifest of either format is an
+  array and no code file parses as JSON, so nothing that is really a mod is
+  misread;
+- otherwise the parsed body decides, `entrypoint` before the PML markers, so a
+  mod shipping for both loaders resolves to the one we can run natively.
+
+The listing-array shape was verified against the live CDN rather than assumed;
+`tests/mod-formats.test.ts` pins both directions.
 
 ### Manifest translation
 
@@ -185,6 +207,42 @@ At install time the portal shows an **advisory caveat** next to a working
 install button — not a block. Mixin refusals and every warning above are
 collected per mod and shown on `/play`, so a mod that will mostly not work is
 visibly that **before** you go looking for the feature it promised.
+
+## PML mods in the catalog
+
+`/browse` lists **every mod in PML's own registry** — all twenty, mirrored from
+[`PolyLibrary/modlist.json`][modlist] into `public/registry/index.json`. They
+install through the adapter like any other entry; nothing about them is a
+special case in the code.
+
+Each row carries `"format": "pml"`, and that field is **load-bearing twice
+over**: it selects the import walk, and it is the source of the loader-format
+chip every card shows. The chip is *derived* from `format` (`entryTags()`),
+never hand-written into `tags` — a row whose tag disagreed with its `format`
+would advertise one code path and run another. `tests/registry.test.ts` fails
+the build if a committed row hand-writes either format into its `tags`.
+
+The chip is a real filter, not a badge: selecting `pml` narrows the grid to
+exactly the PML entries and `tspml` to exactly the native ones. Both directions
+are asserted in a browser (`smoke:registry`, leg 2b), because a chip that
+filtered one way and left the other alone would look like a working control.
+
+Three things about the mirror are worth stating, since they are choices and not
+mechanics:
+
+- **The data is PML's, the descriptions are ours.** Names, authors, tags and
+  URLs come verbatim from PML's registry. It carries **no descriptions at all**,
+  so every `summary` was written from reading that mod's actual source. None is
+  invented, and none is generated from the name.
+- **`gameVersions` lists what the mod's own index offers**, not a range we wish
+  it supported. **Six of the twenty have no 0.6.2 build**, and their summaries
+  open with `NO BUILD FOR THIS GAME VERSION` — an install that will fail should
+  say so on the card, not at the button with the player wondering why.
+- **Every PML row is a `mod-root`**, the third `source.type`. PML addresses all
+  of its mods as a directory with no trailing slash; a row that had to call
+  itself a `mod-json` to be accepted would be lying about what lives there.
+
+[modlist]: https://raw.githubusercontent.com/polytrackmods/PolyLibrary/refs/heads/main/modlist.json
 
 ## Files
 

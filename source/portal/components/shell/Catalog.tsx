@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
 import {
+  entryTags,
   listRegistry,
   registryTags,
   searchRegistry,
@@ -260,8 +261,12 @@ export function EntryCard({
       </div>
       <p className="entry-summary">{entry.summary}</p>
       <div className="entry-tags">
-        {entry.tags.map((t) => (
-          <span key={t} className="tag-chip tag-static">
+        {entryTags(entry).map((t) => (
+          // The format chip gets its own class, not a different element: it is
+          // the same kind of thing (a tag you can filter by) with a different
+          // weight, and a player scanning a grid should be able to see which
+          // cards are PML without reading every chip.
+          <span key={t} className={`tag-chip ${t === entry.format ? 'tag-format' : 'tag-static'}`}>
             {t}
           </span>
         ))}

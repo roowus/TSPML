@@ -16,15 +16,60 @@
  *
  * So these assert on the NOTES as much as on the manifest: a translation that
  * quietly widened a version fence would pass a test that only checked shape.
+ *
+ * The fixtures in `REAL` are copied byte-for-byte off PML's own CDN. That is
+ * deliberate and it is the lesson of the first cut of this file: every fixture
+ * here used to be hand-written from the same belief the code was written from
+ * (`polymod` always present, `main` a bare stem), so 139 green tests and a
+ * passing browser smoke agreed with each other and with nothing real. A fixture
+ * built from the assumption under test cannot falsify it.
  */
 import { describe, expect, it } from 'vitest';
 import {
   isPmlIndexManifest,
   isPmlVersionManifest,
   pickPmlVersion,
+  pmlIndexLatest,
   slugifyPmlId,
   translatePmlManifest,
 } from '@/lib/pml/manifest';
+
+/**
+ * Verbatim bodies from cdn.polymodloader.com, both generations.
+ *
+ * PolyProxy is the current shape (0.6.2, identity in the index, flat version
+ * manifest, `main` a full filename). Cool Cars is the legacy shape (0.5.x, bare
+ * index with no wrapper, identity nested under `polymod`).
+ */
+const REAL = {
+  polyproxyIndex: {
+    name: 'PolyProxy',
+    id: 'polyproxy',
+    author: 'Orangy',
+    latest: {
+      '0.6.0-beta1': '1.1.3',
+      '0.6.0': '1.1.7',
+      '0.6.1': '1.1.8',
+      '0.6.2': '10.0.0',
+    },
+  },
+  polyproxyVersion: {
+    targets: ['0.6.2'],
+    main: 'main.mod.js',
+    dependencies: [],
+  },
+  coolcarsIndex: { '0.5.0': '1.3.1', '0.5.1': '1.5.0', '0.5.2': '1.6.0' },
+  coolcarsVersion: {
+    polymod: {
+      name: 'Cool Cars',
+      id: 'coolcars',
+      author: 'CRJakob',
+      targets: ['0.5.1', '0.5.2'],
+      main: 'main.mod.js',
+    },
+    dependencies: [{ id: 'carswitcher', version: '1.0.5' }],
+  },
+} as const;
 
 /** The minimum a PML manifest needs to translate at all. */
 function polymod(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -33,6 +78,11 @@ function polymod(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 function translated(over: Record<string, unknown> = {}, top: Record<string, unknown> = {}) {
   const res = translatePmlManifest({ ...polymod(over), ...top });
+  if (!res.ok) throw new Error(`expected a translation, got: ${res.error}`);
+  return res.value;
+}
+
+function must(res: ReturnType<typeof translatePmlManifest>) {
   if (!res.ok) throw new Error(`expected a translation, got: ${res.error}`);
   return res.value;
 }
@@ -66,6 +116,38 @@ describe('manifest shape detection', () => {
     expect(isPmlIndexManifest(polymod())).toBe(false);
     expect(isPmlIndexManifest({ latest: { '0.6.2': '1.2.0' } })).toBe(true);
     expect(isPmlVersionManifest({ latest: { '0.6.2': '1.2.0' } })).toBe(false);
+  });
+
+  it('recognises the CURRENT flat version manifest, which has no polymod block', () => {
+    // The shape every 0.6.x mod on the CDN actually ships. Requiring `polymod`
+    // here is what refused all of them with "this does not look like a PML
+    // manifest" while the hand-written fixture said everything was fine.
+    expect(isPmlVersionManifest(REAL.polyproxyVersion)).toBe(true);
+    expect(isPmlVersionManifest(REAL.coolcarsVersion)).toBe(true);
+  });
+
+  it('recognises the LEGACY bare index, which has no `latest` wrapper', () => {
+    // 11 of the 20 mods in PML's registry serve this. It carries no marker key
+    // at all, so it is recognised by its structure: version keys, string values.
+    expect(isPmlIndexManifest(REAL.coolcarsIndex)).toBe(true);
+    expect(isPmlIndexManifest(REAL.polyproxyIndex)).toBe(true);
+    expect(pmlIndexLatest(REAL.coolcarsIndex)).toEqual(REAL.coolcarsIndex);
+    expect(pmlIndexLatest(REAL.polyproxyIndex)).toEqual(REAL.polyproxyIndex.latest);
+  });
+
+  it('does not mistake an arbitrary object for a bare index', () => {
+    // The bare form has no marker, so a loose test here would swallow any JSON
+    // and send the walk chasing a "version" that is not one.
+    expect(isPmlIndexManifest({ hello: 'world' })).toBe(false);
+    expect(isPmlIndexManifest({ '0.5.1': 42 })).toBe(false);
+    expect(isPmlIndexManifest({ '0.5.1': '1.0.0', notaversion: '1.0.0' })).toBe(false);
+    expect(isPmlIndexManifest({})).toBe(false);
+    // A flat version manifest must read as a VERSION manifest, never an index.
+    expect(isPmlIndexManifest(REAL.polyproxyVersion)).toBe(false);
+  });
+
+  it('accepts pre-release version keys, which PolyTrack really ships', () => {
+    expect(isPmlIndexManifest({ '0.6.0-beta1': '1.1.3' })).toBe(true);
   });
 
   it('recognises neither in shapes that are neither', () => {
@@ -117,9 +199,23 @@ describe('translatePmlManifest — the fields', () => {
     expect(manifest.environment).toBe('web');
     expect(manifest.description).toBe('does a thing');
     expect(manifest.authors).toEqual([{ name: 'someone' }]);
-    // PML names its code file by STEM: `"main": "main"` is `main.mod.js`.
+    // A bare stem is completed — that is what PML's older docs showed.
     expect(manifest.entrypoint).toBe('main.mod.js');
     expect(entryPath).toBe('main.mod.js');
+  });
+
+  it('uses `main` VERBATIM when it already names a file', () => {
+    // Every mod on the CDN declares `"main": "main.mod.js"` and PML fetches it
+    // unchanged (`${polyModUrl}/${manifest.main}`). Appending unconditionally
+    // requested `main.mod.js.mod.js`, which 404s — the mod imports, translates,
+    // reports no problem, and then has no code.
+    const { manifest, entryPath } = translated({ main: 'main.mod.js' });
+    expect(entryPath).toBe('main.mod.js');
+    expect(manifest.entrypoint).toBe('main.mod.js');
+    expect(must(translatePmlManifest(REAL.coolcarsVersion)).entryPath).toBe('main.mod.js');
+    // `.js` and `.mjs` both count as "already a file".
+    expect(translated({ main: 'dist/bundle.js' }).entryPath).toBe('dist/bundle.js');
+    expect(translated({ main: 'index.mjs' }).entryPath).toBe('index.mjs');
   });
 
   it('falls back to the raw id for a nameless mod', () => {
@@ -137,10 +233,71 @@ describe('translatePmlManifest — the fields', () => {
     if (!noMain.ok) expect(noMain.error).toMatch(/'main'/);
   });
 
-  it("refuses a body with no 'polymod' block at all", () => {
-    const res = translatePmlManifest({ latest: {} });
+  it('says WHERE the id was looked for, since it can come from either file', () => {
+    // "the polymod block has no id" describes a block a current mod does not
+    // have, and points the reader at the wrong file to fix.
+    const res = translatePmlManifest(REAL.polyproxyVersion);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/'polymod'/);
+    if (!res.ok) expect(res.error).toMatch(/index manifest/);
+  });
+});
+
+describe('translatePmlManifest — identity may live in the index', () => {
+  it('translates a CURRENT mod, whose version manifest states no identity', () => {
+    // PolyProxy 10.0.0 as actually served. Every field but `targets` and `main`
+    // comes from the index, and without it this mod cannot be installed at all.
+    const { manifest, entryPath, notes } = must(
+      translatePmlManifest(REAL.polyproxyVersion, {
+        id: REAL.polyproxyIndex.id,
+        name: REAL.polyproxyIndex.name,
+        author: REAL.polyproxyIndex.author,
+        version: '10.0.0',
+      }),
+    );
+    expect(manifest.id).toBe('polyproxy');
+    expect(manifest.name).toBe('PolyProxy');
+    expect(manifest.version).toBe('10.0.0');
+    expect(manifest.authors).toEqual([{ name: 'Orangy' }]);
+    expect(manifest.targets).toEqual(['0.6.2']);
+    expect(entryPath).toBe('main.mod.js');
+    // Nothing was defaulted or dropped, so nothing is worth saying.
+    expect(notes).toEqual([]);
+  });
+
+  it('translates a LEGACY mod with no index identity at all', () => {
+    // The bare index carries none, so everything must come from `polymod`.
+    const { manifest } = must(translatePmlManifest(REAL.coolcarsVersion, { version: '1.6.0' }));
+    expect(manifest.id).toBe('coolcars');
+    expect(manifest.name).toBe('Cool Cars');
+    expect(manifest.authors).toEqual([{ name: 'CRJakob' }]);
+    expect(manifest.version).toBe('1.6.0');
+    expect(manifest.targets).toEqual(['0.5.1', '0.5.2']);
+  });
+
+  it('lets the version manifest win over the index', () => {
+    // PML merges the same way (`{...index, version, ...versionFile}`): a mod
+    // that restates a field in the version file means it.
+    const { manifest } = must(
+      translatePmlManifest(polymod({ id: 'fromversion', name: 'From Version' }), {
+        id: 'fromindex',
+        name: 'From Index',
+        author: 'indexauthor',
+      }),
+    );
+    expect(manifest.id).toBe('fromversion');
+    expect(manifest.name).toBe('From Version');
+    // …and still falls back for a field it did NOT restate.
+    expect(manifest.authors).toEqual([{ name: 'indexauthor' }]);
+  });
+
+  it('takes the resolved mod version from the index without complaint', () => {
+    // A flat version manifest never states its own version, so defaulting to
+    // '0.0.0' here would put a wrong version on every current PML mod.
+    const { manifest, notes } = must(
+      translatePmlManifest({ main: 'main.mod.js', targets: ['0.6.2'] }, { id: 'x', version: '10.0.0' }),
+    );
+    expect(manifest.version).toBe('10.0.0');
+    expect(notes.join(' ')).not.toMatch(/no version/);
   });
 });
 

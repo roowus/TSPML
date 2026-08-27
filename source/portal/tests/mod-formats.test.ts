@@ -47,8 +47,8 @@ function fakeFetch(routes: Record<string, Route>) {
 
 const BASE = 'https://raw.example.com/you/mod/main';
 
-/** A real PML manifest's shape: the mod metadata nests under `polymod`, and
- *  the entry file is named by `main` (resolved as `<main>.mod.js`). */
+/** A LEGACY (0.5.x) PML version manifest: metadata nests under `polymod`, and
+ *  `main` here is a bare stem, which the walk completes to `<main>.mod.js`. */
 const PML_MANIFEST = {
   polymod: {
     name: 'Some PML Mod',
@@ -59,6 +59,25 @@ const PML_MANIFEST = {
   },
   dependencies: [],
 };
+
+/**
+ * The CURRENT (0.6.x) layout, copied from PolyProxy as actually served.
+ *
+ * Identity lives in the index and NOWHERE else; the version manifest is flat and
+ * carries only what varies per version. Every mod in PML's registry with a 0.6.2
+ * build looks like this, so a walk that cannot do it is a walk that installs no
+ * current PML mod at all.
+ */
+const CURRENT_INDEX = {
+  name: 'PolyProxy',
+  id: 'polyproxy',
+  author: 'Orangy',
+  latest: { '0.6.1': '1.1.8', '0.6.2': '10.0.0' },
+};
+const CURRENT_VERSION = { targets: ['0.6.2'], main: 'main.mod.js', dependencies: [] };
+
+/** The LEGACY index: a bare game→mod version map, no wrapper, no identity. */
+const LEGACY_INDEX = { '0.5.1': '1.5.0', '0.5.2': '1.6.0' };
 
 const TSPML_MANIFEST = {
   schemaVersion: 1,
@@ -72,6 +91,16 @@ const TSPML_MANIFEST = {
 describe('sniffManifestFormat', () => {
   it('reads entrypoint as tspml and polymod as pml', () => {
     expect(sniffManifestFormat(TSPML_MANIFEST)).toBe('tspml');
+    expect(sniffManifestFormat(PML_MANIFEST)).toBe('pml');
+  });
+
+  it('reads BOTH PML generations, neither of which looks like the other', () => {
+    // `polymod` is not the marker it looks like — no 0.6.x mod has one — and a
+    // legacy index has no marker key at all. Sniffing on `polymod`/`latest`
+    // alone read three of these four as "not a mod format".
+    expect(sniffManifestFormat(CURRENT_INDEX)).toBe('pml');
+    expect(sniffManifestFormat(CURRENT_VERSION)).toBe('pml');
+    expect(sniffManifestFormat(LEGACY_INDEX)).toBe('pml');
     expect(sniffManifestFormat(PML_MANIFEST)).toBe('pml');
   });
 
@@ -158,6 +187,192 @@ describe('importModFromUrl — PML detection', () => {
   });
 });
 
+describe('importModFromUrl — the PML walk, both generations', () => {
+  it('walks a CURRENT mod: index → version manifest → code', async () => {
+    // The whole point of the walk. Identity comes from the index, targets and
+    // `main` from the version manifest, and the mod version from the index key
+    // the game version matched — no single file here has all of it.
+    const { impl, requested } = fakeFetch({
+      [`${BASE}/manifest.json`]: { body: JSON.stringify(CURRENT_INDEX), contentType: 'application/json' },
+      [`${BASE}/10.0.0/version.json`]: {
+        body: JSON.stringify(CURRENT_VERSION),
+        contentType: 'application/json',
+      },
+      [`${BASE}/10.0.0/main.mod.js`]: { body: 'export const polyMod = {};' },
+    });
+    const res = await importModFromUrl(`${BASE}/manifest.json`, impl);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.mod.format).toBe('pml');
+    expect(res.mod.manifest.id).toBe('polyproxy');
+    expect(res.mod.manifest.name).toBe('PolyProxy');
+    expect(res.mod.manifest.version).toBe('10.0.0');
+    expect(res.mod.manifest.targets).toEqual(['0.6.2']);
+    expect(res.mod.code).toBe('export const polyMod = {};');
+    // `main` is used VERBATIM. Appending `.mod.js` asked for main.mod.js.mod.js,
+    // which 404s — so the exact request list is the assertion.
+    expect(requested).toEqual([
+      `${BASE}/manifest.json`,
+      `${BASE}/10.0.0/version.json`,
+      `${BASE}/10.0.0/main.mod.js`,
+    ]);
+  });
+
+  it('walks a LEGACY mod: bare index → polymod manifest → code', async () => {
+    // The old spelling, still served by more than half of PML's registry. The
+    // index carries no identity at all, so everything comes from `polymod` —
+    // and the version manifest is named `manifest.json` down here, which is why
+    // the walk probes by content instead of trusting the filename.
+    const { impl, requested } = fakeFetch({
+      [`${BASE}/latest.json`]: { body: JSON.stringify(LEGACY_INDEX), contentType: 'application/json' },
+      [`${BASE}/1.6.0/manifest.json`]: {
+        body: JSON.stringify(PML_MANIFEST),
+        contentType: 'application/json',
+      },
+      [`${BASE}/1.6.0/main.mod.js`]: { body: 'export const polyMod = {};' },
+    });
+    // A 0.5.x-only index has more than one entry and no 0.6.2 key, so it must
+    // refuse rather than guess — that is `pickPmlVersion`'s rule, and it is
+    // the correct outcome for a mod that has no build for this game.
+    const refused = await importModFromUrl(`${BASE}/latest.json`, impl);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toMatch(/no build for PolyTrack/);
+
+    // Pointed straight at the version manifest, it installs.
+    const res = await importModFromUrl(`${BASE}/1.6.0/manifest.json`, impl);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.mod.format).toBe('pml');
+    expect(res.mod.manifest.id).toBe('somepmlmod');
+    expect(requested.at(-1)).toBe(`${BASE}/1.6.0/main.mod.js`);
+  });
+
+  it('follows a bare index when it does name this game version', async () => {
+    // Same legacy shape, but with a build for the version this portal serves.
+    // The bare map has no `latest` wrapper to recognise it by, so this is what
+    // proves the structural test actually drives the walk.
+    const { impl } = fakeFetch({
+      [`${BASE}/latest.json`]: {
+        body: JSON.stringify({ '0.6.2': '1.6.0' }),
+        contentType: 'application/json',
+      },
+      [`${BASE}/1.6.0/manifest.json`]: {
+        body: JSON.stringify(PML_MANIFEST),
+        contentType: 'application/json',
+      },
+      [`${BASE}/1.6.0/main.mod.js`]: { body: 'export const polyMod = {};' },
+    });
+    const res = await importModFromUrl(`${BASE}/latest.json`, impl);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.mod.manifest.version).toBe('1.6.0');
+  });
+
+  it('walks from a mod ROOT url, which is what a mod page links to', async () => {
+    // A directory URL names no file, so both index spellings get probed. This
+    // is the form PML addresses mods by and the form the registry stores, so it
+    // is the form that has to work.
+    const { impl, requested } = fakeFetch({
+      [`${BASE}/manifest.json`]: { body: JSON.stringify(CURRENT_INDEX), contentType: 'application/json' },
+      [`${BASE}/10.0.0/version.json`]: {
+        body: JSON.stringify(CURRENT_VERSION),
+        contentType: 'application/json',
+      },
+      [`${BASE}/10.0.0/main.mod.js`]: { body: 'export const polyMod = {};' },
+    });
+    const res = await importModFromUrl(`${BASE}/`, impl);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.mod.manifest.id).toBe('polyproxy');
+    // And the DIRECTORY itself is never fetched. There is nothing to sniff at a
+    // directory — the real CDN answers one with a GitHub-style listing ARRAY,
+    // which declares no format and would fall through to tspml, reporting a
+    // missing 'entrypoint' for something that was never a manifest.
+    expect(requested).not.toContain(`${BASE}/`);
+  });
+
+  it('treats a root with NO trailing slash as a directory too', async () => {
+    // `.../mod` and `.../mod/` are the same mod page link; only one of them
+    // ends in a slash, and neither has a dot in its last segment.
+    const { impl } = fakeFetch({
+      [`${BASE}/manifest.json`]: { body: JSON.stringify(CURRENT_INDEX), contentType: 'application/json' },
+      [`${BASE}/10.0.0/version.json`]: {
+        body: JSON.stringify(CURRENT_VERSION),
+        contentType: 'application/json',
+      },
+      [`${BASE}/10.0.0/main.mod.js`]: { body: 'export const polyMod = {};' },
+    });
+    const res = await importModFromUrl(BASE, impl);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.mod.manifest.id).toBe('polyproxy');
+  });
+
+  it('walks a dotless root that ANSWERS, when the answer is a listing array', async () => {
+    // The real CDN shape, and the reason path form alone cannot decide this:
+    // `cdn.polymodloader.com/gh/o/r/main/polyproxy` returns HTTP 200 with a
+    // GitHub-style array of directory entries. A dotless URL that answers is
+    // otherwise indistinguishable from a gist raw serving a TSPML file, so the
+    // array — which no manifest of either format can be — is what separates
+    // them. Verified against the live CDN, not assumed.
+    const { impl } = fakeFetch({
+      [BASE]: {
+        body: JSON.stringify([
+          { name: '1.0.0', path: 'polyproxy/1.0.0', type: 'dir', download_url: null },
+          { name: '10.0.0', path: 'polyproxy/10.0.0', type: 'dir', download_url: null },
+        ]),
+        contentType: 'application/json',
+      },
+      [`${BASE}/manifest.json`]: { body: JSON.stringify(CURRENT_INDEX), contentType: 'application/json' },
+      [`${BASE}/10.0.0/version.json`]: {
+        body: JSON.stringify(CURRENT_VERSION),
+        contentType: 'application/json',
+      },
+      [`${BASE}/10.0.0/main.mod.js`]: { body: 'export const polyMod = {};' },
+    });
+    const res = await importModFromUrl(BASE, impl);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.mod.format).toBe('pml');
+      expect(res.mod.manifest.id).toBe('polyproxy');
+    }
+  });
+
+  it('leaves a dotless URL that serves a real TSPML manifest to tspml', async () => {
+    // The other half of the same coin, and the regression this guards: treating
+    // every dotless path as a PML root sent gist raws and hash-named CDN
+    // objects — ordinary TSPML hosting — into the PML walk, where they failed
+    // for a reason having nothing to do with what they were.
+    const { impl } = fakeFetch({
+      'https://gist.example.com/raw/deadbeef': {
+        body: JSON.stringify({ schemaVersion: 1, id: 'gist-mod', entrypoint: 'index.js', targets: [] }),
+      },
+      'https://gist.example.com/raw/index.js': { body: 'export default () => {};' },
+    });
+    const res = await importModFromUrl('https://gist.example.com/raw/deadbeef', impl);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.mod.format).toBe('tspml');
+      expect(res.mod.manifest.id).toBe('gist-mod');
+    }
+  });
+
+  it('refuses a CURRENT version manifest reached without its index, by name', async () => {
+    // Pointing at `<mod>/10.0.0/version.json` skips the only file that states
+    // who the mod is. Refusing is right; refusing while blaming a `polymod`
+    // block the mod never had would send the reader to the wrong file.
+    const { impl } = fakeFetch({
+      [`${BASE}/10.0.0/version.json`]: {
+        body: JSON.stringify(CURRENT_VERSION),
+        contentType: 'application/json',
+      },
+    });
+    const res = await importModFromUrl(`${BASE}/10.0.0/version.json`, impl);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toMatch(/'id'/);
+      expect(res.error).toMatch(/index manifest/);
+    }
+  });
+});
+
 describe('importModFromUrl — explicit format option', () => {
   it('honours an explicit tspml without sniffing', async () => {
     const { impl } = fakeFetch({
@@ -183,8 +398,9 @@ describe('importModFromUrl — explicit format option', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.error).toMatch(/does not look like a PML manifest/);
+      expect(res.error).toMatch(/'main'/);
       expect(res.error).toMatch(/'polymod'/);
-      expect(res.error).toMatch(/'latest'/);
+      expect(res.error).toMatch(/game versions to mod versions/);
     }
   });
 

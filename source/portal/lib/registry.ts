@@ -56,10 +56,12 @@ export interface RegistrySafety {
 export interface RegistryEntry {
   readonly kind: RegistryKind;
   /**
-   * Which loader format the entry is authored for. Reserved from day one
-   * because storage and catalog schemas are far harder to retrofit than code:
-   * a `pml` entry renders as a named, honest refusal rather than being
-   * installed wrong and failing at runtime with a confusing error.
+   * Which loader format the entry is authored for.
+   *
+   * Load-bearing, not decorative: `useInstall` passes it straight to
+   * `importModFromUrl`, so it decides which walk runs and how the stored code is
+   * later executed. It is also the source of the loader-format tag every entry
+   * shows — see {@link entryTags} for why that is derived rather than written.
    */
   readonly format: ModFormatId;
   readonly id: string;
@@ -67,8 +69,24 @@ export interface RegistryEntry {
   readonly author: string;
   /** One line, plain text. Not markdown — this is rendered as text content. */
   readonly summary: string;
+  /**
+   * Content tags — what the entry DOES. The loader-format tag is not in here
+   * and must not be written into it; {@link entryTags} derives that from
+   * `format`, so the two cannot disagree.
+   */
   readonly tags: readonly string[];
-  readonly source: { readonly type: 'mod-json' | 'modpack-txt'; readonly url: string };
+  /**
+   * Where to fetch it from. `mod-json` is a single manifest URL; `mod-root` is
+   * a DIRECTORY that the format's own walk descends (PML addresses mods this
+   * way, and its whole registry is directory URLs); `modpack-txt` is a list of
+   * mod URLs, one per line.
+   *
+   * The distinction is descriptive, not dispatch: `format` is what chooses the
+   * walk. It exists so a row that is a directory does not have to claim to be a
+   * `mod.json`, which would be a lie in our own catalog file about the one
+   * field a reader would use to guess what lives at the other end.
+   */
+  readonly source: { readonly type: 'mod-json' | 'mod-root' | 'modpack-txt'; readonly url: string };
   readonly icon?: string;
   readonly homepage?: string;
   readonly docs?: string;
@@ -146,7 +164,9 @@ function parseEntry(v: unknown): RegistryEntry | null {
   if (typeof summary !== 'string') return null;
   if (!isStringArray(tags)) return null;
   if (!isRecord(source)) return null;
-  if (source.type !== 'mod-json' && source.type !== 'modpack-txt') return null;
+  if (source.type !== 'mod-json' && source.type !== 'mod-root' && source.type !== 'modpack-txt') {
+    return null;
+  }
   if (typeof source.url !== 'string' || source.url.length === 0) return null;
   if (!isStringArray(gameVersions)) return null;
   if (!isRecord(safety)) return null;
@@ -323,11 +343,44 @@ export function resolveDependencies(
   return { resolved, missing };
 }
 
-/** Every tag in the catalog, deduped and sorted — the filter row's vocabulary. */
+/**
+ * Every tag an entry shows: its loader format first, then its content tags.
+ *
+ * The format tag is DERIVED rather than written into each row's `tags` array,
+ * and that is the whole design. `format` already decides which walk installs the
+ * entry and how its code is later executed; a hand-written `"pml"` in `tags`
+ * would be a second, unenforced copy of that fact, and the two would drift on
+ * the first row someone edits in a hurry. Deriving it means the chip a player
+ * filters by and the code path that actually runs are the same field.
+ *
+ * It sorts first because it is a different KIND of fact from the rest — `ui` and
+ * `car` describe what a mod does, `pml` describes what will happen when you
+ * press Install. Grouping it in alphabetically among the content tags would bury
+ * the one tag with consequences.
+ */
+export function entryTags(entry: RegistryEntry): string[] {
+  // Deduped: a row that also hand-wrote its format must not render two chips
+  // whose keys collide. Dropping the duplicate is right — the derived one is
+  // the authoritative copy either way.
+  return [entry.format, ...entry.tags.filter((t) => t !== entry.format)];
+}
+
+/**
+ * Every tag in the catalog, deduped and sorted — the filter row's vocabulary.
+ *
+ * Format tags lead, so `pml` and `tspml` sit together at the front of the row
+ * rather than being scattered through the content tags. Both are real filters:
+ * "show me only what runs natively" is a question a player has, and the answer
+ * changes what installing costs them.
+ */
 export function registryTags(entries: readonly RegistryEntry[]): string[] {
-  const tags = new Set<string>();
-  for (const e of entries) for (const t of e.tags) tags.add(t);
-  return [...tags].sort();
+  const formats = new Set<string>();
+  const content = new Set<string>();
+  for (const e of entries) {
+    formats.add(e.format);
+    for (const t of e.tags) if (t !== e.format) content.add(t);
+  }
+  return [...[...formats].sort(), ...[...content].sort()];
 }
 
 /**
@@ -335,6 +388,11 @@ export function registryTags(entries: readonly RegistryEntry[]): string[] {
  * every term must match somewhere. Not ranked — with tens of entries a relevance
  * score would be theatre, and an unranked list that is obviously complete beats
  * a ranked one whose ordering nobody can explain.
+ *
+ * Both the filter and the haystack read {@link entryTags}, not `tags`, so the
+ * format chips in the filter row are chips that actually filter and typing
+ * "pml" finds the PML mods. A chip that is rendered but not matchable is worse
+ * than no chip: it looks like a control and behaves like decoration.
  */
 export function searchRegistry(
   entries: readonly RegistryEntry[],
@@ -343,9 +401,10 @@ export function searchRegistry(
 ): RegistryEntry[] {
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
   return entries.filter((e) => {
-    if (tag !== null && !e.tags.includes(tag)) return false;
+    const tags = entryTags(e);
+    if (tag !== null && !tags.includes(tag)) return false;
     if (terms.length === 0) return true;
-    const hay = `${e.name} ${e.author} ${e.summary} ${e.tags.join(' ')} ${e.id}`.toLowerCase();
+    const hay = `${e.name} ${e.author} ${e.summary} ${tags.join(' ')} ${e.id}`.toLowerCase();
     return terms.every((t) => hay.includes(t));
   });
 }
