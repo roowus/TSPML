@@ -22,12 +22,14 @@ Early design notes written while surveying the modding landscape, including tool
 for other games. They are kept for provenance and are **not** required to
 understand or use TSPML — the docs above stand on their own.
 
-- [Prior-art survey of PolyTrack modding](./research/polymodloader-analysis.md)
-- [Comparison notes and scope re-scoring](./research/pml-api-and-moat-reassessment.md)
-- [Gaps that motivated the design](./research/pml-shortcomings-and-tspml-improvements.md)
 - [Layered loader architectures in other ecosystems](./research/fabric-architecture.md)
 - [M3 transform spike — go/no-go](./research/transform-spike.md) *(result: VIABLE — JS-Mixin works on the real bundle)*
 - [Portal browser-test findings](./research/portal-browser-test-findings.md) *(transform run-validated in a browser; current blockers = game's own origin/online gates)*
+
+## Concepts
+
+- [PML compatibility](./concepts/pml-compatibility.md) — what carries across from
+  PolyModLoader mods, what is refused, and why.
 
 ## Design
 

@@ -3,7 +3,11 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
+import { DEFAULT_GAME_VERSION } from '@/lib/game-versions';
 import {
+  buildsForGameVersion,
+  entryTags,
+  gameVersionNote,
   getRegistryEntry,
   listRegistry,
   resolveDependencies,
@@ -82,6 +86,10 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
 
   const deps = resolveDependencies(registry, entry);
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  // This page is reached from the launcher, with no instance in hand, so the
+  // default is the honest reference point. The in-play drawer knows better and
+  // passes the running instance's version to the catalog instead.
+  const versionNote = gameVersionNote(entry, DEFAULT_GAME_VERSION);
 
   return (
     <section className="shell-section">
@@ -110,12 +118,21 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
       <p className="entry-summary">{entry.summary}</p>
 
       <div className="entry-tags">
-        {entry.tags.map((t) => (
-          <span key={t} className="tag-chip tag-static">
+        {entryTags(entry).map((t) => (
+          <span key={t} className={`tag-chip ${t === entry.format ? 'tag-format' : 'tag-static'}`}>
             {t}
           </span>
         ))}
       </div>
+
+      {/* Before the button, for the same reason it is before the button on the
+          card: a player deciding whether to install should meet this while
+          deciding, not after. */}
+      {versionNote === null ? null : (
+        <p className="install-caveat">
+          <Icon name="warn" /> {versionNote}
+        </p>
+      )}
 
       <InstallButton entry={entry} install={install} />
 
@@ -130,12 +147,33 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
 
       <dl className="entry-facts">
         <dt>Game versions</dt>
-        <dd>{entry.gameVersions.join(', ')}</dd>
+        <dd>
+          {entry.gameVersions.join(', ')}
+          {/* The list alone reads as a fact with no verdict attached: a row
+              saying "0.5.0, 0.5.1, 0.5.2" states the problem only to a reader
+              who already knows which version they are on. Both branches are
+              derived from the same predicate the advisory above uses. */}
+          <span className="meta">
+            {buildsForGameVersion(entry, DEFAULT_GAME_VERSION)
+              ? ` — covers ${DEFAULT_GAME_VERSION}, the version this launcher plays.`
+              : ` — none of these is ${DEFAULT_GAME_VERSION}, the version this launcher plays.`}
+          </span>
+        </dd>
+
+        <dt>Format</dt>
+        <dd>
+          {entry.format === 'pml'
+            ? 'PolyModLoader (PML). Installs through TSPML’s compatibility adapter — see the note on the Install button for what carries across and what does not.'
+            : 'TSPML, this launcher’s native format. Runs directly, with nothing translated.'}
+        </dd>
 
         <dt>Source</dt>
         <dd>
           <code className="entry-source">{resolveSourceUrl(entry, origin)}</code>
           <span className="meta">
+            {entry.source.type === 'mod-root'
+              ? 'A mod root. Your browser reads the index there, follows it to the build for this game version, and fetches that build’s code. '
+              : ''}
             Fetched live by your browser when you install, and again when you press reload on the
             play page. There is no version history: whatever is at that URL is what you get.
           </span>

@@ -19,13 +19,11 @@ The portal **plays a transformed, modded PolyTrack end-to-end** — a real mod l
 | **M8 — Online/origin handling** | 🚧 Blocked | Root cause found: `vps.kodub.com` is **bot-protected** (bot/TLS-fingerprint drop, not just origin). The **extension path** (real browser on kodub.com origin) is the resilient fix. |
 | **M9 — Auto-mappings pipeline** | ✅ Done | `regen.mjs` orchestrates **fetch → unpack → gen-map → diff → verify-targets**: a one-command candidate-map regen + human-review report (`*.candidate.json`, never clobbers committed). Pure `diff`/`verify-targets` logic unit-tested (26 tests); validated end-to-end on real 0.6.0/0.6.2 bundles. |
 | **M10 — Narrow importer + registry + polish** | 🚧 Mostly shipped | The importer needed at least one working **content** registry; it now has **two**: `api.tracks` ([#12](https://github.com/roowus/TSPML/issues/12) — custom tracks by import code) and `api.audio` ([#11](https://github.com/roowus/TSPML/issues/11) — sound overrides), both verified against the live game. Car-styles/settings remain non-viable (frozen catalogs). The **mod registry** slice shipped in the portal launcher (2026-08-24): a curated `public/registry/index.json` behind a `lib/registry.ts` seam, browse + search + tag filter, one-click install through the existing import chain, and an in-play drawer that installs into a running game. Remaining: the saved-modpack-ID backend ([#80](https://github.com/roowus/TSPML/issues/80)). |
-| **M11 — Physics WASM patching** | 🆕 Planned | **Capability gap ([#43](https://github.com/roowus/TSPML/issues/43)).** Physics tuning is a headline mod category, and anchor discipline cannot reach constants baked into `polytrack_physics.wasm` — those live in a compiled binary with no names to anchor to. The locator and writer now exist (see the mappings-pipeline README); what remains is the mod-facing plumbing. See [pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md). |
+| **M11 — Physics WASM patching** | 🆕 Planned | **Capability gap ([#43](https://github.com/roowus/TSPML/issues/43)).** Physics tuning is a headline mod category, and anchor discipline cannot reach constants baked into `polytrack_physics.wasm` — those live in a compiled binary with no names to anchor to. The locator and writer now exist (see the mappings-pipeline README); what remains is the mod-facing plumbing. |
 
 ## Strategy correction (2026-08-03)
 
-Reading the prior art at source level revised two claims this roadmap had been built on.
-Full detail in
-[pml-api-and-moat-reassessment.md](../research/pml-api-and-moat-reassessment.md):
+Reading the prior art at source level revised two claims this roadmap had been built on:
 
 1. **"Hardcoded identifiers break every release" is an overclaim.** Measured across real
    PolyTrack versions, mangled identifiers were **byte-identical** 0.6.1 → 0.6.2, and the

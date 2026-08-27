@@ -37,10 +37,23 @@ export function BrowseDrawer({
   open,
   onClose,
   install,
+  gameVersion,
 }: {
   open: boolean;
   onClose: () => void;
   install: UseInstall;
+  /**
+   * The RUNNING instance's game version. Passed through to the catalog so the
+   * "no build for this version" advisory is about the game actually on screen
+   * rather than the launcher's default — installing from here targets that
+   * game, so anything else would be a warning about a different session.
+   *
+   * Explicitly `| undefined` rather than merely optional: the play page reads
+   * it off an instance that is null until the launch resolves, and under
+   * `exactOptionalPropertyTypes` "may be absent" and "may be undefined" are
+   * different promises. The catalog's default covers that window.
+   */
+  gameVersion?: string | undefined;
 }): ReactElement {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
@@ -109,7 +122,7 @@ export function BrowseDrawer({
         A curated list, not a search index. Installing from here loads the mod into the game
         you are already playing, so a run in progress restarts.
       </p>
-      <Catalog install={install} linkEntries={false} />
+      <Catalog install={install} linkEntries={false} gameVersion={gameVersion} />
     </div>
   );
 }

@@ -12,11 +12,17 @@
 // than stopping at "the button said installed".
 //
 // PASS requires, in order:
-//   1. browse   — /browse lists the catalog: poly-to-track (the real, currently
-//                 only entry) is on the Mods tab, by name, with its author;
+//   1. browse   — /browse lists the catalog: poly-to-track (the native entry) is
+//                 on the Mods tab, by name, with its author;
 //   2. search   — typing a term that matches nothing empties the list, and
 //                 clearing it brings the entry back (proving the filter is
 //                 filtering, not that the list happened to be short);
+//   2b. format  — the loader-format chips are real filters: selecting `pml`
+//                 hides the native entry and keeps a PML one, and `tspml` does
+//                 the reverse. The chip is derived from each entry's `format`,
+//                 which is the field that decides which import walk runs, so a
+//                 chip that rendered without filtering would be a control in
+//                 appearance and decoration in behaviour;
 //   3. tabs     — the Modpacks tab shows NO entries (the catalog has no packs
 //                 right now) and NOT the mod, so the two content types are
 //                 actually separated;
@@ -32,11 +38,15 @@
 //                 reports it LOADED. This is the leg that proves the install
 //                 path and the play path agree about storage.
 //
-// The catalog's single entry is poly-to-track, hosted on GitHub raw by its
-// author — so legs 6-7 do hit the network (the same fetch a real player makes).
+// The entry legs 4-7 install is poly-to-track, hosted on GitHub raw by its
+// author — so they do hit the network (the same fetch a real player makes).
 // That is deliberate: a same-origin fixture would prove the wiring but not the
 // promise ("install from the catalog works"), and the fixture samples remain in
 // public/ for smoke-user-mods' URL-import legs instead.
+//
+// It is also the catalog's only NATIVE entry; the rest are PML mods mirrored
+// from PML's own registry, which is why leg 2b can assert that a format chip
+// partitions the list rather than merely rendering.
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
@@ -47,6 +57,9 @@ const SHOT = process.env.SMOKE_SHOT ?? "/tmp/tspml-registry-smoke.png";
 // tests/registry.test.ts validates the file's shape, this file its behaviour.
 const ENTRY_ID = "poly-to-track";
 const ENTRY_NAME = "Poly To Track";
+// A PML row, for the format-chip leg. Any one would do; this is the one PML's
+// own registry lists first, and it is present for every 0.6.x game version.
+const PML_ENTRY_NAME = "PML Core";
 
 const step = (msg) => process.stderr.write(`smoke:registry · ${msg}\n`);
 
@@ -117,6 +130,43 @@ await search.fill("");
 out.searchRestores = await waitFor(
   (name) => document.body.innerText.includes(name),
   ENTRY_NAME,
+  10000,
+);
+
+// ---- 2b. The loader-format chips partition the catalog ----------------------
+// Exact-text locators, because `pml` is a substring of `tspml` and a hasText
+// chip lookup would grab whichever came first and then assert against the wrong
+// button. The two directions are both asserted: a chip that filtered one way
+// and left the other alone would be a half-working control that looks whole.
+step("format chips filter by loader");
+const chip = (t) => page.locator(".tag-row button").filter({ hasText: new RegExp(`^${t}$`) });
+await chip("pml").click();
+out.pmlChipHidesNative = await waitFor(
+  (names) => {
+    const [native, pml] = names.split("|");
+    const text = document.body.innerText;
+    return !text.includes(native ?? "") && text.includes(pml ?? "");
+  },
+  `${ENTRY_NAME}|${PML_ENTRY_NAME}`,
+  10000,
+);
+await chip("tspml").click();
+out.tspmlChipHidesPml = await waitFor(
+  (names) => {
+    const [native, pml] = names.split("|");
+    const text = document.body.innerText;
+    return text.includes(native ?? "") && !text.includes(pml ?? "");
+  },
+  `${ENTRY_NAME}|${PML_ENTRY_NAME}`,
+  10000,
+);
+// Back to an unfiltered list: every leg below reads the whole catalog, and a
+// chip left pressed would make the modpack-tab assertion pass for the wrong
+// reason (an empty panel because a mod filter is still on).
+await page.locator(".tag-row button").filter({ hasText: /^All$/ }).click();
+out.allChipRestores = await waitFor(
+  (name) => document.body.innerText.includes(name),
+  PML_ENTRY_NAME,
   10000,
 );
 
@@ -226,6 +276,9 @@ const PASS =
   out.saysCurated === true &&
   out.searchEmpties === true &&
   out.searchRestores === true &&
+  out.pmlChipHidesNative === true &&
+  out.tspmlChipHidesPml === true &&
+  out.allChipRestores === true &&
   out.packTabHidesMods === true &&
   out.packTabEmptyState === true &&
   out.detailShowsEntry === true &&
@@ -245,7 +298,15 @@ console.log(
         catalogListed: out.entryListed ?? false,
         labelledAsCurated: out.saysCurated ?? false,
         searchFilters: (out.searchEmpties && out.searchRestores) ?? false,
-        tabsSeparateKinds: (out.packTabShowsPack && out.packTabHidesMods) ?? false,
+        // Both directions, or the chip is decoration. See leg 2b.
+        formatChipsFilter:
+          (out.pmlChipHidesNative && out.tspmlChipHidesPml && out.allChipRestores) ?? false,
+        // Reads what the run actually measured. This line used to name an
+        // `out.packTabShowsPack` that nothing assigned, so it reported `false`
+        // on every green run — the catalog has held no modpacks since the
+        // sample pack was delisted, and the assertion above is that the pack
+        // tab is EMPTY, not that it shows one.
+        tabsSeparateKinds: (out.packTabHidesMods && out.packTabEmptyState) ?? false,
         detailIsARealUrl: out.detailShowsEntry ?? false,
         // The two that are about trust rather than plumbing.
         confirmBeforeInstall: (out.disclosureShown && out.nothingStoredYet) ?? false,

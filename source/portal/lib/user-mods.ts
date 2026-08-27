@@ -78,16 +78,17 @@ export interface UserModRecord {
   readonly sourceUrl?: string;
   /**
    * Which mod format this record's `code` is. Absent means `tspml`, which is
-   * every record written so far and every record this build writes.
+   * what every record written before PML support landed is.
    *
-   * Reserved now rather than later because it is a STORAGE schema, and storage
-   * is the thing you cannot retrofit — a field added after rows exist has to
-   * cope with rows that predate it forever. More to the point, this is the
-   * field that decides how the code is EXECUTED, which is where the formats
-   * genuinely diverge: a TSPML entrypoint is an ES module with a default export
-   * receiving `api`, while a PML entrypoint exports a named `polyMod` binding
-   * against a `pml` global. `importFromSource` will branch on this when PML
-   * support lands; today nothing writes anything but `tspml`.
+   * This is a STORAGE schema, and storage is the thing you cannot retrofit — a
+   * field added after rows exist has to cope with rows that predate it forever,
+   * which is why it was reserved ahead of the feature. It is the field that
+   * decides how the code is EXECUTED, and that is where the formats genuinely
+   * diverge: a TSPML entrypoint is an ES module with a default export receiving
+   * `api`, while a PML entrypoint exports a named `polyMod` binding against a
+   * `pml` global. The loading path branches on it — `'pml'` goes through
+   * `lib/pml/run.ts`, which rewrites the import and hands the loader a
+   * synthetic module; see `docs/concepts/pml-compatibility.md`.
    */
   readonly format?: 'tspml' | 'pml';
 }

@@ -182,6 +182,11 @@ function toRecord(mod: ImportedMod, sourceUrl: string): UserModRecord {
     code: mod.code,
     ...(mod.mixins === undefined ? {} : { mixins: mod.mixins }),
     ...(mod.physics === undefined ? {} : { physics: mod.physics }),
+    // Which format ran the import, and therefore how this code is EXECUTED
+    // later: a `pml` record goes through the compatibility adapter, an absent
+    // field means the native TSPML path. Dropping it here would store every
+    // PML install as a TSPML mod and fail at load time, in the mod's file.
+    ...(mod.format === undefined ? {} : { format: mod.format }),
     enabled: true,
     addedAt: new Date().toISOString(),
     sourceUrl,

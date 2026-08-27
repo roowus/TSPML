@@ -2417,3 +2417,410 @@ All 11 smokes verified green locally, 506 unit tests green, and a layout
 probe asserted the geometry the screenshots couldn't be read for: popover
 centered to 0px on both axes at 560×680, tabs toggling their panels, method
 cards rendering.
+
+## 2026-08-26 — PML mods install and run, through an adapter that refuses mixins by name ✅
+
+The owner's ask was blunt: *"making pml mods compatible with either native tspml
+or some interpeting layer betewen which ever u think is best"*, followed by the
+constraint that settles the design — *"tspml is still a separete better laoder
+but i want pml combiailbitiy"*.
+
+So it is an **adapter**, and the load-bearing decision is what it does NOT do:
+nothing on the TSPML path moved. No gate was relaxed, no rule widened, and a
+TSPML mod never touches a line of `lib/pml/`. The adapter's whole job is to hand
+`@tspml/loader` an ordinary ES module — a `default` export carrying
+`preInit`/`init`/`ready`/`onUnload` — so **the loader is never taught what PML
+is**, and everything it already guarantees covers a PML mod for free: per-mod
+failure isolation, dependency ordering and soft-disable, safety classification,
+reverse-order unload. A second loader would have had to re-earn all four.
+
+**Mixins are refused, per call, with a reason, and the mod keeps running.** This
+is the incompatibility that matters, and it is a design difference rather than a
+missing feature: a PML mixin names a literal substring of the LIVE minified
+bundle (`toString()`, then `indexOf(token)`, then a string splice, then `eval()`),
+and by the time a PML mod's `init` runs under TSPML the bundle has already been
+transformed and served. There is no live function left to splice, and the token
+describes a build that was never shipped to that tab. A refusal returns
+`undefined` rather than throwing — PML mods register mixins from `init`, so
+throwing would take a whole mod down over one call, and a mod that mixes a UI
+patch with a keybind should keep the keybind. Refusals dedupe by
+`(method, target)`: a mod that registers in a loop produces one line, not a
+thousand, and a thousand lines nobody scrolls past is the same as none.
+
+**Physics mixins get their own refusal, because the answer there is different.**
+TSPML *can* patch `polytrack_physics.wasm` (#43) — but only through a
+`physics.json` pinned to a `wasmHash`. A PML `PATCH_F32` arrives as a raw byte
+offset with no hash to check, and honouring it would mean writing an unverified
+offset into the simulation that produces leaderboard evidence. That gate does
+not bend for compatibility. Same for the eval bridge (`getFromPolyTrack*`): it
+resolves paths inside PML's own patched bundle, and TSPML serves an unpatched
+game with no eval sink, so there is nothing to resolve against.
+
+**What does carry across** is most of the rest: lifecycle hooks (`postInit` then
+`onGameLoad`, in that order, both inside `ready`), real keybind registration
+through `api.keybinds`, settings (stored — no panel yet, so mods run on their
+defaults), `getMod`/`registerMod` resolving by **both** the PML id and our slug,
+the `PolyMod` fields assigned before the first hook as PML's own loader does, and
+the frozen `MixinType`/`SettingType` enums that mods read at module scope.
+
+Two PML **warts are reproduced deliberately**, because mods have written around
+them: `getSetting` returns a string regardless of `SettingType` (so a bool reads
+back as `"true"` — returning a real boolean would be tidier and would break
+exactly the mods that compare against `"true"`), and `registerKeybind` accepts
+both the options-object and the positional `(id, key, fn)` signature, because
+PML's own signature drifted between versions.
+
+**One real behavioural difference, reported rather than hidden.** PML is
+phase-major (every mod's `preInit`, then every mod's `init`); TSPML is mod-major
+(one mod's hooks run to completion before the next starts, in dependency order).
+A PML mod reading another's `init` output from its own `preInit` may find it
+missing. The warning fires **only once a second PML mod loads** — with one mod
+there is no cross-mod order to get wrong, and a warning nobody can act on just
+teaches players to ignore the box.
+
+**Installing one is a CDN directory walk, driven by content and not by filename.**
+PML mods are a tree (`manifest.json` index, then `<ver>/version.json`, then
+`main.mod.js`), and PML's docs disagree with its own repo template about which
+file is called what — so a body with a `latest` map is an index and a body with a
+`polymod` block is a version manifest, whatever it is named. Point the importer
+at any of the three and it works. **Every hop re-checks `checkImportUrl`**: a
+manifest cannot redirect the walk at a kodub host and slip past the entry check.
+
+Manifest translation is pure and every lossy decision is **named in a note the
+installer shows you**. The two worth recording: the PML `id` is slugified but the
+original is kept in `custom.pml.id`, because `pml.getMod()` looks up by it and
+losing it would break the documented way PML mods reach each other; and
+`dependencies` are recorded in `custom.pml.dependencies` but deliberately **not**
+emitted as `depends` — they are PML-registry ids resolving against a registry
+TSPML has no view of, and an unresolvable `depends` is abortive in the loader's
+pre-gate, which would turn "has deps" into "cannot load".
+
+The import rewrite exists because a PML mod's first line is
+`import { PolyMod } from "./PolyModLoader.js"` and TSPML imports mod code from a
+`blob:` URL, against which a relative specifier resolves to nothing — the mod
+would fail at import time with a network error naming no cause. The rewrite is
+textual and conservative on purpose: it only touches `PolyModLoader` specifiers
+(`PolyModLoaderExtras.js` is somebody else's file), it **appends nothing** so
+`export { thing as polyMod }` still works, and a clause it cannot model is left
+as written and named in a warning rather than replaced with a `const` that might
+not parse.
+
+**Testing note worth keeping.** `tests/pml-run.test.ts` mocks exactly one thing —
+`importFromSource` — because blob URLs are not importable under vitest's
+`environment: 'node'`. The mock **captures the code it receives**, which turns it
+from a stub into an assertion that the wrap step actually ran (the captured
+source contains the runtime global and no longer contains `./PolyModLoader.js`).
+Mocking the seam is unavoidable; mocking it blindly would have made the whole
+file vacuous.
+
+139 adapter tests across four files (`pml-manifest`, `pml-wrap`, `pml-shim`,
+`pml-run`); **649 portal unit tests green**, `tsc --noEmit` clean.
+
+Also fixed here: the long-carried `tests/modpack.test.ts:229` TS2493, which
+several previous entries recorded as "pre-existing and untouched". Root cause was
+one line — `fakeFetch` used a **zero-arg** `vi.fn`, which types `mock.calls` as
+`[][]`, so the `#80` invariant assertion (indexing the first call's first argument
+proves the BROWSER fetched, i.e. the server never became a fetcher of arbitrary
+user-pointed URLs) had no element to index. It survived this long because
+`source/portal` has no `typecheck` script, so CI never ran that invocation.
+Declaring the params fixes it.
+
+**Docs.** [`docs/concepts/pml-compatibility.md`](../concepts/pml-compatibility.md)
+is the public statement of what carries across and what is refused. The three PML
+research notes moved to a gitignored `docs/private/` at the owner's request —
+they read another project's source and scope its weaknesses, which is fine as
+working notes and not something to publish under our name — with all four
+cross-references repointed.
+
+### `smoke:pml` — the adapter proved in a browser, not in a mock
+
+The 139 adapter unit tests all run under `environment: 'node'`, where the one
+thing that makes the whole feature possible — importing a rewritten PML module
+from a `blob:` URL — cannot happen and has to be mocked. So the twelfth CI smoke
+runs the real thing: `scripts/smoke-pml.mjs` against a fixture PML mod the portal
+serves itself (`public/sample-pml-mod/`).
+
+The fixture is a **real three-file PML tree**, not one file, because the walk is
+half of what is being proved:
+
+```
+/sample-pml-mod/manifest.json        {"latest": {"0.6.2": "1.0.0"}}   INDEX
+/sample-pml-mod/1.0.0/version.json   {"polymod": {…, "main": "main"}} VERSION
+/sample-pml-mod/1.0.0/main.mod.js                                     code
+```
+
+The import is pointed at the **index**, through the ordinary "Import from a URL"
+form, with **no format stated** — the dispatcher sniffs the `latest` map. A
+passing run therefore also proves a PML mod needs no format selector, which is
+the difference between "supported" and "supported if you know to tell it".
+
+Three fixture choices are deliberate:
+
+- the declared id is `TSPML.sample.pml`, which is **not** a legal TSPML id, so
+  the run exercises `slugifyPmlId` (→ `tspml-sample-pml`) and the preserved
+  `custom.pml.id` rather than a happy-path id that would prove neither;
+- the hooks are written as **class properties** (`init = (pml) => …`), which is
+  what PML mods actually write and the reason `PolyMod` defines no hooks of its
+  own — a class property would shadow them;
+- the keybind's key is `"KeyJ"`, a `KeyboardEvent.code`, because
+  `Keybinds.dispatch` compares `binding.key !== e.code`. The keydown is
+  dispatched **inside the game frame**, where `Keybinds` attaches: a main-frame
+  dispatch would silently never fire and the leg would fail for the wrong reason.
+
+**The load-bearing pair is the last two assertions.** The fixture's `init` calls
+`registerClassMixin` and then keeps going. The smoke asserts that the refusal is
+named in the sidebar's `.pml-report` block **with the target it aimed at**
+(`registerClassMixin (SmokeTarget.prototype)`), that the mod is **still in the
+loaded list while that refusal is on screen**, and that the code *after* the
+refused call ran. Those three together are the only proof of "refuse per call,
+don't abort the mod" — and the first two are load-bearing on each other, because
+`lib/mod-loader.ts` only emits a report for a mod in `loaded`, so a report on
+screen is itself evidence the mod survived.
+
+Also asserted: all four lifecycle hooks in PML's order
+(`preInit,init,postInit,onGameLoad` — the last two both map onto TSPML's `ready`,
+and their relative order is a promise this file now holds us to), the instance's
+identity fields written **before** the first hook, and `getSetting` returning the
+string `"true"` for a bool — PML's own wart, reproduced on purpose because mods
+compare against it, and now regression-guarded.
+
+Registered as `smoke:pml` and wired into `.github/workflows/smoke.yml` after the
+user-mods smoke, in the same sequential portal job. **12 CI smokes.**
+
+**Green on the first run**, against `next dev` with `TSPML_TRANSFORM=1`, with no
+page errors — all thirteen assertions true, `hookOrder` exactly
+`preInit,init,postInit,onGameLoad`, and the console carrying the refusal the
+sidebar shows:
+
+```
+warning: [tspml:pml:tspml-sample-pml] registerClassMixin (SmokeTarget.prototype)
+was not applied — PML mixins string-splice the live minified bundle at runtime …
+```
+
+Portal gates alongside it: **649 unit tests across 27 files pass**, `tsc
+--noEmit` clean. Repo-wide `pnpm -r test`: **1,262 tests green** (portal 649,
+mappings-pipeline 153, loader 109, api-bridge 92, mappings 76, shared 64,
+transform 49, wasm 44, dev-harness 14, create-tspml-mod 12).
+
+### Screenshot review — the two PML surfaces
+
+The DOCS RULE wants eyes on UI changes, and DOM assertions have passed over a
+visibly broken panel before (poly-to-track v0.9.1), so both surfaces were looked
+at rather than only queried.
+
+`.pml-report`, from the smoke's own artifact (`/tmp/tspml-pml-smoke.png`): the
+mod's row reads **RUNNING** and it appears again under **LOADED MODS**, while
+directly between them an amber block names `registerClassMixin
+(SmokeTarget.prototype)` and gives the full reason. The contract — refused, still
+running — is legible in one screen without expanding anything.
+
+`.install-caveat` (`components/shell/InstallButton.tsx`) only renders for an
+entry whose `format` is `pml`, and the curated catalog has none yet, so it was
+shot against a stubbed registry response. It renders as a muted panel **above a
+working orange Install button** — not a greyed-out control — and it survives into
+the confirm step, where it sits above the unsandboxed-code warning rather than
+being replaced by it. That ordering is the intended one: the caveat is a fact
+about what you are getting, the confirm is about trust, and the first must not
+disappear when the second appears.
+
+## 2026-08-26 — the catalog carries PML's whole registry, and the format chip is a real filter ✅
+
+The adapter could run PML mods; the catalog listed none. This closes that gap —
+**all twenty mods from [PML's own registry][modlist] are now `/browse` entries**
+— and adds the facet a mixed catalog needs, since "will this run natively or
+through the adapter?" is now the first thing a player wants to know about a card.
+
+[modlist]: https://raw.githubusercontent.com/polytrackmods/PolyLibrary/refs/heads/main/modlist.json
+
+### The tagging system already existed; the loader-format facet did not
+
+Rows already carried content `tags` (`ui`, `car`, `editor`, …), so the work was
+not a tag system but a **derived** facet:
+
+- `entryTags(entry)` returns `[entry.format, ...entry.tags]`, deduped, format
+  first. **Derived, never hand-written.** `format` is the field `useInstall`
+  passes to the importer, so a row whose `tags` disagreed with it would render a
+  chip that contradicts the code path that actually runs. A test fails the build
+  if a committed row hand-writes `pml` or `tspml` into its own `tags`.
+- `registryTags()` sorts formats to the head of the filter row, so `pml` and
+  `tspml` sit together rather than scattered alphabetically among content tags.
+- `searchRegistry()` routes through `entryTags`, which makes the chip an
+  **exact** filter while free text stays substring — so typing `pml` also matches
+  `tspml`. That looseness is the documented behaviour of every term here, not a
+  format-specific quirk, and it is now asserted so it is a decision on record
+  rather than a surprise.
+- `.tag-format` is deliberately **uncolored** — uppercase and letter-spaced, but
+  not tinted. Beside the amber `physics` chip a second colored chip would read as
+  a second warning, and "this is a PML mod" is not a warning.
+
+### The rows are PML's data and our prose
+
+Names, authors, tags and URLs are verbatim from `modlist.json`. Two things it
+does not contain had to be produced honestly rather than plausibly:
+
+- **Descriptions: PML's registry has none.** Not sparse — *absent*, for all
+  twenty. Every `summary` was therefore written from reading that mod's actual
+  source. `pml-polyproxy` reads "a do-nothing placeholder mod … an empty class
+  with a comment" because that is what its 0.6.2 build is.
+- **`gameVersions` lists what each mod's own index manifest offers**, not a range
+  we wish it supported. **Thirteen of the twenty-one rows have no 0.6.2 build.**
+  Reading each mod's index rather than generating a plausible range from its name
+  is what keeps this from being the failure recorded in
+  [[fakes-cannot-falsify-their-own-assumption]]: a value invented from the same
+  belief as the row proves nothing about it. What the card *says* about those
+  versions is derived — see the next section.
+
+`source.type` gained a third value, **`mod-root`** — PML addresses every one of
+its mods as a directory. A row that had to call itself a `mod-json` to pass
+validation would be lying in our own catalog about what lives at that URL.
+
+### A real regression the registry work exposed
+
+Adding twenty directory URLs surfaced a bug in `dispatchImport`: the dotless-path
+heuristic sent **every** extension-less URL into the PML walk. But a gist raw and
+a hash-named CDN object are also extension-less, and both are legitimate ways to
+host an ordinary TSPML mod — two existing tests went red, correctly.
+
+Path shape cannot separate those cases, so it must not try. Probing the live CDN
+settled what a mod root actually does:
+
+```
+GET https://cdn.polymodloader.com/gh/0rangy/OrangysPolyMods/main/polyproxy
+→ 200 application/json, 3690 bytes
+  [{"name":"1.0.0","path":"polyproxy/1.0.0","type":"dir",…},…]
+```
+
+A GitHub-style **listing array**. So the decision moved from the path to the
+answer: a trailing slash goes to PML with no fetch (unambiguous), and a dotless
+URL is fetched first and goes to PML only when the body parses as an array or the
+fetch failed. No manifest of either format is an array and no code file parses as
+JSON at all, so nothing that is really a mod is misread. Parsed rather than
+pattern-matched, because a leading `[` could open a code file's array literal.
+
+Both directions are pinned in `tests/mod-formats.test.ts`, the PML one against
+the shape above — verified, not assumed.
+
+### Proof
+
+`smoke:registry` gained **leg 2b**: click the `pml` chip and the native entry
+must disappear while a PML one stays; click `tspml` and the reverse; click `All`
+and the list comes back. Both directions, because a chip that filtered one way
+would look like a working control. The chip locators are **exact-text**, since
+`pml` is a substring of `tspml` and a `hasText` lookup would grab the wrong
+button and assert against it.
+
+Fixed while in there: `verdict.tabsSeparateKinds` named an `out.packTabShowsPack`
+that nothing ever assigned, so it reported `false` on every green run. It was
+never in the `PASS` expression — a misreport, not a failure — and it now reads
+what the run measures (the pack tab is empty **and** shows no mods; the sample
+pack was delisted as a smoke fixture, so "empty" is the honest assertion).
+
+Six new guards on the committed catalog file, because a catalog is *data* and
+data gets edited by someone who will not run the app afterwards: no hand-written
+format tags, no dependency on an id the catalog does not list, at least one game
+version per row, every `pml` row a `mod-root`, mods pointing at a manifest or a
+root, and no smoke fixture advertised as player content.
+
+**678 unit tests across 27 files pass**, `tsc --noEmit` clean. Repo-wide
+`pnpm -r test`: **1,291 green** (portal 678, mappings-pipeline 153, loader 109,
+api-bridge 92, mappings 76, shared 64, transform 49, wasm 44, dev-harness 14,
+create-tspml-mod 12).
+
+## 2026-08-26 — the no-build warning becomes a derivation, not prose ✅
+
+Screenshot review of the mirror above (the shot half of the DOCS RULE) exposed a
+defect the DOM assertions could not see: on `pml-coolcars` the most consequential
+fact on the page — *installing this will fail* — rendered as plain body prose,
+while the less consequential PML-adapter caveat beside it got a bordered ⚠ box.
+Reading `index.json` to fix the hierarchy corrected the premise first: **all
+thirteen** no-0.6.2 rows carried a notice, but hand-typed into `summary` in two
+inconsistent phrasings — six said `NO BUILD FOR THIS GAME VERSION: its index
+stops at PolyTrack 0.5.2`, seven said `Its newest build targets 0.6.0, not
+0.6.2.` — a second, unenforced copy of `gameVersions` that could disagree with
+the field the moment either was edited, and did not even agree with itself on
+wording.
+
+### One predicate, both shapes of the field
+
+The fix is the same rule the format chip already follows — **derive, never
+duplicate**. `buildsForGameVersion(entry, version)` and
+`gameVersionNote(entry, version)` live in `lib/registry.ts` next to
+`installCaveat`, and the thirteen prose clauses are gone from `index.json`
+(remaining facts preserved; a guard test fails the build if the phrasings
+return).
+
+The non-obvious part is that `gameVersions` arrives in **two shapes and both are
+real**. PML publishes exact lists (`["0.5.0","0.5.1","0.5.2"]`); poly-to-track
+publishes a single semver *range* (`[">=0.6.0 <0.7.0"]`). A naive
+`.includes('0.6.2')` would call the range entry unsupported — it covers 0.6.2 and
+says so **in syntax rather than by listing it** — putting a false "no build"
+warning on the one native mod in the catalog. Every value is therefore tried as
+an exact match first and as a range second, via `satisfies`/`isValidRange`
+re-exported from `@tspml/loader` (the portal has no `semver` dependency; the
+loader's wrapper was already the established seam). Two semantics worth pinning:
+
+- **Prereleases:** semver ranges deliberately exclude them, so `0.6.0-beta1` —
+  a real value in the committed file — only ever matches itself via the
+  equality branch. Both directions are unit-tested.
+- **Unparseable values answer TRUE.** The function's output is a warning, and a
+  version string we cannot read is not evidence that a build is missing; it is
+  evidence that we cannot tell. Warning on it would put a false "no build" on a
+  card whose mod installs fine.
+
+### Advisory, never a gate
+
+`gameVersionNote` warns; `installBlockedReason` still returns `null` for these
+rows. The catalog copies what an index said at curation time; the install reads
+that index **live**, so a stale warning must never become a false block —
+pinned by a test that asserts all three together (note non-null, block null,
+`isInstallable` true).
+
+The note renders above the install button (read *before* the click) on cards and
+the detail page, and the `GAME VERSIONS` facts row gained a derived verdict —
+`0.5.0, 0.5.1, 0.5.2 — none of these is 0.6.2, the version this launcher plays`
+— because the list alone states the problem only to a reader who already knows
+which version they are on.
+
+### The running game, not the launcher default
+
+The in-play browse drawer passes the **running instance's** `gameVersion` through
+to the catalog, so the advisory there is about the game actually on screen —
+installing from the drawer targets that game, so anything else would be a warning
+about a different session. `/browse` and the detail page have no instance in
+hand and fall back to `DEFAULT_GAME_VERSION`, which is the honest reference
+point. Both prop seams are `string | undefined` rather than merely optional:
+`exactOptionalPropertyTypes` distinguishes "may be absent" from "may be
+undefined", and the play page reads the version off an instance that is null
+until the launch resolves.
+
+### What the screenshots caught that the DOM could not
+
+Two layout defects, both invisible to green assertions:
+
+- On the **detail page** the two caveat boxes rendered at different widths —
+  `max-width: 62ch` lives on `.shell-section > .install-box` and the new
+  advisory sits outside it. Two boxes saying comparable things at two different
+  widths reads as a layout bug, not a hierarchy. Fixed.
+- On **cards** the advisory opened a dead gap *above* itself: `.install-box`'s
+  `margin-top: auto` pinned from the button's side, pushing the caveat away from
+  the button it belongs to. The pin moves to the caveat when one is present, and
+  the pair travels to the bottom of the card together. Fixed.
+
+And a shot-script race: the fixed 600 ms wait captured a "Loading…" state — a
+screenshot of a spinner silently passing for a screenshot of the page. `shot:check`
+now waits for the content (`.entry-facts` / `.entry-card`) instead of an
+interval, and gained a third stop: the **positive case** on `/browse/poly-to-track`,
+where the advisory logic could fail quietly. Verified in the browser: **no caveat
+box**, facts row `>=0.6.0 <0.7.0 — covers 0.6.2, the version this launcher
+plays`. The substring-check regression does not happen.
+
+### Proof
+
+Portal suite **688 tests across 27 files** (registry.test.ts 57 → 67: the two
+committed-file guards, the semver-range and prerelease pins, the advisory-never-
+gate triple, and the exact-thirteen-warned check — which also asserts poly-to-
+track is not among them). `tsc --noEmit` clean. `smoke:registry` and `smoke:pml`
+re-run PASS (Catalog, EntryDetail and globals.css all changed since they last
+ran). Repo-wide `pnpm -r test`: **1,301 green** (portal 688, mappings-pipeline
+153, loader 109, api-bridge 92, mappings 76, shared 64, transform 49, wasm 44,
+dev-harness 14, create-tspml-mod 12).

@@ -1242,6 +1242,23 @@ body {
   line-height: 1.5;
 }
 
+/* The PML adapter's per-mod report. A block rather than a line because it is a
+   LIST — every refused call by name — and every other `.warn` on this page is
+   one sentence. The `p` keeps `.warn`'s top margin; the items must not each
+   re-apply it or the list would space itself out like paragraphs. */
+.pml-report > p {
+  margin: 0;
+}
+
+.pml-report ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.pml-report li {
+  margin-top: 3px;
+}
+
 .restart-banner {
   margin-bottom: 12px;
   padding: 10px 12px;
@@ -2059,6 +2076,22 @@ a.btn {
   color: var(--amber);
 }
 
+/*
+  The loader-format chip. A label like the others, so no pointer — but weighted,
+  because it is the one tag on a card that predicts what pressing Install does.
+  Uppercase and tracked rather than colored: amber already means "physics" here,
+  and a second colour that means "different loader" would read as a second
+  warning. PML is not a warning; it is a fact with a caveat attached to it.
+*/
+.tag-format {
+  cursor: default;
+  border-color: var(--border-strong);
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
 .browse-grid {
   list-style: none;
   margin: 0;
@@ -2160,6 +2193,30 @@ a.btn {
   margin-top: 12px;
 }
 
+/* The no-build advisory renders OUTSIDE `.install-box` (it is about the entry,
+   not about the install control), which means it does not inherit that box's
+   `max-width: 62ch` on the detail page. Without this it sets its own width from
+   the section and sits visibly wider than the adapter caveat directly beneath
+   it — two boxes saying comparable things at two different widths, which reads
+   as a layout bug rather than a hierarchy. */
+.shell-section > .install-caveat {
+  max-width: 62ch;
+  margin-top: 12px;
+}
+
+/* In a CARD the advisory is the last thing before `.install-box`, and that box
+   claims the leftover column height with `margin-top: auto`. Pushing from the
+   button's side opened a gap ABOVE the advisory instead of below the summary,
+   so the pin moves here whenever an advisory is present and the pair travels
+   to the bottom of the card together. */
+.entry-card > .install-caveat {
+  margin-top: auto;
+}
+
+.entry-card > .install-caveat + .install-box {
+  margin-top: 0;
+}
+
 .install-actions {
   display: flex;
   gap: 6px;
@@ -2198,6 +2255,22 @@ a.btn {
   margin-top: auto;
   color: var(--green);
   font-size: 12.5px;
+}
+
+/* The PML compatibility caveat. Styled like `.install-blocked` rather than
+   `.install-warn` on purpose: this is a statement of what you are getting, not
+   a danger notice, and it sits next to a working Install button. It also
+   survives the install (it renders under `.install-done` too), so the
+   `margin-top: auto` that pins the done-line to the bottom of a card must not
+   apply here as well or the two would fight for the same slot. */
+.install-caveat {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .entry-detail-head {
@@ -2343,7 +2416,7 @@ a.btn {
   .btn,
   .nav-item,
   .browse-tab,
-  .tag-chip:not(.tag-static):not(.tag-warn),
+  .tag-chip:not(.tag-static):not(.tag-warn):not(.tag-format),
   .stage-btn,
   .docs-link {
     min-height: 40px;

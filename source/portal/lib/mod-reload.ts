@@ -83,6 +83,11 @@ export async function refreshFromSources(
         // must stop patching the binary here too — keeping the old copy would
         // apply constants the current build was never derived against.
         ...(result.mod.physics === undefined ? {} : { physics: result.mod.physics }),
+        // The RE-DETECTED format, not the stored one. A mod that switched
+        // formats upstream must switch here too — and dropping this field
+        // entirely (as this did before PML support landed) silently demoted
+        // every PML record to tspml on the first ⟳ reload.
+        ...(result.mod.format === undefined ? {} : { format: result.mod.format }),
         enabled: mod.enabled,
         addedAt: mod.addedAt,
         sourceUrl: mod.sourceUrl,

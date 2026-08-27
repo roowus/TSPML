@@ -52,7 +52,7 @@ Beyond the CSP `frame-ancestors` directive, PolyTrack performs a **second, in-co
 
 ## Community & existing modding
 
-- **Mod loader:** PolyModLoader (PML) — primary repo on Codeberg (`git.polymodloader.com` / `wiki.polymodloader.com`), GitHub mirror `polytrackmods/PolyModLoader`. See [polymodloader-analysis.md](./polymodloader-analysis.md).
+- **Mod loader:** PolyModLoader (PML) — primary repo on Codeberg (`git.polymodloader.com` / `wiki.polymodloader.com`), GitHub mirror `polytrackmods/PolyModLoader`. TSPML can install and run PML mods through a compatibility adapter; see [PML compatibility](../concepts/pml-compatibility.md).
 - **Mod distribution:** GameBanana (`gamebanana.com/mods/games/20700`), Nexus Mods (nearly empty), Google-Drive mod packs.
 - **Track sharing:** in-game editor + text import codes on `polytrackcodes.com`, GitHub (`K-4410/Polytrack-Tracks`), `polytrack.blog`.
 - **Records/meta:** `polytrack.best`, `speedrun.com/polytrack`.

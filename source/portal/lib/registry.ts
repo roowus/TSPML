@@ -28,6 +28,7 @@
  * and the checks are three comparisons. Mod code runs unsandboxed either way —
  * that disclosure belongs at the install click, not only in the paste form.
  */
+import { isValidRange, satisfies } from '@tspml/loader';
 import { checkImportUrl } from './mod-fetch';
 import type { ModFormatId } from './mod-formats/types';
 import { isSupportedFormat } from './mod-formats';
@@ -56,10 +57,12 @@ export interface RegistrySafety {
 export interface RegistryEntry {
   readonly kind: RegistryKind;
   /**
-   * Which loader format the entry is authored for. Reserved from day one
-   * because storage and catalog schemas are far harder to retrofit than code:
-   * a `pml` entry renders as a named, honest refusal rather than being
-   * installed wrong and failing at runtime with a confusing error.
+   * Which loader format the entry is authored for.
+   *
+   * Load-bearing, not decorative: `useInstall` passes it straight to
+   * `importModFromUrl`, so it decides which walk runs and how the stored code is
+   * later executed. It is also the source of the loader-format tag every entry
+   * shows — see {@link entryTags} for why that is derived rather than written.
    */
   readonly format: ModFormatId;
   readonly id: string;
@@ -67,12 +70,34 @@ export interface RegistryEntry {
   readonly author: string;
   /** One line, plain text. Not markdown — this is rendered as text content. */
   readonly summary: string;
+  /**
+   * Content tags — what the entry DOES. The loader-format tag is not in here
+   * and must not be written into it; {@link entryTags} derives that from
+   * `format`, so the two cannot disagree.
+   */
   readonly tags: readonly string[];
-  readonly source: { readonly type: 'mod-json' | 'modpack-txt'; readonly url: string };
+  /**
+   * Where to fetch it from. `mod-json` is a single manifest URL; `mod-root` is
+   * a DIRECTORY that the format's own walk descends (PML addresses mods this
+   * way, and its whole registry is directory URLs); `modpack-txt` is a list of
+   * mod URLs, one per line.
+   *
+   * The distinction is descriptive, not dispatch: `format` is what chooses the
+   * walk. It exists so a row that is a directory does not have to claim to be a
+   * `mod.json`, which would be a lie in our own catalog file about the one
+   * field a reader would use to guess what lives at the other end.
+   */
+  readonly source: { readonly type: 'mod-json' | 'mod-root' | 'modpack-txt'; readonly url: string };
   readonly icon?: string;
   readonly homepage?: string;
   readonly docs?: string;
-  /** Free-text range, shown not parsed. There is no resolver to feed it to. */
+  /**
+   * Which PolyTrack builds this entry's own index offers, copied from that
+   * index. Two shapes are legitimate and both appear in the committed file: a
+   * list of exact versions (`["0.5.0","0.5.2"]`, how PML publishes) or a single
+   * semver range (`[">=0.6.0 <0.7.0"]`). {@link buildsForGameVersion} is the
+   * only thing that interprets them; everything else shows them.
+   */
   readonly gameVersions: readonly string[];
   readonly safety: RegistrySafety;
   /** Other registry ids this needs. Resolved ONLY through the registry. */
@@ -146,7 +171,9 @@ function parseEntry(v: unknown): RegistryEntry | null {
   if (typeof summary !== 'string') return null;
   if (!isStringArray(tags)) return null;
   if (!isRecord(source)) return null;
-  if (source.type !== 'mod-json' && source.type !== 'modpack-txt') return null;
+  if (source.type !== 'mod-json' && source.type !== 'mod-root' && source.type !== 'modpack-txt') {
+    return null;
+  }
   if (typeof source.url !== 'string' || source.url.length === 0) return null;
   if (!isStringArray(gameVersions)) return null;
   if (!isRecord(safety)) return null;
@@ -255,16 +282,88 @@ export function resolveSourceUrl(entry: RegistryEntry, origin: string): string {
 }
 
 /**
+ * What a player should know BEFORE installing this entry, or null when there is
+ * nothing unusual to say. Advisory: it never blocks.
+ *
+ * Only `pml` has anything to say today. A PML mod installs and runs through the
+ * compatibility adapter in `lib/pml/`, and the parts that carry across (hooks,
+ * keybinds, settings, `getMod`) are not the parts that don't (mixins, raw
+ * physics offsets, `eval`-shaped patching). Saying so at install time is the
+ * whole point: the alternative is a mod that installs cleanly, loads cleanly,
+ * reports success, and does nothing — the silence this project exists to end.
+ * What exactly was refused, for the mod actually in front of you, arrives after
+ * it runs (`ModLoadSummary.pml`); this is the part we can say up front.
+ */
+export function installCaveat(entry: RegistryEntry): string | null {
+  if (entry.format !== 'pml') return null;
+  return 'this mod is packaged for PML and installs through TSPML\'s compatibility adapter. Lifecycle hooks, keybinds and settings carry across; mixins do not — PML patches the game by matching minified identifiers at runtime, TSPML patches structurally against a symbol map, so the two are not interchangeable. Each refused call is reported by name once the mod runs, so a mod whose patching was all mixins will load and visibly do less than it claims.';
+}
+
+/**
+ * Does this entry's own index offer a build for `version`?
+ *
+ * `gameVersions` arrives in two shapes and both are real. PML publishes exact
+ * lists (`["0.5.0","0.5.1","0.5.2"]`); poly-to-track publishes a range
+ * (`">=0.6.0 <0.7.0"`). A `.includes('0.6.2')` would call the range entry
+ * unsupported — it covers 0.6.2 and says so in syntax rather than by listing it
+ * — so every value is tried as an exact match first and as a range second.
+ *
+ * Unparseable values answer TRUE. This function's output is a warning, and a
+ * version string we cannot read is not evidence that a build is missing; it is
+ * evidence that we cannot tell. Warning on it would put a false "no build for
+ * this version" on a card whose mod installs fine, which is worse than staying
+ * quiet — the install path reports the real answer either way, from the index.
+ */
+export function buildsForGameVersion(entry: RegistryEntry, version: string): boolean {
+  return entry.gameVersions.some((v) => {
+    if (v === version) return true;
+    if (!isValidRange(v)) return true;
+    // A bare exact version is also a valid range, and `satisfies` handles it —
+    // but a prerelease target (`0.6.0-beta1`) only ever matches itself, which
+    // the equality above already did.
+    return satisfies(version, v);
+  });
+}
+
+/**
+ * The advisory a card shows when the mod has no build for the version being
+ * played, or null when it does.
+ *
+ * DERIVED from `gameVersions`, never written into the row. The same fact used
+ * to live in each row's `summary` as hand-typed prose, in two different
+ * phrasings ("NO BUILD FOR THIS GAME VERSION" and "its newest build targets
+ * X, not Y") — a second, unenforced copy of `gameVersions` that could disagree
+ * with it the moment either was edited. This is the `entryTags`/`format` rule
+ * applied to the other derivable claim in the file.
+ *
+ * Advisory, not a block: {@link installBlockedReason} still returns null for
+ * these. The install is genuinely attemptable and the mod's own index is the
+ * authority on what it offers. What this buys is that the failure is legible on
+ * the card BEFORE the click, rather than at the button with the player
+ * wondering why.
+ */
+export function gameVersionNote(entry: RegistryEntry, version: string): string | null {
+  if (buildsForGameVersion(entry, version)) return null;
+  const offered = entry.gameVersions.join(', ');
+  return `no build for PolyTrack ${version}. This mod's index offers ${offered}, so installing it will fail with that message rather than silently install a build for another version.`;
+}
+
+/**
  * Why an entry cannot be installed, or null when it can.
  *
  * Returns the REASON rather than a boolean so the UI can say it out loud. A
- * greyed-out button with no explanation is the thing this is designed to avoid:
- * for a `pml` entry the honest answer is specific and worth reading, and for a
- * bad source URL it is a bug in our own catalog.
+ * greyed-out button with no explanation is the thing this is designed to avoid.
+ *
+ * Since PML compatibility landed, format is no longer a reason to refuse: both
+ * `tspml` and `pml` install (see {@link installCaveat} for what a PML install
+ * costs). The check stays because {@link SUPPORTED_FORMATS} is what decides,
+ * not this function — a build that ships a third format id before it ships the
+ * code to run it must refuse by name rather than install a mod nothing can
+ * execute.
  */
 export function installBlockedReason(entry: RegistryEntry, origin: string): string | null {
   if (!isSupportedFormat(entry.format)) {
-    return 'this mod is packaged for PML, which TSPML cannot load yet. PML mods patch the game by matching minified identifiers at runtime; TSPML patches structurally against a symbol map, so the two are not interchangeable. Compatibility is planned, and will be partial and clearly labelled when it lands.';
+    return `this entry is packaged for '${entry.format}', which this build cannot load.`;
   }
   // The curated file gets NO exemption from the URL policy. It is ours today;
   // the seam exists so it may not be tomorrow, and this is three comparisons.
@@ -300,11 +399,44 @@ export function resolveDependencies(
   return { resolved, missing };
 }
 
-/** Every tag in the catalog, deduped and sorted — the filter row's vocabulary. */
+/**
+ * Every tag an entry shows: its loader format first, then its content tags.
+ *
+ * The format tag is DERIVED rather than written into each row's `tags` array,
+ * and that is the whole design. `format` already decides which walk installs the
+ * entry and how its code is later executed; a hand-written `"pml"` in `tags`
+ * would be a second, unenforced copy of that fact, and the two would drift on
+ * the first row someone edits in a hurry. Deriving it means the chip a player
+ * filters by and the code path that actually runs are the same field.
+ *
+ * It sorts first because it is a different KIND of fact from the rest — `ui` and
+ * `car` describe what a mod does, `pml` describes what will happen when you
+ * press Install. Grouping it in alphabetically among the content tags would bury
+ * the one tag with consequences.
+ */
+export function entryTags(entry: RegistryEntry): string[] {
+  // Deduped: a row that also hand-wrote its format must not render two chips
+  // whose keys collide. Dropping the duplicate is right — the derived one is
+  // the authoritative copy either way.
+  return [entry.format, ...entry.tags.filter((t) => t !== entry.format)];
+}
+
+/**
+ * Every tag in the catalog, deduped and sorted — the filter row's vocabulary.
+ *
+ * Format tags lead, so `pml` and `tspml` sit together at the front of the row
+ * rather than being scattered through the content tags. Both are real filters:
+ * "show me only what runs natively" is a question a player has, and the answer
+ * changes what installing costs them.
+ */
 export function registryTags(entries: readonly RegistryEntry[]): string[] {
-  const tags = new Set<string>();
-  for (const e of entries) for (const t of e.tags) tags.add(t);
-  return [...tags].sort();
+  const formats = new Set<string>();
+  const content = new Set<string>();
+  for (const e of entries) {
+    formats.add(e.format);
+    for (const t of e.tags) if (t !== e.format) content.add(t);
+  }
+  return [...[...formats].sort(), ...[...content].sort()];
 }
 
 /**
@@ -312,6 +444,11 @@ export function registryTags(entries: readonly RegistryEntry[]): string[] {
  * every term must match somewhere. Not ranked — with tens of entries a relevance
  * score would be theatre, and an unranked list that is obviously complete beats
  * a ranked one whose ordering nobody can explain.
+ *
+ * Both the filter and the haystack read {@link entryTags}, not `tags`, so the
+ * format chips in the filter row are chips that actually filter and typing
+ * "pml" finds the PML mods. A chip that is rendered but not matchable is worse
+ * than no chip: it looks like a control and behaves like decoration.
  */
 export function searchRegistry(
   entries: readonly RegistryEntry[],
@@ -320,9 +457,10 @@ export function searchRegistry(
 ): RegistryEntry[] {
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
   return entries.filter((e) => {
-    if (tag !== null && !e.tags.includes(tag)) return false;
+    const tags = entryTags(e);
+    if (tag !== null && !tags.includes(tag)) return false;
     if (terms.length === 0) return true;
-    const hay = `${e.name} ${e.author} ${e.summary} ${e.tags.join(' ')} ${e.id}`.toLowerCase();
+    const hay = `${e.name} ${e.author} ${e.summary} ${tags.join(' ')} ${e.id}`.toLowerCase();
     return terms.every((t) => hay.includes(t));
   });
 }
