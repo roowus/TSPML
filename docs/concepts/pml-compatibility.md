@@ -227,7 +227,7 @@ exactly the PML entries and `tspml` to exactly the native ones. Both directions
 are asserted in a browser (`smoke:registry`, leg 2b), because a chip that
 filtered one way and left the other alone would look like a working control.
 
-Three things about the mirror are worth stating, since they are choices and not
+Four things about the mirror are worth stating, since they are choices and not
 mechanics:
 
 - **The data is PML's, the descriptions are ours.** Names, authors, tags and
@@ -250,6 +250,21 @@ mechanics:
 - **Every PML row is a `mod-root`**, the third `source.type`. PML addresses all
   of its mods as a directory with no trailing slash; a row that had to call
   itself a `mod-json` to be accepted would be lying about what lives there.
+- **Every row carries an icon**, from the `icon.png` PML's authors ship inside
+  each version directory. The URL points at the row's newest version that has
+  one — committed per row rather than derived from the live index, because the
+  catalog is a copy and a derived "latest" would rot the day a version ships
+  without an icon. The icons are dark line art on transparency, drawn for a
+  light UI, so the portal renders them on a light tile.
+
+### People are filter chips too
+
+The person chips are **derived from the `author` byline** (`entryPersons()`
+splits "Cwcinc + Jakob + Orangy" into three names), the same
+single-source rule as the format chip: a hand-written copy in `tags` could
+disagree with the byline on the first row someone edits. Selecting *Orangy*
+narrows the grid to exactly that person's ten rows — solo work plus
+collaborations — asserted in a browser (`smoke:registry`, leg 2c).
 
 [modlist]: https://raw.githubusercontent.com/polytrackmods/PolyLibrary/refs/heads/main/modlist.json
 

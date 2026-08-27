@@ -23,6 +23,11 @@
 //                 which is the field that decides which import walk runs, so a
 //                 chip that rendered without filtering would be a control in
 //                 appearance and decoration in behaviour;
+//   2c. person  — the person chips (derived from the `author` byline, split on
+//                 its separators) filter by WHO across collaborations: Orangy's
+//                 chip narrows the grid to exactly their ten rows — six solo
+//                 and four collaborations — and excludes a mod they had no
+//                 hand in. A whole-byline chip would only ever match the trio;
 //   3. tabs     — the Modpacks tab shows NO entries (the catalog has no packs
 //                 right now) and NOT the mod, so the two content types are
 //                 actually separated;
@@ -170,6 +175,30 @@ out.allChipRestores = await waitFor(
   10000,
 );
 
+// ---- 2c. A person chip filters by WHO, across collaborations -----------------
+// Orangy is the densest byline in the data: solo rows plus four collaborations
+// that also name other people. The chip must catch all ten (a whole-byline
+// chip would only ever match the exact trio) and must NOT catch a row Orangy
+// had nothing to do with.
+step("person chip filters across collaborations");
+await chip("Orangy").click();
+await page.waitForTimeout(400);
+// The TOTAL is what proves the filter ran: counting only cards that mention
+// Orangy would return 10 before the chip did anything, because those same ten
+// bylines are what the filter is derived from. Six solo rows plus four
+// collaborations, every one of them still mentioning Orangy, and none of them
+// a mod Orangy had nothing to do with.
+const filtered = page.locator(".entry-card");
+out.personChipNarrowsToTen = (await filtered.count()) === 10;
+out.personChipKeepsCollaborations = (await filtered.filter({ hasText: "Orangy" }).count()) === 10;
+out.personChipExcludesOthers = !(await filtered.filter({ hasText: "Poly Library" }).count());
+await page.locator(".tag-row button").filter({ hasText: /^All$/ }).click();
+out.personChipRestores = await waitFor(
+  (name) => document.body.innerText.includes(name),
+  "Poly Library",
+  10000,
+);
+
 // ---- 3. Tabs separate mods from modpacks ------------------------------------
 // The catalog currently holds no packs (the sample pack was removed from the
 // listing — it is a smoke fixture, not player content), so the honest
@@ -279,6 +308,10 @@ const PASS =
   out.pmlChipHidesNative === true &&
   out.tspmlChipHidesPml === true &&
   out.allChipRestores === true &&
+  out.personChipNarrowsToTen === true &&
+  out.personChipKeepsCollaborations === true &&
+  out.personChipExcludesOthers === true &&
+  out.personChipRestores === true &&
   out.packTabHidesMods === true &&
   out.packTabEmptyState === true &&
   out.detailShowsEntry === true &&
@@ -301,6 +334,14 @@ console.log(
         // Both directions, or the chip is decoration. See leg 2b.
         formatChipsFilter:
           (out.pmlChipHidesNative && out.tspmlChipHidesPml && out.allChipRestores) ?? false,
+        // Across collaborations, or the chip answers "who exactly" instead of
+        // "who". See leg 2c.
+        personChipsFilter:
+          (out.personChipNarrowsToTen &&
+            out.personChipKeepsCollaborations &&
+            out.personChipExcludesOthers &&
+            out.personChipRestores) ??
+          false,
         // Reads what the run actually measured. This line used to name an
         // `out.packTabShowsPack` that nothing assigned, so it reported `false`
         // on every green run — the catalog has held no modpacks since the
