@@ -28,8 +28,13 @@ await page.waitForSelector('.entry-card:not(.inst-card-skeleton)', { timeout: 15
 await page
   .waitForFunction(
     () => {
-      const imgs = [...document.querySelectorAll('img.entry-tile')];
-      return imgs.length > 0 && imgs.every((i) => i.complete);
+      // Cast because the compound selector defeats querySelectorAll's
+      // tag-name inference, and `complete`/`naturalWidth` live on
+      // HTMLImageElement, not Element. Same JSDoc pattern smoke-pml uses.
+      const imgs = /** @type {NodeListOf<HTMLImageElement>} */ (
+        document.querySelectorAll('img.entry-tile')
+      );
+      return imgs.length > 0 && Array.from(imgs).every((i) => i.complete);
     },
     undefined,
     { timeout: 15000 },
@@ -37,10 +42,12 @@ await page
   .catch(() => {});
 console.log(
   'icon imgs loaded:',
-  await page.evaluate(
-    () =>
-      `${[...document.querySelectorAll('img.entry-tile')].filter((i) => i.naturalWidth > 0).length}/${document.querySelectorAll('img.entry-tile').length}`,
-  ),
+  await page.evaluate(() => {
+    const tiles = /** @type {NodeListOf<HTMLImageElement>} */ (
+      document.querySelectorAll('img.entry-tile')
+    );
+    return `${Array.from(tiles).filter((i) => i.naturalWidth > 0).length}/${tiles.length}`;
+  }),
 );
 // The light-backdrop rule is the difference between "loaded" and "visible":
 // the authors' icons are dark art on transparency, so a dark tile background
