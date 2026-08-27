@@ -2,8 +2,8 @@
  * Two jobs, and the second is the one that earns its keep in CI:
  *
  *  1. `lib/registry.ts` behaves — malformed rows are dropped, author URLs are
- *     sanitized, a `pml` entry is refused BY NAME, dependencies resolve only
- *     through the catalog.
+ *     sanitized, a `pml` entry installs but says what it costs, dependencies
+ *     resolve only through the catalog.
  *  2. The COMMITTED `public/registry/index.json` is valid. A catalog is data,
  *     and data is exactly the thing that gets edited by someone who will not
  *     run the app afterwards. A typo'd `format` or a dropped `source.url`
@@ -12,9 +12,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_GAME_VERSION } from '../lib/game-versions';
 import {
+  buildsForGameVersion,
+  entryTags,
+  gameVersionNote,
   getRegistryEntry,
   installBlockedReason,
+  installCaveat,
   isInstallable,
   listRegistry,
   parseRegistry,
@@ -99,6 +104,16 @@ describe('parseRegistry', () => {
     delete e.dependencies;
     expect(parsed(e).entries[0]?.dependencies).toEqual([]);
   });
+
+  it('accepts a mod-root source, which is how PML addresses every one of its mods', () => {
+    // Not a cosmetic third enum value: PML's whole registry is directory URLs
+    // with no trailing slash, and a row that had to call itself a `mod-json` to
+    // be accepted would be lying in our own catalog about what lives there.
+    const r = parsed(
+      entry({ format: 'pml', source: { type: 'mod-root', url: 'https://cdn.example/gh/o/r/main/m' } }),
+    );
+    expect(r.entries[0]?.source.type).toBe('mod-root');
+  });
 });
 
 describe('author-supplied URL sanitizing', () => {
@@ -150,14 +165,13 @@ describe('installBlockedReason', () => {
     expect(isInstallable(e, ORIGIN)).toBe(true);
   });
 
-  it('refuses a pml entry BY NAME rather than letting it fail at load time', () => {
+  it('allows a pml entry — format is no longer a reason to refuse', () => {
+    // PML entries install through the compatibility adapter. What they cost is
+    // said by `installCaveat`, not by blocking the button: a refusal would be
+    // the wrong answer now that the mod runs.
     const e = parsed(entry({ format: 'pml' })).entries[0] as RegistryEntry;
-    const why = installBlockedReason(e, ORIGIN);
-    expect(why).toContain('PML');
-    // The refusal has to explain itself; a greyed button with no reason is the
-    // failure mode this whole function exists to avoid.
-    expect(why).toContain('symbol map');
-    expect(isInstallable(e, ORIGIN)).toBe(false);
+    expect(installBlockedReason(e, ORIGIN)).toBeNull();
+    expect(isInstallable(e, ORIGIN)).toBe(true);
   });
 
   it('applies checkImportUrl to curated entries — a curated file is not a trust upgrade', () => {
@@ -170,6 +184,95 @@ describe('installBlockedReason', () => {
     const e = parsed(entry({ source: { type: 'mod-json', url: 'https://kodub.com/m.json' } }))
       .entries[0] as RegistryEntry;
     expect(installBlockedReason(e, ORIGIN)).toContain('kodub.com');
+  });
+
+  it('still refuses a pml entry whose URL fails the host rules', () => {
+    // The two checks are independent, and the format one passing must not
+    // shortcut the URL one — the curated file gets no exemption either way.
+    const e = parsed(entry({ format: 'pml', source: { type: 'mod-json', url: 'https://kodub.com/m.json' } }))
+      .entries[0] as RegistryEntry;
+    expect(installBlockedReason(e, ORIGIN)).toContain('kodub.com');
+  });
+});
+
+describe('installCaveat', () => {
+  it('says what a PML install costs, next to a button that still works', () => {
+    // The advisory a blocked entry used to carry. It has to explain itself for
+    // the same reason the refusal did — "half of this mod's patching will be
+    // refused" is a fact about what you are getting, and a player who reads it
+    // only after installing has already been misled about what they installed.
+    const e = parsed(entry({ format: 'pml' })).entries[0] as RegistryEntry;
+    const caveat = installCaveat(e);
+    expect(caveat).toContain('PML');
+    expect(caveat).toContain('symbol map');
+    expect(caveat).toContain('mixins');
+  });
+
+  it('has nothing to say about a tspml entry', () => {
+    expect(installCaveat(parsed(entry()).entries[0] as RegistryEntry)).toBeNull();
+  });
+});
+
+describe('buildsForGameVersion', () => {
+  const at = (versions: string[], v = '0.6.2'): boolean =>
+    buildsForGameVersion(parsed(entry({ gameVersions: versions })).entries[0] as RegistryEntry, v);
+
+  it('matches an exact version in the list, which is how PML publishes', () => {
+    expect(at(['0.6.0', '0.6.2'])).toBe(true);
+    expect(at(['0.5.0', '0.5.1', '0.5.2'])).toBe(false);
+  });
+
+  it('honours a semver RANGE, which a naive includes() would call unsupported', () => {
+    // The regression this function exists for. poly-to-track ships the range
+    // form, covers 0.6.2 by syntax rather than by listing it, and a substring
+    // check would have put a false "no build" warning on the one native mod in
+    // the catalog.
+    expect(at(['>=0.6.0 <0.7.0'])).toBe(true);
+    expect(at(['>=0.7.0'])).toBe(false);
+    expect(at(['^0.5.0'])).toBe(false);
+  });
+
+  it('does not let a prerelease target stand in for the release', () => {
+    // 0.6.0-beta1 is a real value in the committed file. Semver deliberately
+    // excludes prereleases from ranges, and an exact match is the only way it
+    // should ever count — for itself, not for 0.6.0 or 0.6.2.
+    expect(at(['0.6.0-beta1'])).toBe(false);
+    expect(at(['0.6.0-beta1'], '0.6.0-beta1')).toBe(true);
+  });
+
+  it('stays quiet on a version string it cannot parse', () => {
+    // Not evidence of a missing build — evidence that we cannot tell. Warning
+    // here would print "no build for 0.6.2" on a mod that installs fine.
+    expect(at(['whatever the author wrote'])).toBe(true);
+  });
+
+  it('needs only one of several values to match', () => {
+    expect(at(['0.5.0', 'nonsense', '0.6.2'])).toBe(true);
+  });
+});
+
+describe('gameVersionNote', () => {
+  it('names the version, and lists what the mod does offer', () => {
+    const e = parsed(entry({ gameVersions: ['0.5.0', '0.5.2'] })).entries[0] as RegistryEntry;
+    const note = gameVersionNote(e, DEFAULT_GAME_VERSION);
+    expect(note).toContain(DEFAULT_GAME_VERSION);
+    expect(note).toContain('0.5.0, 0.5.2');
+  });
+
+  it('is silent when there is a build, rather than saying so', () => {
+    const e = parsed(entry({ gameVersions: ['0.6.2'] })).entries[0] as RegistryEntry;
+    expect(gameVersionNote(e, DEFAULT_GAME_VERSION)).toBeNull();
+  });
+
+  it('never blocks the install — the mod index is the authority', () => {
+    // Advisory and gate are deliberately separate. The catalog copies what an
+    // index said at curation time; the install reads that index live, and if
+    // the author has since published a build the install should succeed while
+    // this warning is merely stale.
+    const e = parsed(entry({ gameVersions: ['0.5.0'] })).entries[0] as RegistryEntry;
+    expect(gameVersionNote(e, DEFAULT_GAME_VERSION)).not.toBeNull();
+    expect(installBlockedReason(e, ORIGIN)).toBeNull();
+    expect(isInstallable(e, ORIGIN)).toBe(true);
   });
 });
 
@@ -186,6 +289,28 @@ describe('resolveDependencies', () => {
     const r = parsed(entry({ id: 'main', dependencies: ['nope'] }));
     const main = getRegistryEntry(r, 'main') as RegistryEntry;
     expect(resolveDependencies(r, main).missing).toEqual(['nope']);
+  });
+});
+
+describe('entryTags', () => {
+  it('leads with the loader format, then the content tags', () => {
+    const e = parsed(entry({ format: 'pml', tags: ['ui', 'car'] })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['pml', 'ui', 'car']);
+  });
+
+  it('derives the format tag rather than trusting a hand-written one', () => {
+    // The point of deriving: `format` is what `useInstall` passes to the
+    // importer, so a row whose `tags` disagreed with it would render a chip
+    // that contradicts the code path that actually runs.
+    const e = parsed(entry({ format: 'tspml', tags: ['pml'] })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['tspml', 'pml']);
+  });
+
+  it('renders one chip when a row also hand-wrote its own format', () => {
+    // Duplicate keys in the chip loop would be a React warning at best and a
+    // dropped chip at worst. The derived copy is the authoritative one.
+    const e = parsed(entry({ format: 'pml', tags: ['pml', 'ui'] })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['pml', 'ui']);
   });
 });
 
@@ -216,8 +341,31 @@ describe('searchRegistry', () => {
     expect(searchRegistry(r.entries, 'grip', 'hud')).toHaveLength(0);
   });
 
-  it('collects tags deduped and sorted', () => {
-    expect(registryTags(r.entries)).toEqual(['hud', 'physics']);
+  it('filters by loader format exactly, because that chip is a real filter', () => {
+    // The chip row renders `pml` and `tspml`; selecting one has to narrow to
+    // exactly that set, or the chip is a control in appearance and decoration
+    // in behaviour. Tag filtering is an equality test on entryTags, so it is.
+    const mixed = parsed(entry({ id: 'native' }), entry({ id: 'adapted', format: 'pml' }));
+    expect(searchRegistry(mixed.entries, '', 'pml').map((e) => e.id)).toEqual(['adapted']);
+    expect(searchRegistry(mixed.entries, '', 'tspml').map((e) => e.id)).toEqual(['native']);
+  });
+
+  it('matches the format tag as a substring in free text, "pml" included', () => {
+    // Typing "pml" also matches `tspml`, and that is the documented behaviour
+    // of every term here rather than a format-specific quirk: substring, no
+    // ranking. Asserted so the looseness is a decision on record and not a
+    // surprise the day someone wonders why both cards came back.
+    const mixed = parsed(entry({ id: 'native' }), entry({ id: 'adapted', format: 'pml' }));
+    expect(searchRegistry(mixed.entries, 'pml', null).map((e) => e.id)).toEqual(['native', 'adapted']);
+    expect(searchRegistry(mixed.entries, 'tspml', null).map((e) => e.id)).toEqual(['native']);
+  });
+
+  it('collects tags deduped and sorted, formats first', () => {
+    // Formats lead so `pml` and `tspml` sit together at the head of the filter
+    // row rather than being scattered alphabetically among the content tags.
+    expect(registryTags(r.entries)).toEqual(['tspml', 'hud', 'physics']);
+    const mixed = parsed(entry({ tags: ['ui'] }), entry({ id: 'b', format: 'pml', tags: ['car'] }));
+    expect(registryTags(mixed.entries)).toEqual(['pml', 'tspml', 'car', 'ui']);
   });
 });
 
@@ -283,10 +431,94 @@ describe('the committed public/registry/index.json', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('points modpack entries at a .txt and mod entries at a mod.json', () => {
+  it('points modpack entries at a .txt, and mod entries at a manifest or a root', () => {
+    // Mods are addressed two ways and both are legitimate: a `mod.json` URL, or
+    // a directory the format's own walk descends. PML uses the latter for every
+    // mod it publishes. Modpacks stay a single shape — a list file is a list
+    // file, and there is no directory form of one to allow.
     if (!result.ok) throw new Error('did not parse');
     for (const e of result.registry.entries) {
-      expect(e.source.type).toBe(e.kind === 'modpack' ? 'modpack-txt' : 'mod-json');
+      if (e.kind === 'modpack') expect(e.source.type).toBe('modpack-txt');
+      else expect(['mod-json', 'mod-root']).toContain(e.source.type);
+    }
+  });
+
+  it('never hand-writes a loader format into a row\'s content tags', () => {
+    // entryTags dedupes, so a stray one would not render twice — it would just
+    // sit in the file as a second, unenforced copy of `format`, waiting to
+    // disagree with it. Catching it here keeps `format` the single source.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.tags).not.toContain('pml');
+      expect(e.tags).not.toContain('tspml');
+    }
+  });
+
+  it('never hand-writes the no-build warning into a summary', () => {
+    // Same rule as the format tag, for the other derivable claim in this file.
+    // These rows USED to carry the fact as prose, in two different phrasings
+    // ("NO BUILD FOR THIS GAME VERSION" and "its newest build targets X, not
+    // Y") — a second copy of `gameVersions` that could disagree with it the
+    // moment either was edited, and did not even agree with itself on wording.
+    // gameVersionNote derives it now; a row restating it would be that copy
+    // coming back.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.summary).not.toMatch(/no build for/i);
+      expect(e.summary).not.toMatch(/not 0\.\d/);
+      expect(e.summary).not.toMatch(/newest build targets/i);
+    }
+  });
+
+  it('warns on exactly the entries whose index lacks a build for the played version', () => {
+    // The count is asserted rather than just the predicate because the whole
+    // point of deriving is that this number tracks the file. Thirteen of the
+    // twenty-one rows stop before 0.6.2; poly-to-track's RANGE covers it and
+    // must not be miscounted among them.
+    if (!result.ok) throw new Error('did not parse');
+    const warned = result.registry.entries.filter(
+      (e) => gameVersionNote(e, DEFAULT_GAME_VERSION) !== null,
+    );
+    expect(warned.length).toBe(13);
+    for (const e of warned) {
+      expect(e.gameVersions).not.toContain(DEFAULT_GAME_VERSION);
+    }
+  });
+
+  it('declares dependencies only on ids the catalog actually lists', () => {
+    // A missing dep renders as a named warning rather than breaking the page,
+    // which is right for a third-party id — but inside our OWN file it means a
+    // typo, and a typo should fail the build instead of shipping the warning.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(resolveDependencies(result.registry, e).missing).toEqual([]);
+    }
+  });
+
+  it('gives every entry at least one game version to show', () => {
+    // Shown, not parsed — but an empty list renders as an empty fact row, and
+    // "we do not know" is not something this catalog is ever entitled to say:
+    // the value comes from the mod's own index.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.gameVersions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('routes every pml entry through a mod-root, which is how PML publishes', () => {
+    if (!result.ok) throw new Error('did not parse');
+    const pml = result.registry.entries.filter((e) => e.format === 'pml');
+    expect(pml.length).toBeGreaterThan(0);
+    for (const e of pml) expect(e.source.type).toBe('mod-root');
+  });
+
+  it('lists none of the smoke fixtures, which are not content for players', () => {
+    // /sample-mod and friends exist so the Playwright smokes have same-origin
+    // URLs that cannot rot with someone else's repo. Advertising demo content
+    // in the catalog would be the failure mode this guards.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.source.url).not.toContain('/sample-');
     }
   });
 });

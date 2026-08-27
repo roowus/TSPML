@@ -168,6 +168,15 @@ jobs:
       - name: smoke — runtime user mods (add / mixins #62 / persist / disable / remove)
         run: pnpm --filter @tspml/portal smoke:usermods
 
+      # PML compatibility, end to end: a mod in PolyModLoader's own three-file
+      # CDN layout, imported by URL with no format stated (the dispatcher sniffs
+      # it), through the walk + import rewrite + adapter. The load-bearing pair
+      # is the last two assertions — the mod's mixin is refused BY NAME while
+      # the mod stays LOADED. Nothing cheaper can prove "refuse per call, don't
+      # abort the mod", which is the whole compatibility contract.
+      - name: smoke — PML mods install and run (walk / hooks / keybind / mixin refused)
+        run: pnpm --filter @tspml/portal smoke:pml
+
       # The launcher's reason to exist: a player who never types a URL. Follows
       # one catalog entry from /browse through the confirm step into a LOADED mod
       # on /play, because an install that writes a record the play page ignores

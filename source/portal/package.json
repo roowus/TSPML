@@ -13,6 +13,7 @@
     "smoke:tracks": "node scripts/smoke-tracks.mjs",
     "smoke:audio": "node scripts/smoke-audio.mjs",
     "smoke:usermods": "node scripts/smoke-user-mods.mjs",
+    "smoke:pml": "node scripts/smoke-pml.mjs",
     "smoke:ui": "node scripts/smoke-ui.mjs",
     "smoke:hydration": "node scripts/smoke-hydration.mjs",
     "shot:check": "node scripts/shot-check.mjs",

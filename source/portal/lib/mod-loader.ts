@@ -19,10 +19,18 @@ import { TSPML_API_VERSION, TSPML_LOADER_VERSION } from '@tspml/shared';
 import type { UserModRecord } from './user-mods';
 import { importFromSource, USER_ENTRY_PREFIX, userEntrySpecifier, userModId } from './user-mods';
 import { mixinEnvironmentAppliesToHost, PORTAL_HOST_ENVIRONMENT } from './mixin-env';
+import { clearPmlSession, importPmlMod, pmlReports } from './pml/run';
+import type { PmlModReport } from './pml/shim';
 
 export interface ModSafetyEntry {
   readonly id: string;
   readonly report: SafetyReport;
+}
+
+/** One PML mod's compatibility report — see {@link ModLoadSummary.pml}. */
+export interface PmlModEntry {
+  readonly id: string;
+  readonly report: PmlModReport;
 }
 
 export interface ModLoadSummary {
@@ -49,6 +57,15 @@ export interface ModLoadSummary {
    * physics patch did nothing" — the exact silence this project exists to end.
    */
   readonly physicsSkipped: readonly string[];
+  /**
+   * What the PML compatibility adapter could not do, per PML mod that loaded.
+   *
+   * Empty for every session with no PML mods, which is most of them. It is on
+   * the summary rather than only in the console for the same reason
+   * `mixinsSkipped` is: a mod whose mixins were all refused LOADS, reports
+   * success, and does nothing — the exact silence this project exists to end.
+   */
+  readonly pml: readonly PmlModEntry[];
   /**
    * Tear down every loaded mod, in reverse load order (#17). Idempotent.
    * The caller emits `loader.onUnload` around this — the loader itself has no
@@ -98,7 +115,17 @@ export const PORTAL_RESOLVE_CONTEXT: ResolveContext = {
  */
 export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Promise<ModLoadSummary> {
   const userMods = (options.userMods ?? []).filter((m) => m.enabled);
-  const importUserMod = options.importUserMod ?? ((record: UserModRecord) => importFromSource(record.code));
+  // The one place the two formats diverge at EXECUTION. A PML record's code is
+  // not an ES module with a default export — it exports a named `polyMod` and
+  // expects a `pml` object — so it goes through the adapter, which hands back a
+  // synthetic module the loader drives exactly like any other (see lib/pml/run.ts).
+  // A missing `format` means `tspml`: that is every record written before the
+  // field existed, and defaulting the other way would try to read `polyMod` off
+  // every mod in the store.
+  const importUserMod =
+    options.importUserMod ??
+    ((record: UserModRecord) =>
+      record.format === 'pml' ? importPmlMod(record, api) : importFromSource(record.code));
   const context = options.context ?? PORTAL_RESOLVE_CONTEXT;
 
   // Every user mod is addressed as `user:<id>`.
@@ -229,12 +256,24 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
     }
   }
 
+  // Read AFTER load(): the adapter fills a mod's report while its module is
+  // imported and its hooks run, so reading earlier would report every PML mod
+  // as having had nothing to say.
+  const pml: PmlModEntry[] = [];
+  for (const [id, report] of pmlReports(api)) {
+    // Only mods that survived to `loaded` — a mod that failed is already in
+    // `failed` with the loader's reason, and listing its refusals next to that
+    // reads as if the refusals were the cause.
+    if (loaded.includes(id)) pml.push({ id, report });
+  }
+
   return {
     loaded,
     failed,
     safety,
     mixinsSkipped,
     physicsSkipped,
+    pml,
     unload: async () => {
       const un = await result.unload();
       for (const [id, s] of Object.entries(un.status)) {
@@ -242,6 +281,10 @@ export async function loadMods(api: TspmlApi, options: LoadModsOptions = {}): Pr
         // still a leak the author needs to see — don't swallow it.
         if (s.status === 'failed') api.logger.error(`[tspml] mod '${id}' failed to unload: ${s.reason}`);
       }
+      // The adapter's per-session state dies with the mods it describes. A
+      // reload builds a fresh set; keeping the old reports would show the UI
+      // refusals from mods that are no longer loaded.
+      clearPmlSession(api);
     },
   };
 }

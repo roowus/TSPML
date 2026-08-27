@@ -51,6 +51,30 @@ declare global {
      * not tell "never ran" from "ran and set false".
      */
     __smokeOverlayRuns?: number;
+    /**
+     * Smoke scratch: the PML lifecycle phases the fixture PML mod
+     * (`/sample-pml-mod`) has run, in order. An array (not a flag) because
+     * smoke-pml asserts the ORDER — preInit, init, postInit, onGameLoad — and
+     * a "they all ran" flag could not catch two hooks firing swapped.
+     */
+    __smokePmlPhases?: string[];
+    /** Smoke scratch: the fixture PML mod's `id/name/version` string from `init`. */
+    __smokePmlIdentity?: string;
+    /** Smoke scratch: fire count of the fixture PML mod's `KeyJ` keybind. */
+    __smokePmlKey?: number;
+    /**
+     * Smoke scratch: the fixture PML mod's setting read back from
+     * `pml.getSetting`. Deliberately `string | boolean` — PML's `getSetting`
+     * wart is that a bool set through its settings API reads back as the STRING
+     * `"true"`, and the leg exists to pin exactly that, so a `boolean`-only type
+     * would assume away the behaviour under test.
+     */
+    __smokePmlSetting?: string | boolean;
+    /**
+     * Smoke scratch: set only if the fixture PML mod's code ran PAST its refused
+     * `registerClassMixin` call — the refusal must return, not throw.
+     */
+    __smokePmlSurvivedMixin?: boolean;
   }
 }
 

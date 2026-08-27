@@ -29,7 +29,8 @@
  */
 import type { FetchLike, ProbedBody } from '../mod-fetch';
 
-/** The formats the import path knows about. Only `tspml` is installable. */
+/** The formats the import path knows about. `tspml` is native; `pml` installs
+ *  through the compatibility adapter in `lib/pml/`, partially and labelled. */
 export type ModFormatId = 'tspml' | 'pml';
 
 export interface ImportedMod {
@@ -41,6 +42,17 @@ export interface ImportedMod {
   readonly physics?: Record<string, unknown>;
   /** Human note about non-obvious handling (e.g. "manifest synthesized"). */
   readonly note?: string;
+  /**
+   * Which format actually produced this mod — the value that must reach the
+   * stored `UserModRecord.format`, because it is what decides how the code is
+   * EXECUTED later (default export vs. `polyMod` + adapter).
+   *
+   * Stamped by the dispatcher from the format's own `id` rather than written by
+   * each format, so a format cannot forget it and quietly have its mods run
+   * down the wrong path. Absent only if a format result somehow bypasses
+   * `dispatchImport`, which callers should treat as `tspml`.
+   */
+  readonly format?: ModFormatId;
 }
 
 export type ImportResult =
