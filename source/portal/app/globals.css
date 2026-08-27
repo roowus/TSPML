@@ -2092,6 +2092,19 @@ a.btn {
   font-size: 11px;
 }
 
+/*
+  A person chip. A label like the others, italic rather than coloured or
+  cased: a byline is attribution, not a category, and italics is the one
+  treatment that says "name" without implying weight (the format chip) or
+  warning (physics). Same text as the filter chip it matches, so the two read
+  as the same facet from either end.
+*/
+.tag-person {
+  cursor: default;
+  font-style: italic;
+  border-style: dashed;
+}
+
 .browse-grid {
   list-style: none;
   margin: 0;
@@ -2144,6 +2157,18 @@ a.btn {
   width: 48px;
   height: 48px;
   font-size: 20px;
+}
+
+/*
+  A tile showing an IMAGE gets a light backdrop, unlike the letter tiles'
+  `--panel-deep`. The authors' icons are mostly dark line art on transparency
+  (PML's whole registry ships black-on-transparent PNGs, drawn for a light UI),
+  and dark art on the dark panel paints as a blank square — loaded, decoded,
+  invisible. The light chip reads as "app icon on a tile" and keeps ANY icon
+  legible regardless of the palette it was drawn for.
+*/
+img.entry-tile {
+  background: #f2f2f3;
 }
 
 .entry-title {
@@ -2416,7 +2441,7 @@ a.btn {
   .btn,
   .nav-item,
   .browse-tab,
-  .tag-chip:not(.tag-static):not(.tag-warn):not(.tag-format),
+  .tag-chip:not(.tag-static):not(.tag-warn):not(.tag-format):not(.tag-person),
   .stage-btn,
   .docs-link {
     min-height: 40px;

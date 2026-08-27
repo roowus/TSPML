@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_GAME_VERSION } from '../lib/game-versions';
 import {
   buildsForGameVersion,
+  entryPersons,
   entryTags,
   gameVersionNote,
   getRegistryEntry,
@@ -293,9 +294,9 @@ describe('resolveDependencies', () => {
 });
 
 describe('entryTags', () => {
-  it('leads with the loader format, then the content tags', () => {
+  it('leads with the loader format, then the content tags, then the people', () => {
     const e = parsed(entry({ format: 'pml', tags: ['ui', 'car'] })).entries[0] as RegistryEntry;
-    expect(entryTags(e)).toEqual(['pml', 'ui', 'car']);
+    expect(entryTags(e)).toEqual(['pml', 'ui', 'car', 'someone']);
   });
 
   it('derives the format tag rather than trusting a hand-written one', () => {
@@ -303,14 +304,49 @@ describe('entryTags', () => {
     // importer, so a row whose `tags` disagreed with it would render a chip
     // that contradicts the code path that actually runs.
     const e = parsed(entry({ format: 'tspml', tags: ['pml'] })).entries[0] as RegistryEntry;
-    expect(entryTags(e)).toEqual(['tspml', 'pml']);
+    expect(entryTags(e)).toEqual(['tspml', 'pml', 'someone']);
   });
 
   it('renders one chip when a row also hand-wrote its own format', () => {
     // Duplicate keys in the chip loop would be a React warning at best and a
     // dropped chip at worst. The derived copy is the authoritative one.
     const e = parsed(entry({ format: 'pml', tags: ['pml', 'ui'] })).entries[0] as RegistryEntry;
-    expect(entryTags(e)).toEqual(['pml', 'ui']);
+    expect(entryTags(e)).toEqual(['pml', 'ui', 'someone']);
+  });
+
+  it('renders one chip when an author shares a name with a content tag', () => {
+    // Not a made-up worry: the person chips and the content tags share one
+    // loop and one key space, and a "who" that looked like a "what" would
+    // collide before anyone chose to make them collide. (The `tags` override
+    // REPLACES the default, so this row's content tag IS the name.)
+    const e = parsed(entry({ tags: ['ada'], author: 'ada' })).entries[0] as RegistryEntry;
+    expect(entryTags(e)).toEqual(['tspml', 'ada']);
+  });
+});
+
+describe('entryPersons', () => {
+  const at = (author: string): string[] =>
+    entryPersons(parsed(entry({ author })).entries[0] as RegistryEntry);
+
+  it('splits the byline separators that actually appear in the committed data', () => {
+    // "Cwcinc + Jakob + Orangy" and "Hero, Jakob" are verbatim author strings
+    // from index.json. The question a player has is per-person — everything
+    // Orangy touched — and a whole-byline chip would only ever match the trio.
+    expect(at('Orangy')).toEqual(['Orangy']);
+    expect(at('Cwcinc + Jakob + Orangy')).toEqual(['Cwcinc', 'Jakob', 'Orangy']);
+    expect(at('Hero, Jakob')).toEqual(['Hero', 'Jakob']);
+    expect(at('DoraChad + Orangy')).toEqual(['DoraChad', 'Orangy']);
+  });
+
+  it('answers no one for an empty byline rather than an empty-string chip', () => {
+    // An empty author parses (the field's contract is `string`, not non-empty),
+    // and rendering a chip for '' would be a key that filters everything out.
+    expect(at('')).toEqual([]);
+    expect(at('  +  ')).toEqual([]);
+  });
+
+  it('never repeats a name the byline lists twice', () => {
+    expect(at('Jakob + Jakob')).toEqual(['Jakob']);
   });
 });
 
@@ -360,12 +396,14 @@ describe('searchRegistry', () => {
     expect(searchRegistry(mixed.entries, 'tspml', null).map((e) => e.id)).toEqual(['native']);
   });
 
-  it('collects tags deduped and sorted, formats first', () => {
+  it('collects tags deduped and sorted, formats first, people last', () => {
     // Formats lead so `pml` and `tspml` sit together at the head of the filter
     // row rather than being scattered alphabetically among the content tags.
-    expect(registryTags(r.entries)).toEqual(['tspml', 'hud', 'physics']);
+    // People trail for the mirrored reason: ten names is the longest group in
+    // the row, and the short meaning-dense chips keep it scannable past them.
+    expect(registryTags(r.entries)).toEqual(['tspml', 'hud', 'physics', 'ada', 'bo']);
     const mixed = parsed(entry({ tags: ['ui'] }), entry({ id: 'b', format: 'pml', tags: ['car'] }));
-    expect(registryTags(mixed.entries)).toEqual(['pml', 'tspml', 'car', 'ui']);
+    expect(registryTags(mixed.entries)).toEqual(['pml', 'tspml', 'car', 'ui', 'someone']);
   });
 });
 
@@ -451,6 +489,56 @@ describe('the committed public/registry/index.json', () => {
     for (const e of result.registry.entries) {
       expect(e.tags).not.toContain('pml');
       expect(e.tags).not.toContain('tspml');
+    }
+  });
+
+  it('never hand-writes a person into a row\'s content tags', () => {
+    // The derivation rule, stated for persons the way the guard above states
+    // it for loaders: a hand-written name in `tags` is a second, unenforced
+    // copy of the byline, waiting to disagree with it.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      for (const person of entryPersons(e)) {
+        expect(e.tags).not.toContain(person);
+      }
+    }
+  });
+
+  it('filters by person across every collaboration', () => {
+    // Orangy is the densest case in the data: six solo rows plus four
+    // collaborations that also name other people. The chip has to catch all
+    // ten, or "everything by this person" is a control that quietly misses.
+    if (!result.ok) throw new Error('did not parse');
+    const by = searchRegistry(result.registry.entries, '', 'Orangy');
+    expect(by.map((e) => e.id).sort()).toEqual([
+      'pml-3decspeed',
+      'pml-carswitcher',
+      'pml-ghosttoggle',
+      'pml-husplits',
+      'pml-noitalics',
+      'pml-pdip',
+      'pml-pmlapi',
+      'pml-pmlcore',
+      'pml-polyeditor',
+      'pml-polyproxy',
+    ]);
+    // And it must NOT catch a row Orangy had nothing to do with, even a
+    // collaboration among the same other people.
+    expect(by.some((e) => e.id === 'pml-plibrary')).toBe(false);
+  });
+
+  it('carries an icon on every row, each pointing at the CDN or GitHub it came from', () => {
+    // Every mod in PML's registry ships an icon.png per version directory —
+    // probed and verified 200 image/png before any URL was committed. The
+    // guard exists because an icon is the first thing a player sees and the
+    // easiest thing to drop in an edit: a row silently falling back to its
+    // letter tile is a visual regression no other test would catch.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.icon, e.id).toBeDefined();
+      // registryIcon already dropped anything unsafe at parse; this pins that
+      // it was there to be dropped-or-kept at all.
+      expect(raw).toContain(`"icon": "${e.icon}"`);
     }
   });
 

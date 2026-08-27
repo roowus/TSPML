@@ -6,6 +6,7 @@ import { Icon } from '@/app/icons';
 import { DEFAULT_GAME_VERSION } from '@/lib/game-versions';
 import {
   buildsForGameVersion,
+  entryPersons,
   entryTags,
   gameVersionNote,
   getRegistryEntry,
@@ -90,6 +91,10 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
   // default is the honest reference point. The in-play drawer knows better and
   // passes the running instance's version to the catalog instead.
   const versionNote = gameVersionNote(entry, DEFAULT_GAME_VERSION);
+  // Same set the card builds, so the person chips read identically on both
+  // surfaces — a name that is dashed-and-italic on a card and plain here would
+  // look like two different facts.
+  const persons = new Set(entryPersons(entry));
 
   return (
     <section className="shell-section">
@@ -119,7 +124,10 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
 
       <div className="entry-tags">
         {entryTags(entry).map((t) => (
-          <span key={t} className={`tag-chip ${t === entry.format ? 'tag-format' : 'tag-static'}`}>
+          <span
+            key={t}
+            className={`tag-chip ${t === entry.format ? 'tag-format' : persons.has(t) ? 'tag-person' : 'tag-static'}`}
+          >
             {t}
           </span>
         ))}
