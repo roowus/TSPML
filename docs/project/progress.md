@@ -2663,12 +2663,12 @@ does not contain had to be produced honestly rather than plausibly:
   source. `pml-polyproxy` reads "a do-nothing placeholder mod … an empty class
   with a comment" because that is what its 0.6.2 build is.
 - **`gameVersions` lists what each mod's own index manifest offers**, not a range
-  we wish it supported. **Six of the twenty have no 0.6.2 build.** Their
-  summaries open with `NO BUILD FOR THIS GAME VERSION` and name where the index
-  stops, so the card says it rather than the Install button failing with the
-  player wondering why. Generating those from the name would have been the
-  failure recorded in [[fakes-cannot-falsify-their-own-assumption]]: a
-  description invented from the same belief as the row proves nothing about it.
+  we wish it supported. **Thirteen of the twenty-one rows have no 0.6.2 build.**
+  Reading each mod's index rather than generating a plausible range from its name
+  is what keeps this from being the failure recorded in
+  [[fakes-cannot-falsify-their-own-assumption]]: a value invented from the same
+  belief as the row proves nothing about it. What the card *says* about those
+  versions is derived — see the next section.
 
 `source.type` gained a third value, **`mod-root`** — PML addresses every one of
 its mods as a directory. A row that had to call itself a `mod-json` to pass
@@ -2721,4 +2721,106 @@ format tags, no dependency on an id the catalog does not list, at least one game
 version per row, every `pml` row a `mod-root`, mods pointing at a manifest or a
 root, and no smoke fixture advertised as player content.
 
-**678 unit tests across 27 files pass**, `tsc --noEmit` clean.
+**678 unit tests across 27 files pass**, `tsc --noEmit` clean. Repo-wide
+`pnpm -r test`: **1,291 green** (portal 678, mappings-pipeline 153, loader 109,
+api-bridge 92, mappings 76, shared 64, transform 49, wasm 44, dev-harness 14,
+create-tspml-mod 12).
+
+## 2026-08-26 — the no-build warning becomes a derivation, not prose ✅
+
+Screenshot review of the mirror above (the shot half of the DOCS RULE) exposed a
+defect the DOM assertions could not see: on `pml-coolcars` the most consequential
+fact on the page — *installing this will fail* — rendered as plain body prose,
+while the less consequential PML-adapter caveat beside it got a bordered ⚠ box.
+Reading `index.json` to fix the hierarchy corrected the premise first: **all
+thirteen** no-0.6.2 rows carried a notice, but hand-typed into `summary` in two
+inconsistent phrasings — six said `NO BUILD FOR THIS GAME VERSION: its index
+stops at PolyTrack 0.5.2`, seven said `Its newest build targets 0.6.0, not
+0.6.2.` — a second, unenforced copy of `gameVersions` that could disagree with
+the field the moment either was edited, and did not even agree with itself on
+wording.
+
+### One predicate, both shapes of the field
+
+The fix is the same rule the format chip already follows — **derive, never
+duplicate**. `buildsForGameVersion(entry, version)` and
+`gameVersionNote(entry, version)` live in `lib/registry.ts` next to
+`installCaveat`, and the thirteen prose clauses are gone from `index.json`
+(remaining facts preserved; a guard test fails the build if the phrasings
+return).
+
+The non-obvious part is that `gameVersions` arrives in **two shapes and both are
+real**. PML publishes exact lists (`["0.5.0","0.5.1","0.5.2"]`); poly-to-track
+publishes a single semver *range* (`[">=0.6.0 <0.7.0"]`). A naive
+`.includes('0.6.2')` would call the range entry unsupported — it covers 0.6.2 and
+says so **in syntax rather than by listing it** — putting a false "no build"
+warning on the one native mod in the catalog. Every value is therefore tried as
+an exact match first and as a range second, via `satisfies`/`isValidRange`
+re-exported from `@tspml/loader` (the portal has no `semver` dependency; the
+loader's wrapper was already the established seam). Two semantics worth pinning:
+
+- **Prereleases:** semver ranges deliberately exclude them, so `0.6.0-beta1` —
+  a real value in the committed file — only ever matches itself via the
+  equality branch. Both directions are unit-tested.
+- **Unparseable values answer TRUE.** The function's output is a warning, and a
+  version string we cannot read is not evidence that a build is missing; it is
+  evidence that we cannot tell. Warning on it would put a false "no build" on a
+  card whose mod installs fine.
+
+### Advisory, never a gate
+
+`gameVersionNote` warns; `installBlockedReason` still returns `null` for these
+rows. The catalog copies what an index said at curation time; the install reads
+that index **live**, so a stale warning must never become a false block —
+pinned by a test that asserts all three together (note non-null, block null,
+`isInstallable` true).
+
+The note renders above the install button (read *before* the click) on cards and
+the detail page, and the `GAME VERSIONS` facts row gained a derived verdict —
+`0.5.0, 0.5.1, 0.5.2 — none of these is 0.6.2, the version this launcher plays`
+— because the list alone states the problem only to a reader who already knows
+which version they are on.
+
+### The running game, not the launcher default
+
+The in-play browse drawer passes the **running instance's** `gameVersion` through
+to the catalog, so the advisory there is about the game actually on screen —
+installing from the drawer targets that game, so anything else would be a warning
+about a different session. `/browse` and the detail page have no instance in
+hand and fall back to `DEFAULT_GAME_VERSION`, which is the honest reference
+point. Both prop seams are `string | undefined` rather than merely optional:
+`exactOptionalPropertyTypes` distinguishes "may be absent" from "may be
+undefined", and the play page reads the version off an instance that is null
+until the launch resolves.
+
+### What the screenshots caught that the DOM could not
+
+Two layout defects, both invisible to green assertions:
+
+- On the **detail page** the two caveat boxes rendered at different widths —
+  `max-width: 62ch` lives on `.shell-section > .install-box` and the new
+  advisory sits outside it. Two boxes saying comparable things at two different
+  widths reads as a layout bug, not a hierarchy. Fixed.
+- On **cards** the advisory opened a dead gap *above* itself: `.install-box`'s
+  `margin-top: auto` pinned from the button's side, pushing the caveat away from
+  the button it belongs to. The pin moves to the caveat when one is present, and
+  the pair travels to the bottom of the card together. Fixed.
+
+And a shot-script race: the fixed 600 ms wait captured a "Loading…" state — a
+screenshot of a spinner silently passing for a screenshot of the page. `shot:check`
+now waits for the content (`.entry-facts` / `.entry-card`) instead of an
+interval, and gained a third stop: the **positive case** on `/browse/poly-to-track`,
+where the advisory logic could fail quietly. Verified in the browser: **no caveat
+box**, facts row `>=0.6.0 <0.7.0 — covers 0.6.2, the version this launcher
+plays`. The substring-check regression does not happen.
+
+### Proof
+
+Portal suite **688 tests across 27 files** (registry.test.ts 57 → 67: the two
+committed-file guards, the semver-range and prerelease pins, the advisory-never-
+gate triple, and the exact-thirteen-warned check — which also asserts poly-to-
+track is not among them). `tsc --noEmit` clean. `smoke:registry` and `smoke:pml`
+re-run PASS (Catalog, EntryDetail and globals.css all changed since they last
+ran). Repo-wide `pnpm -r test`: **1,301 green** (portal 688, mappings-pipeline
+153, loader 109, api-bridge 92, mappings 76, shared 64, transform 49, wasm 44,
+dev-harness 14, create-tspml-mod 12).

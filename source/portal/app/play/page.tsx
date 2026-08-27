@@ -1626,6 +1626,7 @@ export default function PlayPage(): ReactElement {
           open={browseOpen}
           onClose={() => setBrowseOpen(false)}
           install={drawerInstall}
+          gameVersion={instance?.gameVersion}
         />
 
         {/* The Mods menu: everything that used to be the permanent sidebar,

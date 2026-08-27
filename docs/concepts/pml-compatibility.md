@@ -235,9 +235,18 @@ mechanics:
   so every `summary` was written from reading that mod's actual source. None is
   invented, and none is generated from the name.
 - **`gameVersions` lists what the mod's own index offers**, not a range we wish
-  it supported. **Six of the twenty have no 0.6.2 build**, and their summaries
-  open with `NO BUILD FOR THIS GAME VERSION` — an install that will fail should
-  say so on the card, not at the button with the player wondering why.
+  it supported. **Thirteen of the twenty-one rows have no 0.6.2 build**, and the
+  card says so — not in hand-written prose (the old rows carried the fact in two
+  inconsistent phrasings, a second copy of `gameVersions` that could disagree
+  with the field), but as a derived advisory. `buildsForGameVersion()` interprets
+  the field — both shapes it really arrives in: exact lists, and the semver
+  *range* poly-to-track publishes (`">=0.6.0 <0.7.0"`, which covers 0.6.2 by
+  syntax rather than by listing it; a substring check would have put a false
+  warning on the one native mod in the catalog). The warning is an advisory and
+  never a gate — the mod's index is the authority at install time, so a stale
+  catalog row cannot block a mod whose author has since shipped a build. In the
+  in-play drawer the advisory is judged against the **running instance's**
+  version, not the launcher default.
 - **Every PML row is a `mod-root`**, the third `source.type`. PML addresses all
   of its mods as a directory with no trailing slash; a row that had to call
   itself a `mod-json` to be accepted would be lying about what lives there.

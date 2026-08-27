@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useId, useMemo, useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
+import { DEFAULT_GAME_VERSION } from '@/lib/game-versions';
 import {
   entryTags,
+  gameVersionNote,
   listRegistry,
   registryTags,
   searchRegistry,
@@ -48,10 +50,23 @@ const KINDS = ['mod', 'modpack'] as const satisfies readonly RegistryKind[];
 export function Catalog({
   install,
   linkEntries = true,
+  gameVersion = DEFAULT_GAME_VERSION,
 }: {
   install: UseInstall;
   /** False in the in-play drawer: navigating away would stop the game. */
   linkEntries?: boolean;
+  /**
+   * Which PolyTrack build to judge "has a build for this version" against.
+   *
+   * The drawer passes the RUNNING instance's version, because there the
+   * question has one true answer and it is not the default. `/browse` has no
+   * instance in hand and falls back — a catalog opened from the launcher is
+   * being read before any instance is chosen.
+   *
+   * Explicitly `| undefined` so the drawer can forward a not-yet-loaded
+   * instance's version straight through under `exactOptionalPropertyTypes`.
+   */
+  gameVersion?: string | undefined;
 }): ReactElement {
   // The drawer and /browse can both be mounted in one document, so the tab and
   // panel ids have to be per-instance or the two tablists cross-wire.
@@ -218,7 +233,13 @@ export function Catalog({
         ) : (
           <ul className="browse-grid">
             {shown.map((e) => (
-              <EntryCard key={e.id} entry={e} install={install} link={linkEntries} />
+              <EntryCard
+                key={e.id}
+                entry={e}
+                install={install}
+                link={linkEntries}
+                gameVersion={gameVersion}
+              />
             ))}
           </ul>
         )}
@@ -231,11 +252,14 @@ export function EntryCard({
   entry,
   install,
   link = true,
+  gameVersion = DEFAULT_GAME_VERSION,
 }: {
   entry: RegistryEntry;
   install: UseInstall;
   link?: boolean;
+  gameVersion?: string;
 }): ReactElement {
+  const versionNote = gameVersionNote(entry, gameVersion);
   return (
     <li className="entry-card">
       <div className="entry-head">
@@ -276,6 +300,14 @@ export function EntryCard({
           </span>
         ) : null}
       </div>
+      {/* Above the button, not below it: the point is to be read BEFORE the
+          click. Derived from gameVersions, so it cannot drift out of step with
+          the versions the facts row shows. */}
+      {versionNote === null ? null : (
+        <p className="install-caveat">
+          <Icon name="warn" /> {versionNote}
+        </p>
+      )}
       <InstallButton entry={entry} install={install} />
     </li>
   );

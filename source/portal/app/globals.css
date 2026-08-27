@@ -2193,6 +2193,30 @@ a.btn {
   margin-top: 12px;
 }
 
+/* The no-build advisory renders OUTSIDE `.install-box` (it is about the entry,
+   not about the install control), which means it does not inherit that box's
+   `max-width: 62ch` on the detail page. Without this it sets its own width from
+   the section and sits visibly wider than the adapter caveat directly beneath
+   it — two boxes saying comparable things at two different widths, which reads
+   as a layout bug rather than a hierarchy. */
+.shell-section > .install-caveat {
+  max-width: 62ch;
+  margin-top: 12px;
+}
+
+/* In a CARD the advisory is the last thing before `.install-box`, and that box
+   claims the leftover column height with `margin-top: auto`. Pushing from the
+   button's side opened a gap ABOVE the advisory instead of below the summary,
+   so the pin moves here whenever an advisory is present and the pair travels
+   to the bottom of the card together. */
+.entry-card > .install-caveat {
+  margin-top: auto;
+}
+
+.entry-card > .install-caveat + .install-box {
+  margin-top: 0;
+}
+
 .install-actions {
   display: flex;
   gap: 6px;

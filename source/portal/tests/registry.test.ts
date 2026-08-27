@@ -12,8 +12,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_GAME_VERSION } from '../lib/game-versions';
 import {
+  buildsForGameVersion,
   entryTags,
+  gameVersionNote,
   getRegistryEntry,
   installBlockedReason,
   installCaveat,
@@ -210,6 +213,69 @@ describe('installCaveat', () => {
   });
 });
 
+describe('buildsForGameVersion', () => {
+  const at = (versions: string[], v = '0.6.2'): boolean =>
+    buildsForGameVersion(parsed(entry({ gameVersions: versions })).entries[0] as RegistryEntry, v);
+
+  it('matches an exact version in the list, which is how PML publishes', () => {
+    expect(at(['0.6.0', '0.6.2'])).toBe(true);
+    expect(at(['0.5.0', '0.5.1', '0.5.2'])).toBe(false);
+  });
+
+  it('honours a semver RANGE, which a naive includes() would call unsupported', () => {
+    // The regression this function exists for. poly-to-track ships the range
+    // form, covers 0.6.2 by syntax rather than by listing it, and a substring
+    // check would have put a false "no build" warning on the one native mod in
+    // the catalog.
+    expect(at(['>=0.6.0 <0.7.0'])).toBe(true);
+    expect(at(['>=0.7.0'])).toBe(false);
+    expect(at(['^0.5.0'])).toBe(false);
+  });
+
+  it('does not let a prerelease target stand in for the release', () => {
+    // 0.6.0-beta1 is a real value in the committed file. Semver deliberately
+    // excludes prereleases from ranges, and an exact match is the only way it
+    // should ever count — for itself, not for 0.6.0 or 0.6.2.
+    expect(at(['0.6.0-beta1'])).toBe(false);
+    expect(at(['0.6.0-beta1'], '0.6.0-beta1')).toBe(true);
+  });
+
+  it('stays quiet on a version string it cannot parse', () => {
+    // Not evidence of a missing build — evidence that we cannot tell. Warning
+    // here would print "no build for 0.6.2" on a mod that installs fine.
+    expect(at(['whatever the author wrote'])).toBe(true);
+  });
+
+  it('needs only one of several values to match', () => {
+    expect(at(['0.5.0', 'nonsense', '0.6.2'])).toBe(true);
+  });
+});
+
+describe('gameVersionNote', () => {
+  it('names the version, and lists what the mod does offer', () => {
+    const e = parsed(entry({ gameVersions: ['0.5.0', '0.5.2'] })).entries[0] as RegistryEntry;
+    const note = gameVersionNote(e, DEFAULT_GAME_VERSION);
+    expect(note).toContain(DEFAULT_GAME_VERSION);
+    expect(note).toContain('0.5.0, 0.5.2');
+  });
+
+  it('is silent when there is a build, rather than saying so', () => {
+    const e = parsed(entry({ gameVersions: ['0.6.2'] })).entries[0] as RegistryEntry;
+    expect(gameVersionNote(e, DEFAULT_GAME_VERSION)).toBeNull();
+  });
+
+  it('never blocks the install — the mod index is the authority', () => {
+    // Advisory and gate are deliberately separate. The catalog copies what an
+    // index said at curation time; the install reads that index live, and if
+    // the author has since published a build the install should succeed while
+    // this warning is merely stale.
+    const e = parsed(entry({ gameVersions: ['0.5.0'] })).entries[0] as RegistryEntry;
+    expect(gameVersionNote(e, DEFAULT_GAME_VERSION)).not.toBeNull();
+    expect(installBlockedReason(e, ORIGIN)).toBeNull();
+    expect(isInstallable(e, ORIGIN)).toBe(true);
+  });
+});
+
 describe('resolveDependencies', () => {
   it('resolves ids through the registry', () => {
     const r = parsed(entry({ id: 'main', dependencies: ['lib'] }), entry({ id: 'lib' }));
@@ -385,6 +451,37 @@ describe('the committed public/registry/index.json', () => {
     for (const e of result.registry.entries) {
       expect(e.tags).not.toContain('pml');
       expect(e.tags).not.toContain('tspml');
+    }
+  });
+
+  it('never hand-writes the no-build warning into a summary', () => {
+    // Same rule as the format tag, for the other derivable claim in this file.
+    // These rows USED to carry the fact as prose, in two different phrasings
+    // ("NO BUILD FOR THIS GAME VERSION" and "its newest build targets X, not
+    // Y") — a second copy of `gameVersions` that could disagree with it the
+    // moment either was edited, and did not even agree with itself on wording.
+    // gameVersionNote derives it now; a row restating it would be that copy
+    // coming back.
+    if (!result.ok) throw new Error('did not parse');
+    for (const e of result.registry.entries) {
+      expect(e.summary).not.toMatch(/no build for/i);
+      expect(e.summary).not.toMatch(/not 0\.\d/);
+      expect(e.summary).not.toMatch(/newest build targets/i);
+    }
+  });
+
+  it('warns on exactly the entries whose index lacks a build for the played version', () => {
+    // The count is asserted rather than just the predicate because the whole
+    // point of deriving is that this number tracks the file. Thirteen of the
+    // twenty-one rows stop before 0.6.2; poly-to-track's RANGE covers it and
+    // must not be miscounted among them.
+    if (!result.ok) throw new Error('did not parse');
+    const warned = result.registry.entries.filter(
+      (e) => gameVersionNote(e, DEFAULT_GAME_VERSION) !== null,
+    );
+    expect(warned.length).toBe(13);
+    for (const e of warned) {
+      expect(e.gameVersions).not.toContain(DEFAULT_GAME_VERSION);
     }
   });
 

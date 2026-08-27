@@ -28,6 +28,7 @@
  * and the checks are three comparisons. Mod code runs unsandboxed either way —
  * that disclosure belongs at the install click, not only in the paste form.
  */
+import { isValidRange, satisfies } from '@tspml/loader';
 import { checkImportUrl } from './mod-fetch';
 import type { ModFormatId } from './mod-formats/types';
 import { isSupportedFormat } from './mod-formats';
@@ -90,7 +91,13 @@ export interface RegistryEntry {
   readonly icon?: string;
   readonly homepage?: string;
   readonly docs?: string;
-  /** Free-text range, shown not parsed. There is no resolver to feed it to. */
+  /**
+   * Which PolyTrack builds this entry's own index offers, copied from that
+   * index. Two shapes are legitimate and both appear in the committed file: a
+   * list of exact versions (`["0.5.0","0.5.2"]`, how PML publishes) or a single
+   * semver range (`[">=0.6.0 <0.7.0"]`). {@link buildsForGameVersion} is the
+   * only thing that interprets them; everything else shows them.
+   */
   readonly gameVersions: readonly string[];
   readonly safety: RegistrySafety;
   /** Other registry ids this needs. Resolved ONLY through the registry. */
@@ -290,6 +297,55 @@ export function resolveSourceUrl(entry: RegistryEntry, origin: string): string {
 export function installCaveat(entry: RegistryEntry): string | null {
   if (entry.format !== 'pml') return null;
   return 'this mod is packaged for PML and installs through TSPML\'s compatibility adapter. Lifecycle hooks, keybinds and settings carry across; mixins do not — PML patches the game by matching minified identifiers at runtime, TSPML patches structurally against a symbol map, so the two are not interchangeable. Each refused call is reported by name once the mod runs, so a mod whose patching was all mixins will load and visibly do less than it claims.';
+}
+
+/**
+ * Does this entry's own index offer a build for `version`?
+ *
+ * `gameVersions` arrives in two shapes and both are real. PML publishes exact
+ * lists (`["0.5.0","0.5.1","0.5.2"]`); poly-to-track publishes a range
+ * (`">=0.6.0 <0.7.0"`). A `.includes('0.6.2')` would call the range entry
+ * unsupported — it covers 0.6.2 and says so in syntax rather than by listing it
+ * — so every value is tried as an exact match first and as a range second.
+ *
+ * Unparseable values answer TRUE. This function's output is a warning, and a
+ * version string we cannot read is not evidence that a build is missing; it is
+ * evidence that we cannot tell. Warning on it would put a false "no build for
+ * this version" on a card whose mod installs fine, which is worse than staying
+ * quiet — the install path reports the real answer either way, from the index.
+ */
+export function buildsForGameVersion(entry: RegistryEntry, version: string): boolean {
+  return entry.gameVersions.some((v) => {
+    if (v === version) return true;
+    if (!isValidRange(v)) return true;
+    // A bare exact version is also a valid range, and `satisfies` handles it —
+    // but a prerelease target (`0.6.0-beta1`) only ever matches itself, which
+    // the equality above already did.
+    return satisfies(version, v);
+  });
+}
+
+/**
+ * The advisory a card shows when the mod has no build for the version being
+ * played, or null when it does.
+ *
+ * DERIVED from `gameVersions`, never written into the row. The same fact used
+ * to live in each row's `summary` as hand-typed prose, in two different
+ * phrasings ("NO BUILD FOR THIS GAME VERSION" and "its newest build targets
+ * X, not Y") — a second, unenforced copy of `gameVersions` that could disagree
+ * with it the moment either was edited. This is the `entryTags`/`format` rule
+ * applied to the other derivable claim in the file.
+ *
+ * Advisory, not a block: {@link installBlockedReason} still returns null for
+ * these. The install is genuinely attemptable and the mod's own index is the
+ * authority on what it offers. What this buys is that the failure is legible on
+ * the card BEFORE the click, rather than at the button with the player
+ * wondering why.
+ */
+export function gameVersionNote(entry: RegistryEntry, version: string): string | null {
+  if (buildsForGameVersion(entry, version)) return null;
+  const offered = entry.gameVersions.join(', ');
+  return `no build for PolyTrack ${version}. This mod's index offers ${offered}, so installing it will fail with that message rather than silently install a build for another version.`;
 }
 
 /**
