@@ -12,12 +12,12 @@ Mods are written against a stable API and declarative mixins rather than against
 > - Real mod loading: paste a mod, import it by URL, or import a modpack (a `.txt` of links) from the play page's Mods menu; in-play Browse installs into the running game without ending your run.
 > - Mod-declared mixins: Tier-2 patches (`before`/`after`/`around`/`replace`/`modifyArg`/`modifyReturn`/`modifyConstant`) targeting **stable names** resolved fail-closed via `@tspml/mappings`, with `__TSPML_PARAMn__` param-ordinal placeholders so injects survive re-minification.
 > - Physics patching (#43): a mod's `physics.json` rewrites constants in the compiled wasm binary, verified per-load by the service worker.
-> - **PolyModLoader (PML) mods install and run** through a compatibility adapter: lifecycle hooks, keybinds, settings and `getMod` work; mixins are **refused per call with a reason** and the mod keeps running. See [PML compatibility](./docs/concepts/pml-compatibility.md).
+> - **PolyModLoader (PML) mods install and run** through a compatibility adapter: lifecycle hooks, keybinds, settings and `getMod` work, and **token-anchored mixins carry across** — collected on first launch, applied as exactly-once-verified source splices at the transform seam on the next. What can't carry (physics offsets, method-extent patches, the eval bridge) is **refused per call with a reason** and the mod keeps running. See [PML compatibility](./docs/concepts/pml-compatibility.md).
 > - **`/browse` lists all 20 mods from PML's own registry** alongside the native ones, each tagged with the loader that runs it (`tspml`/`pml`) and with the authors as filter chips — both derived, both real filters (pick a person, see their work across collaborations). Every row carries its icon (PML's authors ship one per version). Summaries were written from each mod's source (PML's registry carries none), and the thirteen with no 0.6.2 build carry a derived "no build for this version" advisory (never a gate — semver ranges honoured).
 > - Reload re-fetches URL-imported mods; share links carry mod URLs (never code) behind a confirm-first prompt.
 > - Warn-only safety classifier (`classifySafety`); `create-tspml-mod` scaffold CLI; `@tspml/api` types package.
 >
-> **1,308 unit tests + 12 CI smokes, all green.** Headlessly verified against the real game via Playwright — including a fixture PML mod imported from its own CDN layout and run end to end. See [`docs/project/progress.md`](./docs/project/progress.md).
+> **1,335 unit tests + 12 CI smokes, all green.** Headlessly verified against the real game via Playwright — including a fixture PML mod imported from its own CDN layout and run end to end. See [`docs/project/progress.md`](./docs/project/progress.md).
 
 ## Quick start (create a mod)
 

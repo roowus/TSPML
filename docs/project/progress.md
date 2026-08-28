@@ -2889,3 +2889,91 @@ smoke typecheck clean. `smoke:registry` PASS with all four person legs true.
 Repo-wide `pnpm -r test`: **1,308 green** (portal 695, mappings-pipeline 153,
 loader 109, api-bridge 92, mappings 76, shared 64, transform 49, wasm 44,
 dev-harness 14, create-tspml-mod 12).
+
+## 2026-08-28 — PML mixins carry across: collected at runtime, spliced at the transform seam ✅
+
+Owner: "the pml disclainmer should be expandable, also can u make mixins carry over to".
+Two features: a UI one (the disclaimer) and the one this section is really about —
+**mixins**, the exact half of PML compatibility this project had documented as
+impossible.
+
+### Why "impossible" was the wrong word
+
+The design doc said mixins were **not translatable in general**, and its reasoning
+was sound as far as it went: PML patches by token-matching the live minified
+bundle, and by the time a mod's `init` runs under TSPML that bundle has already
+been served. But that argument only rules out *translating the patch* (rewriting a
+PML splice into a TSPML AST mixin) or *faking a live target*. It says nothing
+against the third option: **run PML's patch language at TSPML's own patch time**.
+TSPML already has a carriage from "a mod's declared patches" to "the served
+bundle" — the #62 request-carried plan, parked in the Cache API before the frame
+mounts and applied per surface. A PML splice is just another patch riding it.
+
+### The pipeline, end to end
+
+1. **Collect** (`lib/pml/shim.ts`): `registerClassMixin` with an object spec
+   (the form real CDN mods ship — ghosttoggle 1.0.8 is the reference) is parsed
+   per call. The four token-anchored types become `pmlMixins` on the mod's
+   record; everything else (method-extent types, wasm offsets, the other seven
+   families) keeps its named refusal.
+2. **Persist** (`app/play/page.tsx`): after a load summary reports collected
+   mixins, the page merges them onto the records (JSON-key dedupe — a mod
+   re-registers every boot) and re-parks the plan. Deliberately NOT the full
+   `updateUserMods` path: the mod is already running, its hooks must not fire
+   twice over a storage write; only the plan half runs.
+3. **Carry** (`lib/user-patches.ts`): `pmlMixins` join pasted mixins in the plan,
+   one set per mod, `func` capped exactly as `inject` is.
+4. **Apply** (`lib/pml/splice.ts` + `lib/demo-transform.ts`): splices edit the
+   RAW bundle text **before Babel** — PML tokens are written in Kodub's own
+   minified formatting and would not survive regeneration — then the engine's
+   existing re-parse gate covers the spliced source. A broken splice fails the
+   compose and boots vanilla; this was observed live (see below).
+
+### The rule that makes it TSPML's
+
+An anchor must match **exactly once** in the surface, or the patch refuses with
+the match count. PML splices at whatever its lookup finds first; this refuses
+ambiguity. One concession to reality, discovered by MEASURING the real bundle:
+twin anchors (`tokenStart === tokenEnd`, which is what ghosttoggle actually
+ships) occur **once**, not twice — so one occurrence is legal (the single anchor
+serves as both ends, the span is empty, the func inserts after it); two splice
+between; three refuse. The first draft of the rule would have refused
+ghosttoggle's real mixin — the unit test pins the real fragment verbatim.
+
+### What the smoke proved (and what a failure proved)
+
+`smoke:pml` now covers both halves. Refusal: an `OVERRIDE` and a
+`registerGlobalMixin` refused by name while the mod stays loaded. Carriage: the
+fixture registers a splice whose token is the game's own FPS-counter keybind
+registration (measured exactly-once in the vanilla 0.6.2 bundle, executed at
+bundle eval). First boot: collected, marker ABSENT. After one reload: the marker
+is in the game frame — the spliced code **executed** — and the in-bundle report
+reads `applied: 1` on `main.bundle.js`.
+
+The failed first run is worth keeping: the fixture's func was `;stmt;`-shaped,
+but the token sits inside the entry's **comma-expression sequence**, so the
+insert broke syntax — `planStatus: base-failed`, `transform-threw: Unexpected
+token`, **game booted vanilla**. Two lessons landed: the fail-closed gate holds
+under a genuinely broken splice, and a PML author's func must fit its insertion
+context (the fixture now uses a parenthesized expression, with a comment saying
+why — exactly the discipline a real PML mod's func carries).
+
+### The UI half
+
+The PML install caveat is now a native `<details>`: one line ("runs through
+TSPML's PML adapter — what carries across and what doesn't") with the paragraph
+behind an expander. Zero-JS open, keyboard-accessible free. And per an earlier
+owner note ("don't have all tags in one group, organize the tabs by type") the
+filter row split into **labelled groups** — `loader` / `category` / `people` —
+each keeping the `tag-row` class so every existing locator still sees the same
+control.
+
+### Proof
+
+Portal **722 tests across 28 files** (695 → 722: `pml-splice.test.ts` new at 18,
+shim collection block, demo-transform splice composition ×3, user-patches plan
+carriage ×2, caveat assertions). `tsc --noEmit` clean; smoke typecheck clean and
+run AFTER the last script edit this time. `smoke:pml` PASS end-to-end including
+the splice legs; `smoke:registry` PASS against the grouped tag rows. Screenshot
+review done (three labelled rows render; collapsed caveat reads as one line).
+Repo-wide `pnpm -r test`: **1,335 green**.

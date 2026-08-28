@@ -60,9 +60,11 @@ function runtime(over: Partial<Parameters<typeof createPmlRuntime>[1]> = {}) {
   return { ...f, ...built, pml: built.runtime.ActivePolyModLoader };
 }
 
-/** Every mixin family PML exposes, with the reason family each belongs to. */
+/** Every mixin family PML exposes. `registerClassMixin` is the ONE family
+ *  that carries (its token-anchored types are collected — see the shim
+ *  header), so it has its own describe below and is excluded from the
+ *  family-refusal assertions. */
 const MIXIN_METHODS = [
-  'registerClassMixin',
   'registerFuncMixin',
   'registerClassWideMixin',
   'registerGlobalMixin',
@@ -71,6 +73,14 @@ const MIXIN_METHODS = [
   'registerSimWorkerFuncMixin',
   'registerPhysicsLibMixin',
 ] as const;
+
+/** The one family that carries, in the object-spec form real PML mods ship
+ *  (ghosttoggle 1.0.8 on the CDN is the reference). */
+const SPEC = {
+  type: 'INSERT',
+  token: 'e.car.setCarState(t, !1)',
+  func: ';e.car.setVisible(!1);',
+} as const;
 
 describe('the value exports a mod reads at MODULE scope', () => {
   it('provides every MixinType member PML documents', () => {
@@ -147,6 +157,21 @@ describe('mixins are refused per call, never thrown', () => {
     expect(reason).toMatch(/mixins\.json/);
   });
 
+  it('registerClassMixin refuses an UNSUPPORTED TYPE with the type-gate reason', () => {
+    // Method-extent types (OVERRIDE and friends) are the registerClassMixin
+    // calls that still refuse: they have no token to verify, so there is no
+    // faithful way to apply them. The reason must say THAT, not the generic
+    // family text — an author reading "module scope" would look in the wrong
+    // place for the fix.
+    const { pml, report } = runtime();
+    pml.registerClassMixin('uf', 'prototype', { type: 'OVERRIDE', func: 'void 0;' });
+    expect(report.mixins).toHaveLength(0);
+    const reason = report.refusals[0]?.reason ?? '';
+    expect(reason).toMatch(/method-extent/);
+    expect(reason).toMatch(/OVERRIDE/);
+    expect(reason).not.toMatch(/module scope/);
+  });
+
   it('gives physics mixins their OWN reason, about the wasmHash gate', () => {
     // Not a copy-paste of the mixin reason: TSPML *can* patch physics (#43), but
     // only through a hash-pinned physics.json. A PML PATCH_F32 offset arrives
@@ -221,6 +246,72 @@ describe('refusals are deduped, and named by target', () => {
     pml.registerClassMixin('uf', 'prototype');
     expect(warn).toHaveBeenCalledOnce();
     expect(String(warn.mock.calls[0]?.[0])).toContain('somemod');
+  });
+});
+
+describe('token-anchored mixins are COLLECTED, not applied', () => {
+  it('collects a valid object-spec registerClassMixin into report.mixins', () => {
+    // The object-spec form is what real PML mods ship; the spec rides the
+    // report out of the runtime so the page can persist it onto the record
+    // and the next launch's plan can carry it to the transform seam.
+    const { pml, report } = runtime();
+    pml.registerClassMixin('ws.prototype', 'update', SPEC);
+    expect(report.mixins).toHaveLength(1);
+    expect(report.refusals).toHaveLength(0);
+    expect(report.mixins[0]).toMatchObject({
+      op: 'pml-splice',
+      type: 'INSERT',
+      classRef: 'ws.prototype',
+      method: 'update',
+      token: SPEC.token,
+      func: SPEC.func,
+    });
+  });
+
+  it('collects every supported type, and refuses nothing among them', () => {
+    const { pml, report } = runtime();
+    pml.registerClassMixin('a', 'x', SPEC);
+    pml.registerClassMixin('b', 'x', { type: 'REPLACE', token: 'p', func: 'q' });
+    pml.registerClassMixin('c', 'x', { type: 'REPLACEBETWEEN', tokenStart: 'p', tokenEnd: 'q', func: 'r' });
+    pml.registerClassMixin('d', 'x', { type: 'REMOVEBETWEEN', tokenStart: 'p', tokenEnd: 'q' });
+    expect(report.mixins.map((m) => m.type)).toEqual([
+      'INSERT',
+      'REPLACE',
+      'REPLACEBETWEEN',
+      'REMOVEBETWEEN',
+    ]);
+    expect(report.refusals).toHaveLength(0);
+  });
+
+  it('refuses a malformed spec (no object) per call, deduped, without throwing', () => {
+    // Positional-signature calls (an older PML shape) arrive with no spec
+    // object; they are malformed to the collector and must take the same
+    // refused-per-call path as everything else.
+    const { pml, report, warn } = runtime();
+    for (let i = 0; i < 10; i += 1) pml.registerClassMixin('uf', 'prototype');
+    expect(() => pml.registerClassMixin('uf', 'prototype')).not.toThrow();
+    expect(report.mixins).toHaveLength(0);
+    expect(report.refusals).toHaveLength(1);
+    expect(report.refusals[0]?.target).toBe('uf.prototype');
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps collecting after a refusal in the same mod', () => {
+    // The collector is per call, like the refusals: one bad spec must not
+    // poison the mod's good ones.
+    const { pml, report } = runtime();
+    pml.registerClassMixin('uf', 'prototype');
+    pml.registerClassMixin('ws.prototype', 'update', SPEC);
+    expect(report.mixins).toHaveLength(1);
+    expect(report.refusals).toHaveLength(1);
+  });
+
+  it('does not log a collection as a warning — collecting is success-shaped', () => {
+    // A collected mixin is the half that WORKS; putting it in the warn log
+    // would teach the player that every PML mod errors.
+    const { pml, warn } = runtime();
+    pml.registerClassMixin('ws.prototype', 'update', SPEC);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

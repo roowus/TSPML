@@ -41,14 +41,25 @@
 //                 `code`, which is what Keybinds.dispatch compares;
 //   6. setting  — `getSetting` returns the STRING "true" for a bool, PML's own
 //                 wart, reproduced deliberately because mods compare against it;
-//   7. refusal  — the mod's `registerClassMixin` is refused BY NAME in the
-//                 sidebar's .pml-report block, naming the target it aimed at;
-//   8. survives — and the mod is STILL LOADED while that refusal is on screen.
-//                 This is the load-bearing pair: lib/mod-loader.ts only emits a
-//                 report for a mod in `loaded`, and the code after the refused
-//                 call still ran. "Refuse per call, don't abort the mod" is the
-//                 entire compatibility contract, and 7+8 together are its proof;
-//   9. cleanup  — removing the mod clears its stored record.
+//   7. refusal  — the untranslatable halves are refused BY NAME in the
+//                 sidebar's .pml-report block: the method-extent TYPE
+//                 (`registerClassMixin` with OVERRIDE) and the global-mixin
+//                 FAMILY (`registerGlobalMixin`), each with its reason;
+//   8. survives — and the mod is STILL LOADED while those refusals are on
+//                 screen, and its code past them ran. "Refuse per call, don't
+//                 abort the mod" is the compatibility contract, and 7+8
+//                 together are its proof;
+//   8b. collected — the translatable HALF shows as collected: the panel says
+//                 the mod's token-anchored mixin applies on the next launch,
+//                 and the game frame does NOT have the splice's marker yet
+//                 (the running frame predates the plan that carries it);
+//   9. splice   — after ONE RELOAD, the collected mixin has ridden the plan
+//                 into the served bundle: the game frame carries the marker
+//                 the splice inserts (it fires at bundle eval, so presence
+//                 means EXECUTED, not merely accepted) and the per-mod mixin
+//                 report inside the frame reads applied:1 on main.bundle.js.
+//                 This is the end-to-end proof that PML mixins carry across;
+//   10. cleanup — removing the mod clears its stored record.
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.SMOKE_URL ?? "http://localhost:3000";
@@ -241,15 +252,19 @@ out.keybindFired = gameFrame
 // 6. PML's getSetting wart: a bool reads back as the STRING "true".
 out.settingIsString = await page.evaluate(() => window.__smokePmlSetting === "true");
 
-// 7+8. THE contract. The refused mixin is named in the .pml-report block, and
-// the mod is still loaded while it is on screen — the code after the refused
-// call ran, and mod-loader.ts only reports for a mod in `loaded`.
-step("check the mixin was refused BY NAME and the mod kept running");
+// 7+8. THE contract. The untranslatable halves are named in the .pml-report
+// block — the method-extent TYPE and the global-mixin FAMILY — and the mod is
+// still loaded while they are on screen, its code past them having run.
+step("check the untranslatable mixins were refused BY NAME and the mod kept running");
 out.mixinRefusalReported = await waitForSidebar(
   () => {
     const report = document.querySelector('aside[aria-label="Mods"] .pml-report');
     const text = report?.textContent ?? "";
-    return /registerClassMixin/.test(text) && /SmokeTarget\.prototype/.test(text);
+    return (
+      /registerClassMixin/.test(text) &&
+      /SmokeTarget\.prototype/.test(text) &&
+      /registerGlobalMixin/.test(text)
+    );
   },
   30000,
 );
@@ -260,17 +275,106 @@ out.refusalNamesReason = await page
         document.querySelector('aside[aria-label="Mods"] .pml-report')
       )?.textContent ?? "",
   )
-  .then((t) => /string-splice/.test(t) && /mixins\.json/.test(t));
-// Still loaded, with the refusal showing. Re-read rather than reuse the earlier
+  // 'method-extent' is the TYPE refusal's reason (OVERRIDE has no token to
+  // verify); the family refusal says what it anchors to instead.
+  .then((t) => /method-extent/.test(t) && /module scope/.test(t));
+// Still loaded, with the refusals showing. Re-read rather than reuse the earlier
 // value: "loaded THEN refused" is the claim, and a stale read would not prove it.
 out.modSurvivedRefusal = /mods:\s*✓ .*tspml-sample-pml/.test(await sidebarText());
-// And the mod's own code past the refused call ran — the refusal returned
+// And the mod's own code past the refused calls ran — a refusal returns
 // undefined instead of throwing.
 out.codeAfterRefusalRan = await page.evaluate(() => window.__smokePmlSurvivedMixin === true);
 
+// 8b. The translatable half: COLLECTED, not applied yet. The panel says so,
+// and the running game frame predates the plan that would carry the splice,
+// so its marker must NOT exist yet — a splice that "applied" without a
+// re-served bundle would be the silent-failure mode this whole feature
+// exists to avoid.
+step("check the token-anchored mixin was collected, and has NOT run yet");
+out.mixinCollectedReported = (await sidebarText()).includes("1 source mixin collected");
+const frameBeforeReload = await waitForGameFrame(15000);
+out.spliceNotRunBeforeReload = frameBeforeReload
+  ? await frameBeforeReload.evaluate(() => (window.__pmlSpliceRan ?? 0) === 0)
+  : false;
+
+// 9. THE SPLICE. One reload: the plan now parks with the collected mixin, the
+// SW replays the bundle POST, and the route splices the token (verified
+// exactly-once) into the served source BEFORE Babel. The marker the mod
+// inserts fires at bundle eval — so finding it in the game frame proves the
+// spliced code EXECUTED, and the report inside the frame proves the pipeline
+// knows it applied.
+step("reload and check the splice ran in the re-served bundle");
+await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 });
+out.modLoadedAfterReload = await waitForSidebar(
+  () =>
+    /mods:\s*✓ .*tspml-sample-pml/.test(
+      document.querySelector('aside[aria-label="Mods"]')?.textContent ?? "",
+    ),
+  90000,
+);
+const frame2 = await waitForGameFrame(45000);
+out.spliceRan = frame2
+  ? await frame2
+      .waitForFunction(() => (window.__pmlSpliceRan ?? 0) >= 1, undefined, {
+        timeout: 45000,
+        polling: 400,
+      })
+      .then(() => true)
+      .catch(() => false)
+  : false;
+// The per-mod mixin report rides INSIDE the served bundle as a prelude; this
+// is the plan's own account of what it did, read from the same frame.
+out.spliceReportedApplied = frame2
+  ? await frame2
+      .evaluate((modId) => {
+        const w = window;
+        const report = w.__tspmlUserMixins;
+        if (!report || !Array.isArray(report.mods)) return false;
+        const row = report.mods.find((m) => m && m.modId === modId);
+        return !!row && row.declared === 1 && row.applied === 1;
+      }, MOD_ID)
+      .catch(() => false)
+  : false;
+// Diagnostic detail (not part of PASS): what the second boot actually had —
+// whether the record's stored mixins made it into the plan cache, and what
+// the served bundle's report says verbatim. Turns a false spliceRan into an
+// answer instead of a shrug.
+out.debugStorageHasMixins = await page.evaluate((modId) => {
+  try {
+    const raw = window.localStorage.getItem("tspml.userMods.v1");
+    return !!raw && raw.includes(modId) && raw.includes("pmlMixins");
+  } catch {
+    return false;
+  }
+}, MOD_ID);
+out.debugPlanCache = await page
+  .evaluate(async () => {
+    try {
+      const cache = await caches.open("tspml-user-patches-v1");
+      const res = await cache.match("/__tspml/user-patch-plan");
+      if (!res) return "no plan entry";
+      const text = await res.text();
+      return text.includes("pml-splice") ? `plan carries splices (${text.length}b)` : `plan without splices: ${text.slice(0, 120)}`;
+    } catch (e) {
+      return `cache error: ${String(e).slice(0, 80)}`;
+    }
+  })
+  .catch(() => "unreachable");
+out.debugReportRaw = frame2
+  ? await frame2
+      .evaluate(() => {
+        try {
+          return JSON.stringify(window.__tspmlUserMixins).slice(0, 300);
+        } catch {
+          return "unreadable";
+        }
+      })
+      .catch(() => false)
+  : false;
+
 await page.screenshot({ path: SHOT, fullPage: false }).catch(() => {});
 
-// 9. Cleanup: removing the row clears the stored record.
+// 10. Cleanup: removing the row clears the stored record.
 step("remove the PML mod");
 await openModsMenu();
 await page
@@ -301,6 +405,11 @@ const PASS =
   out.refusalNamesReason === true &&
   out.modSurvivedRefusal === true &&
   out.codeAfterRefusalRan === true &&
+  out.mixinCollectedReported === true &&
+  out.spliceNotRunBeforeReload === true &&
+  out.modLoadedAfterReload === true &&
+  out.spliceRan === true &&
+  out.spliceReportedApplied === true &&
   out.storageCleared === true;
 
 console.log(

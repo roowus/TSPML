@@ -18,20 +18,33 @@
  * | `registerKeybind` | real keybind, via `api.keybinds` |
  * | `registerSetting` / `getSetting` / `setSetting` | stored, headless |
  * | `getMod(id)` | resolves against the mods loaded THIS session |
- * | `registerClassMixin` and every other mixin family | **refused, per call** |
- * | `registerPhysicsMixin` | **refused, per call** |
+ * | `registerClassMixin` (token-anchored types) | **collected, applied at the transform seam on next launch** |
+ * | other mixin families (`Func`/`ClassWide`/`Global`/`Chunk`/`SimWorker`) | **refused, per call** |
+ * | `registerPhysicsMixin` and `PATCH_F32`/`PATCH_I32` | **refused, per call** |
  * | `getFromPolyTrack` / `getFromPolyTrackGlobal` | **refused, per call** |
  *
- * Mixins are refused because they are not translatable, and that is a fact
- * about the two designs rather than an unfinished feature. PML patches by
- * `toString()` + `indexOf(token)` + `eval()` against webpack-mangled names in
- * the live bundle; TSPML patches structurally, server-side, against a symbol map
- * pinned to a bundle hash, before the game is ever served. By the time a mod's
- * `init` runs here, the bundle it wants to string-splice has already been
- * transformed and shipped — there is no live function to rewrite and no `eval`
- * sink to rewrite it through. Accepting the call and doing nothing would be
- * worse than refusing it: the mod would load, report success, and silently not
- * work, which is the precise failure mode this project exists to end.
+ * Mixins USED to be refused outright, and the reason was real: PML patches by
+ * token-matching the live minified bundle, and by the time a mod's `init` runs
+ * here that bundle has already been transformed and shipped — there is no live
+ * function to rewrite and no `eval` sink to rewrite it through. The fix is not
+ * to fake a live target but to move the application to where TSPML already
+ * patches: `registerClassMixin` calls are COLLECTED here (validated per call —
+ * a spec this adapter cannot carry is still refused with a reason), persisted
+ * with the mod, and spliced into the served source at the transform seam,
+ * BEFORE Babel, because PML's tokens are written in Kodub's own minified
+ * formatting and would not survive a regeneration. `./splice.ts` owns the
+ * patch language and its exactly-once anchor rule.
+ *
+ * The consequence worth stating to a player: a PML mod's mixins apply on the
+ * NEXT launch, not the one that collected them. The first boot after install
+ * registers and reports; the reload applies. That is the same shape as every
+ * other plan-carrying feature here (physics included), because the plan must
+ * be parked before the frame's first fetch.
+ *
+ * The families still refused are refused for structure, not effort: they
+ * anchor to a scope or file this adapter never holds (module-scoped functions,
+ * the worker bundle), and the method-extent types (`HEAD`/`TAIL`/`OVERRIDE`/
+ * `CONSTRUCTOR`) need the live class PML resolves them against.
  *
  * `registerPhysicsMixin` is refused for a sharper reason. TSPML *can* patch the
  * physics binary (#43), but only through a `physics.json` pinned to a
@@ -53,6 +66,7 @@
  */
 import type { TspmlApi } from '@tspml/api';
 import { PML_RUNTIME_GLOBAL } from './wrap';
+import { parsePmlMixinSpec, type PmlSplicePatch } from './splice';
 
 /** One thing the adapter could not do, with the reason the author needs. */
 export interface PmlRefusal {
@@ -68,6 +82,12 @@ export interface PmlRefusal {
 export interface PmlModReport {
   readonly refusals: readonly PmlRefusal[];
   readonly warnings: readonly string[];
+  /**
+   * Token-anchored mixins the mod registered, collected for the transform
+   * seam. NOT applied yet — see the file header: they ride the plan and apply
+   * on the NEXT launch, after the page persists them onto the mod's record.
+   */
+  readonly mixins: readonly PmlSplicePatch[];
 }
 
 /** A setting as PML declares it (values are stored, never rendered). */
@@ -213,10 +233,12 @@ export interface PmlLoaderShim {
   [key: string]: unknown;
 }
 
-/** The reason text for every mixin-family refusal. Written once — the whole
- *  point is that an author reads the SAME explanation whichever one they hit. */
+/** The reason text for every mixin-FAMILY refusal (the token-anchored
+ *  `registerClassMixin` types are collected instead — see the file header).
+ *  Written once — the whole point is that an author reads the SAME explanation
+ *  whichever family they hit. */
 const MIXIN_REASON =
-  'PML mixins string-splice the live minified bundle at runtime (toString + indexOf + eval); TSPML transforms the bundle structurally before it is served, so by the time this mod runs there is no live function left to patch. Port this patch to a TSPML mixins.json (anchored to a mapped symbol) to have it apply.';
+  'PML mixins string-splice the live minified bundle at runtime (toString + indexOf + eval). Token-anchored registerClassMixin calls carry across — collected here and applied to the served source at the transform seam; this mixin family anchors to module scope, which no translation of a served bundle can reach. Port this patch to a TSPML mixins.json (anchored to a mapped symbol) to have it apply.';
 
 const PHYSICS_REASON =
   'PML physics mixins write a raw byte offset into polytrack_physics.wasm. TSPML applies physics patches only through a physics.json pinned to a wasmHash, so a stale offset refuses instead of writing into an unverified binary — and this call arrives with no hash to check. Port it to a physics.json to have it apply.';
@@ -242,6 +264,9 @@ export function createPmlRuntime(
 ): { readonly runtime: PmlRuntime; readonly report: PmlModReport; readonly disposers: Array<() => void> } {
   const refusals: PmlRefusal[] = [];
   const warnings: string[] = [];
+  // Token-anchored mixin specs collected from registerClassMixin — see the
+  // file header for why collection (not application) is this runtime's job.
+  const mixins: PmlSplicePatch[] = [];
   const disposers: Array<() => void> = [];
   const settings = new Map<string, PmlSetting>();
   const registry = options.registry ?? new Map<string, unknown>();
@@ -368,8 +393,21 @@ export function createPmlRuntime(
       else found.value = value;
     },
 
-    // ── the untranslatable half ───────────────────────────────────────────
-    registerClassMixin: mixinRefusal('registerClassMixin'),
+    // ── mixins: collected here, applied at the transform seam ─────────────
+    // The ONE family that carries. The spec is validated per call; anything
+    // this adapter cannot faithfully splice is refused below like the other
+    // families, so a mod always gets an answer it can read in the report.
+    registerClassMixin(classRef: unknown, method: unknown, spec: unknown): void {
+      const parsed = parsePmlMixinSpec(classRef, method, spec);
+      if (!parsed.ok) {
+        // Through the shared `refuse` — a malformed spec deserves the same
+        // dedupe and logger treatment as a refused family, and a mod in a loop
+        // must not flood its own report.
+        refuse('registerClassMixin', parsed.reason, [classRef, method]);
+        return;
+      }
+      mixins.push(parsed.patch);
+    },
     registerFuncMixin: mixinRefusal('registerFuncMixin'),
     registerClassWideMixin: mixinRefusal('registerClassWideMixin'),
     registerGlobalMixin: mixinRefusal('registerGlobalMixin'),
@@ -391,7 +429,7 @@ export function createPmlRuntime(
     PolyModLoader: loader,
   };
 
-  return { runtime, report: { refusals, warnings }, disposers };
+  return { runtime, report: { refusals, warnings, mixins }, disposers };
 }
 
 function str(v: unknown): string | null {

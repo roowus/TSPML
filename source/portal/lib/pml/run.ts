@@ -194,7 +194,7 @@ export async function importPmlMod(record: UserModRecord, api: TspmlApi): Promis
   if (sessionReports.size > 0 && !warnings.includes(PML_ORDER_WARNING)) {
     warnings.push(PML_ORDER_WARNING);
   }
-  sessionReports.set(id, { refusals: report.refusals, warnings });
+  sessionReports.set(id, { refusals: report.refusals, warnings, mixins: report.mixins });
 
   const call = async (hook: 'preInit' | 'init' | 'postInit' | 'onGameLoad'): Promise<void> => {
     const fn = instance[hook];

@@ -287,17 +287,19 @@ export function resolveSourceUrl(entry: RegistryEntry, origin: string): string {
  * nothing unusual to say. Advisory: it never blocks.
  *
  * Only `pml` has anything to say today. A PML mod installs and runs through the
- * compatibility adapter in `lib/pml/`, and the parts that carry across (hooks,
- * keybinds, settings, `getMod`) are not the parts that don't (mixins, raw
- * physics offsets, `eval`-shaped patching). Saying so at install time is the
- * whole point: the alternative is a mod that installs cleanly, loads cleanly,
- * reports success, and does nothing — the silence this project exists to end.
- * What exactly was refused, for the mod actually in front of you, arrives after
- * it runs (`ModLoadSummary.pml`); this is the part we can say up front.
+ * compatibility adapter in `lib/pml/`. The long form is {@link installCaveat};
+ * the UI shows {@link installCaveatSummary} collapsed with the long form behind
+ * an expander, because the fact is load-bearing and the reasoning is not — a
+ * paragraph repeated on every PML card trained the eye to skip it.
  */
+export function installCaveatSummary(entry: RegistryEntry): string | null {
+  if (entry.format !== 'pml') return null;
+  return 'runs through TSPML\'s PML adapter — what carries across and what doesn\'t.';
+}
+
 export function installCaveat(entry: RegistryEntry): string | null {
   if (entry.format !== 'pml') return null;
-  return 'this mod is packaged for PML and installs through TSPML\'s compatibility adapter. Lifecycle hooks, keybinds and settings carry across; mixins do not — PML patches the game by matching minified identifiers at runtime, TSPML patches structurally against a symbol map, so the two are not interchangeable. Each refused call is reported by name once the mod runs, so a mod whose patching was all mixins will load and visibly do less than it claims.';
+  return 'this mod is packaged for PML and installs through TSPML\'s compatibility adapter. Lifecycle hooks, keybinds, settings and mixins carry across; mixins are collected at runtime and applied as token-verified source patches on the next launch, so a freshly installed mod needs one restart for its patching to take effect. What still does not carry: raw physics offsets (TSPML\'s wasm gate is fail-closed on a structural hash PML never sends) and eval-shaped global lookups. Everything refused or applied is reported by name once the mod runs.';
 }
 
 /**
@@ -456,19 +458,24 @@ export function entryTags(entry: RegistryEntry): string[] {
 }
 
 /**
- * Every tag in the catalog, deduped and sorted — the filter row's vocabulary.
+ * The filter row's vocabulary, split by what kind of fact a chip states.
  *
- * Format tags lead, so `pml` and `tspml` sit together at the front of the row
- * rather than being scattered through the content tags. Both are real filters:
- * "show me only what runs natively" is a question a player has, and the answer
- * changes what installing costs them.
+ * Three groups, because the row read as one flat list buried its own structure:
+ * eighteen chips in insertion order is a wall, and "which of these are people?"
+ * was answerable only by recognising names. The groups are labelled on screen
+ * (`loader`, `category`, `people`) and the labels are the honest answer to what
+ * the groups ARE — `loader` changes what pressing Install does, `category` says
+ * what the mod does, `people` says who made it.
  *
- * People trail, after the content tags, mirroring their place on a card — and
- * because with ten names in a twenty-one-row catalog they are the longest
- * group, and putting the short, meaning-dense chips first keeps the row
- * scannable past them.
+ * Ordering inside the row mirrors a card: loader, content, people.
  */
-export function registryTags(entries: readonly RegistryEntry[]): string[] {
+export interface RegistryTagGroups {
+  readonly loaders: readonly string[];
+  readonly content: readonly string[];
+  readonly persons: readonly string[];
+}
+
+export function registryTagGroups(entries: readonly RegistryEntry[]): RegistryTagGroups {
   const formats = new Set<string>();
   const content = new Set<string>();
   const persons = new Set<string>();
@@ -477,7 +484,25 @@ export function registryTags(entries: readonly RegistryEntry[]): string[] {
     for (const t of e.tags) if (t !== e.format) content.add(t);
     for (const p of entryPersons(e)) persons.add(p);
   }
-  return [...[...formats].sort(), ...[...content].sort(), ...[...persons].sort()];
+  return {
+    loaders: [...formats].sort(),
+    content: [...content].sort(),
+    persons: [...persons].sort(),
+  };
+}
+
+/**
+ * Every tag in the catalog, deduped and sorted — the flat view of
+ * {@link registryTagGroups}, in the same loader/content/people order.
+ *
+ * Format tags lead, so `pml` and `tspml` sit together at the front of the row
+ * rather than being scattered through the content tags. Both are real filters:
+ * "show me only what runs natively" is a question a player has, and the answer
+ * changes what installing costs them.
+ */
+export function registryTags(entries: readonly RegistryEntry[]): string[] {
+  const g = registryTagGroups(entries);
+  return [...g.loaders, ...g.content, ...g.persons];
 }
 
 /**

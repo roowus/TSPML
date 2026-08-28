@@ -72,9 +72,18 @@ declare global {
     __smokePmlSetting?: string | boolean;
     /**
      * Smoke scratch: set only if the fixture PML mod's code ran PAST its refused
-     * `registerClassMixin` call — the refusal must return, not throw.
+     * mixin calls — a refusal must return, not throw.
      */
     __smokePmlSurvivedMixin?: boolean;
+    /**
+     * Smoke scratch: incremented IN THE GAME FRAME by the fixture PML mod's
+     * collected splice, which the transform seam inserts into the served
+     * bundle. Presence means the spliced code EXECUTED at bundle eval — the
+     * difference between "the plan accepted the patch" and "the patch ran".
+     */
+    __pmlSpliceRan?: number;
+    /** The user-mixin plan report the route prepends to the served bundle. */
+    __tspmlUserMixins?: any;
   }
 }
 

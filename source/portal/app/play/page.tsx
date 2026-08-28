@@ -771,6 +771,55 @@ export default function PlayPage(): ReactElement {
       }
       for (const w of e.report.warnings) log(`[pml:${e.id}] ${w}`);
     }
+    // PML mixins this boot COLLECTED (token-anchored registerClassMixin calls)
+    // ride the plan, not the runtime: persist any new ones onto their records
+    // so the NEXT launch's parked plan carries them to the transform seam.
+    //
+    // Deliberately NOT updateUserMods: that path reloads the mod set, and the
+    // mod is already running — its hooks should not fire twice over a storage
+    // write it cannot observe. What changes is the PLAN, so exactly the plan
+    // half of refreshRunningSet runs here (persist + re-park + restart
+    // banner). Idempotent by content: a mod re-registers the same spec every
+    // boot, and the JSON-key dedupe keeps the second pass a no-op.
+    const collectedMixins = s.pml.filter((e) => e.report.mixins.length > 0);
+    if (collectedMixins.length > 0) {
+      const current = userModsRef.current;
+      let changed = false;
+      const next = current.map((r) => {
+        if (r.format !== 'pml') return r;
+        const rid = r.manifest.id;
+        const entry = collectedMixins.find((e) => e.id === rid);
+        if (entry === undefined || typeof rid !== 'string') return r;
+        const existing = r.pmlMixins ?? [];
+        const known = new Set(existing.map((p) => JSON.stringify(p)));
+        const fresh = entry.report.mixins.filter((p) => !known.has(JSON.stringify(p)));
+        if (fresh.length === 0) return r;
+        log(`[pml:${rid}] ${fresh.length} mixin(s) collected — they apply after a restart`);
+        changed = true;
+        // The record stores raw records (the transform seam owns deep shape
+        // validation, same division as `mixins`), so the typed specs are
+        // widened on the way into storage.
+        return { ...r, pmlMixins: [...existing, ...(fresh as unknown as Record<string, unknown>[])] };
+      });
+      if (changed) {
+        userModsRef.current = next;
+        setUserMods(next);
+        setPersistWarning(
+          saveUserMods(next)
+            ? null
+            : 'Storage unavailable — mods work this session but will not survive a reload.',
+        );
+        planChainRef.current = planChainRef.current.then(async () => {
+          const r = await parkUserPatchPlan(runningMods());
+          parkedFingerprintRef.current = r.fingerprint;
+          planSetsRef.current = r.sets;
+          setNeedsRestart(
+            r.fingerprint !== servedFingerprintRef.current ||
+              parkedPhysicsRef.current !== servedPhysicsRef.current,
+          );
+        });
+      }
+    }
     setModsStatus(
       s.loaded.length > 0
         ? `✓ ${s.loaded.join(', ')}`
@@ -1923,29 +1972,50 @@ export default function PlayPage(): ReactElement {
                 adapter could not carry across reports SUCCESS everywhere else
                 on this page — it is in `loaded`, it has a green dot — and then
                 does less than it claims. This is the only place that says so,
-                so it names every refused call rather than counting them. */}
+                so it names every refused call rather than counting them.
+                Collected mixins get their own line because they are the
+                OPPOSITE of a refusal: the patch will run, just on the next
+                launch, and a player who reads "did not apply" above a mixin
+                that DID collect would rightly stop trusting the panel. */}
             {pmlEntries
-              .filter((e) => e.report.refusals.length > 0 || e.report.warnings.length > 0)
+              .filter(
+                (e) =>
+                  e.report.refusals.length > 0 ||
+                  e.report.warnings.length > 0 ||
+                  e.report.mixins.length > 0,
+              )
               .map((e) => (
                 <div className="warn pml-report" key={e.id}>
                   <p>
                     <Icon name="warn" /> <code>{e.id}</code> is a PML mod running through the
-                    compatibility adapter. It loaded, but the following did not apply:
+                    compatibility adapter. It loaded
+                    {e.report.refusals.length + e.report.warnings.length > 0
+                      ? ', but the following did not apply:'
+                      : '.'}
                   </p>
-                  <ul>
-                    {e.report.refusals.map((r) => (
-                      <li key={`${r.method}:${r.target ?? ''}`}>
-                        <code>
-                          {r.method}
-                          {r.target ? ` (${r.target})` : ''}
-                        </code>{' '}
-                        — {r.reason}
-                      </li>
-                    ))}
-                    {e.report.warnings.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
+                  {e.report.refusals.length + e.report.warnings.length > 0 ? (
+                    <ul>
+                      {e.report.refusals.map((r) => (
+                        <li key={`${r.method}:${r.target ?? ''}`}>
+                          <code>
+                            {r.method}
+                            {r.target ? ` (${r.target})` : ''}
+                          </code>{' '}
+                          — {r.reason}
+                        </li>
+                      ))}
+                      {e.report.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {e.report.mixins.length > 0 ? (
+                    <p className="meta">
+                      {e.report.mixins.length} source mixin
+                      {e.report.mixins.length === 1 ? '' : 's'} collected — applied on the next
+                      launch (restart to run this mod's patching).
+                    </p>
+                  ) : null}
                 </div>
               ))}
           </section>

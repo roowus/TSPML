@@ -21,6 +21,7 @@ import {
   getRegistryEntry,
   installBlockedReason,
   installCaveat,
+  installCaveatSummary,
   isInstallable,
   listRegistry,
   parseRegistry,
@@ -199,14 +200,25 @@ describe('installBlockedReason', () => {
 describe('installCaveat', () => {
   it('says what a PML install costs, next to a button that still works', () => {
     // The advisory a blocked entry used to carry. It has to explain itself for
-    // the same reason the refusal did — "half of this mod's patching will be
-    // refused" is a fact about what you are getting, and a player who reads it
-    // only after installing has already been misled about what they installed.
+    // the same reason the refusal did — "your mixins apply after one restart"
+    // and "physics patches never carry" are facts about what you are getting,
+    // and a player who reads them only after installing has already been
+    // misled about what they installed.
     const e = parsed(entry({ format: 'pml' })).entries[0] as RegistryEntry;
     const caveat = installCaveat(e);
     expect(caveat).toContain('PML');
-    expect(caveat).toContain('symbol map');
+    // Mixins carry — with the launch-order cost named, because "applied on the
+    // next launch" is the difference between a working mod and one a player
+    // uninstalls as broken after the first boot did nothing.
     expect(caveat).toContain('mixins');
+    expect(caveat).toContain('next launch');
+    // And the honest remaining limit: the fail-closed wasm gate.
+    expect(caveat).toContain('physics');
+    // The summary line is what shows collapsed; it must not be a second copy
+    // of the body that can drift out of step with it.
+    const summary = installCaveatSummary(e);
+    expect(summary).toContain('adapter');
+    expect(summary === null ? '' : summary).not.toContain('next launch');
   });
 
   it('has nothing to say about a tspml entry', () => {
