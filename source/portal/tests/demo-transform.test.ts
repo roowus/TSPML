@@ -151,6 +151,104 @@ describe('composeTransform (#62)', () => {
     });
   });
 
+  it('composes PML splices into the same output and the same per-mod row', () => {
+    // A splice rides the plan like any patch but applies to the RAW source
+    // before Babel: its token (`class Hud`'s neighbourhood, in Kodub's own
+    // formatting) would not survive the engine's regeneration, and the mod's
+    // own INSERT text reaches the served bundle through the engine's output
+    // gate like every other byte of the composed file.
+    const r = composeTransform(
+      ENGINE,
+      BUNDLE,
+      BASE,
+      [
+        {
+          modId: 'pml-mod',
+          patches: [
+            {
+              op: 'pml-splice',
+              type: 'INSERT',
+              classRef: 'Hud.prototype',
+              method: 'draw',
+              token: 'return 1;',
+              func: 'globalThis.__pmlSpliced = 1;',
+            },
+          ],
+        },
+      ],
+      MAP,
+      LIVE_HASH,
+      MAIN,
+    );
+    expect(r.transformed).toBe(true);
+    expect(r.code).toContain('__base');
+    expect(r.code).toContain('__pmlSpliced');
+    expect(r.userReport?.mods[0]).toEqual({
+      modId: 'pml-mod',
+      declared: 1,
+      applied: 1,
+      failed: [],
+    });
+  });
+
+  it('reports a PML splice whose token is absent as a failed row, not a broken boot', () => {
+    // The per-call isolation rule extended to splices: a stale token (the mod
+    // was written for a different game build) fails THAT patch with the count
+    // in the reason, and the base + every other mod still compose.
+    const r = composeTransform(
+      ENGINE,
+      BUNDLE,
+      BASE,
+      [
+        {
+          modId: 'stale-pml',
+          patches: [
+            { op: 'pml-splice', type: 'INSERT', token: 'e.car.setCarState(t, !1)', func: ';x;' },
+          ],
+        },
+        { modId: 'fine-mod', patches: [{ op: 'after', target: HUD_TARGET, inject: 'globalThis.__fine = 1;' }] },
+      ],
+      MAP,
+      LIVE_HASH,
+      MAIN,
+    );
+    expect(r.transformed).toBe(true);
+    expect(r.code).toContain('__fine');
+    const row = r.userReport?.mods.find((m) => m.modId === 'stale-pml');
+    expect(row?.applied).toBe(0);
+    expect(row?.failed[0]?.reason).toBe('token-not-found');
+    expect(row?.failed[0]?.detail).toContain('0 times');
+  });
+
+  it('a mod with BOTH a splice and an engine patch gets one row counting both', () => {
+    const r = composeTransform(
+      ENGINE,
+      BUNDLE,
+      BASE,
+      [
+        {
+          modId: 'mixed-mod',
+          patches: [
+            { op: 'pml-splice', type: 'INSERT', token: 'return 1;', func: 'globalThis.__pmlSpliced = 1;' },
+            { op: 'after', target: HUD_TARGET, inject: 'globalThis.__userA = 1;' },
+          ],
+        },
+      ],
+      MAP,
+      LIVE_HASH,
+      MAIN,
+    );
+    expect(r.transformed).toBe(true);
+    expect(r.code).toContain('__pmlSpliced');
+    expect(r.code).toContain('__userA');
+    expect(r.userReport?.mods[0]).toEqual({
+      modId: 'mixed-mod',
+      declared: 2,
+      applied: 2,
+      failed: [],
+    });
+  });
+
   it('isolates one mod\'s not-found patch from the others and from the base', () => {
     const r = composeTransform(
       ENGINE,

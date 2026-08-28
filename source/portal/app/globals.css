@@ -2105,6 +2105,57 @@ a.btn {
   border-style: dashed;
 }
 
+/*
+  The filter rows, grouped by what kind of fact a chip states. One flat row of
+  eighteen chips made "which of these are people?" unanswerable without
+  recognising names; three labelled rows answer it before anything is read.
+*/
+.tag-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A caption, not a chip: no border, no press, half the size. */
+.tag-row-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  align-self: center;
+  margin-right: 2px;
+  user-select: none;
+}
+
+/*
+  The expandable PML caveat. The summary line is the fact; the paragraph is the
+  reasoning. `list-style: none` on both states because the disclosure triangle
+  is a marker, not a bullet, and the expander affordance is the wording plus the
+  cursor — a triangle would read as a nav menu on a card that already has chips
+  and buttons in it. The summary keeps the caveat's warn icon so the collapsed
+  line looks like what it is: the same advisory, shortened.
+*/
+.install-caveat-expandable {
+  cursor: pointer;
+}
+
+.install-caveat-expandable > summary {
+  list-style: none;
+  display: list-item;
+}
+
+.install-caveat-expandable[open] > summary {
+  list-style: none;
+}
+
+.install-caveat-expandable > summary::-webkit-details-marker {
+  display: none;
+}
+
+.install-caveat-expandable > summary + p {
+  margin: 6px 0 0;
+}
+
 .browse-grid {
   list-style: none;
   margin: 0;

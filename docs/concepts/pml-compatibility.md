@@ -5,11 +5,12 @@ first mod loader. This page states exactly how much of a PML mod carries across,
 what does not, and why the parts that do not are **refused by name** instead of
 silently accepted.
 
-> **The short version.** Lifecycle hooks, keybinds, settings and `getMod` work.
-> **Mixins do not** — they are refused per call with a reason, and the mod keeps
-> running. A mod that is mostly mixins is mostly not going to work, and the
-> portal says so at install time rather than leaving you to wonder why nothing
-> happened.
+> **The short version.** Lifecycle hooks, keybinds, settings, `getMod` and
+> **token-anchored mixins** work — mixins are collected on first launch and
+> applied as verified source patches on the next. What does not carry — physics
+> offsets, method-extent patches, PML's eval bridge — is **refused by name**,
+> and the mod keeps running. The portal says all of this at install time rather
+> than leaving you to wonder why nothing happened.
 
 ## TSPML is still its own loader
 
@@ -30,10 +31,10 @@ Everything it already guarantees therefore covers a PML mod for free:
 That is the whole reason for the shape. A second loader would have had to
 re-earn every one of those.
 
-## Why mixins cannot be translated
+## Mixins: carried, with PML's semantics and TSPML's discipline
 
-This is the load-bearing incompatibility, and it is a design difference rather
-than a missing feature.
+The interesting half of compatibility, and it used to be a hard refusal. The
+reason it was is still true and still worth reading, so it stays:
 
 | | PML | TSPML |
 |---|---|---|
@@ -42,30 +43,58 @@ than a missing feature.
 | **Anchored to** | a literal substring of the minified source | a named symbol in a map pinned to a `bundleHash` |
 | **On a game update** | the token silently stops matching | the hash mismatches and the patch **fails closed** |
 
-A PML mixin names a place in the *minified text* of a live function. By the time
-a PML mod's `init` runs under TSPML, the bundle has already been transformed and
-served — there is no live function left to splice, and the token it wants to
-find describes a build that was never shipped to that tab.
+A PML mixin names a place in the *minified text* of the game source, and by the
+time a PML mod's `init` runs under TSPML that bundle has already been
+transformed and served — there is no live function left to splice. **Refusing
+was the honest answer for as long as "translate the patch" was the only
+imagined alternative.** The working answer turned out to be different: don't
+translate the patch — **run PML's patch language at TSPML's own patch time**.
 
-So the adapter refuses each mixin call and says this:
+How a mixin carries now:
 
-> PML mixins string-splice the live minified bundle at runtime (toString +
-> indexOf + eval); TSPML transforms the bundle structurally before it is served,
-> so by the time this mod runs there is no live function left to patch. Port this
-> patch to a TSPML `mixins.json` (anchored to a mapped symbol) to have it apply.
+1. **Collect.** The mod's `registerClassMixin` calls are validated per call at
+   runtime and collected onto the mod's record. A spec the adapter cannot
+   faithfully apply — a method-extent type (`HEAD`/`TAIL`/`OVERRIDE`/
+   `CONSTRUCTOR`), a wasm offset, a non-object spec — is refused by name right
+   there, exactly as before.
+2. **Carry.** The collected specs ride the same request-carried plan as pasted
+   TSPML mixins (#62): parked in the Cache API before the game frame mounts,
+   POSTed to the transform route, applied per surface.
+3. **Apply — before Babel.** A splice edits the RAW bundle text, because PML's
+   tokens are written in Kodub's own minified formatting and would not survive
+   the engine's regeneration. Then the engine's existing re-parse gate covers
+   the spliced source: a splice that breaks syntax fails the whole compose and
+   the game boots **vanilla** instead of broken.
+4. **Verify — exactly once.** An anchor must match **exactly once** in the
+   surface being served, or the patch is refused with the match count. PML
+   splices at whatever its lookup finds first; TSPML refuses ambiguity rather
+   than guess. The one concession to reality: twin anchors (`tokenStart ===
+   tokenEnd`, which is what real PML mods ship) accept one occurrence — the
+   single anchor serves as both ends and the span is empty — or two; three or
+   more refuse.
 
-Physics mixins get their **own** reason, because the answer there is different.
-TSPML *can* patch `polytrack_physics.wasm` (M11 / [#43]) — but only through a
-`physics.json` **pinned to a `wasmHash`**. A PML `PATCH_F32` arrives as a raw
-byte offset with no hash to check, and honouring it would mean writing an
-unverified offset into the simulation that produces leaderboard evidence. That
-gate does not bend for compatibility.
+The consequence a player sees: **a PML mod's mixins apply on the next launch,
+not the first one.** The first boot collects and says so; the reload applies.
+That is the same shape as every plan-carrying feature here (physics included),
+because the plan must be parked before the frame's first fetch.
 
-The same applies to PML's eval bridge (`getFromPolyTrack`,
-`getFromPolyTrackGlobal`): it resolves paths inside PML's own patched bundle.
-TSPML serves an unpatched game with no eval sink, so there is nothing to resolve
-against — use `api.events` / `api.keybinds` / `api.editor`, or a `mixins.json`
-anchor.
+What still refuses, and why:
+
+- **Method-extent types** (`HEAD`/`TAIL`/`OVERRIDE`/`CONSTRUCTOR`) anchor to a
+  method's extent, which PML resolves by holding the live class — a resolution
+  no served-bundle translation can reproduce.
+- **Other families** (`registerFuncMixin`, `registerClassWideMixin`,
+  `registerGlobalMixin`, `registerChunkMixin`, the sim-worker pair) anchor to
+  module scope, the worker bundle, or a chunk this adapter never holds.
+- **Physics offsets** (`PATCH_F32`/`PATCH_I32`) get their own reason: TSPML
+  *can* patch `polytrack_physics.wasm` (M11 / [#43]) but only through a
+  `physics.json` **pinned to a `wasmHash`**. A raw offset arrives with no hash
+  to check, and honouring it would mean writing into the simulation that
+  produces leaderboard evidence. That gate does not bend for compatibility.
+- **PML's eval bridge** (`getFromPolyTrack`, `getFromPolyTrackGlobal`) resolves
+  paths inside PML's own patched bundle. TSPML serves an unpatched game with no
+  eval sink, so there is nothing to resolve against — use `api.events` /
+  `api.keybinds` / `api.editor`, or a `mixins.json` anchor.
 
 ### Refusing, not throwing
 
@@ -87,7 +116,8 @@ scroll past is the same as none.
 | `getMod` / `registerMod` | ✅ | Scoped to one session; resolves by PML id **and** by our slug |
 | `PolyMod` fields (`modName`, `modID`, `modAuthor`, `modVersion`, `baseUrl`, …) | ✅ | Assigned before the first hook, as PML's own loader does |
 | `MixinType` / `SettingType` | ✅ | Full enums, frozen — mods read these at module scope |
-| Mixins (all eight families) | ❌ Refused | Per call, with the reason above |
+| `registerClassMixin` (token-anchored types) | ✅ next launch | Collected, applied at the transform seam; see above |
+| Other mixin families (7 of 8) | ❌ Refused | Per call, with the reason above |
 | `registerPhysicsMixin` | ❌ Refused | The `wasmHash` gate; see above |
 | `getFromPolyTrack*` | ❌ Refused | The eval bridge; see above |
 
@@ -204,9 +234,13 @@ The rewrite is textual and deliberately conservative:
 ## What you see as a player
 
 At install time the portal shows an **advisory caveat** next to a working
-install button — not a block. Mixin refusals and every warning above are
-collected per mod and shown on `/play`, so a mod that will mostly not work is
-visibly that **before** you go looking for the feature it promised.
+install button — not a block. It is collapsed to one line with the full
+reasoning behind an expander (a native `<details>`): the fact is load-bearing
+and the reasoning is not, and a paragraph repeated on every PML card is
+wallpaper by the third one. Mixin refusals, collections and every warning
+above are shown per mod on `/play` — a mod that will mostly not work is visibly
+that **before** you go looking for the feature it promised, and a mod whose
+patching is collected says so with the restart it needs.
 
 ## PML mods in the catalog
 
@@ -275,15 +309,18 @@ collaborations — asserted in a browser (`smoke:registry`, leg 2c).
 | `lib/mod-formats/pml.ts` | The CDN walk and format entry point |
 | `lib/pml/manifest.ts` | PML manifest → TSPML manifest (pure) |
 | `lib/pml/wrap.ts` | Rewrites the `PolyModLoader` import |
-| `lib/pml/shim.ts` | The PML runtime a mod actually talks to |
+| `lib/pml/shim.ts` | The PML runtime a mod actually talks to (collects mixins) |
+| `lib/pml/splice.ts` | PML's token-splice language, exactly-once verified |
 | `lib/pml/run.ts` | Builds the synthetic module the loader drives |
 
 Tests: `tests/pml-manifest.test.ts`, `tests/pml-wrap.test.ts`,
-`tests/pml-shim.test.ts`, `tests/pml-run.test.ts` (139 tests).
+`tests/pml-shim.test.ts`, `tests/pml-run.test.ts`, `tests/pml-splice.test.ts`,
+plus splice-composition cases in `tests/demo-transform.test.ts` and plan
+carriage in `tests/user-patches.test.ts`.
 
 ## Proved in a browser
 
-Those 139 tests run under node, where the one thing that makes this work —
+Those unit tests run under node, where the one thing that makes this work —
 importing a rewritten PML module from a `blob:` URL — cannot happen and has to be
 mocked. So there is a CI smoke that does it for real:
 
@@ -296,10 +333,25 @@ The smoke imports the fixture's **index manifest** through the ordinary "Import
 from a URL" form with no format stated (the dispatcher sniffs it), then asserts
 the walk resolved, the `PolyModLoader` import rewrite worked, all four lifecycle
 hooks ran in order, the identity fields were assigned before the first hook, the
-keybind fires when a `keydown` is dispatched in the game frame, `getSetting`
-returns a string — and, load-bearingly, that the mod's `registerClassMixin` is
-**refused by name in the UI while the mod is still loaded** and the code after the
-refused call ran. That last trio is the only end-to-end proof of the contract
-this page is about.
+keybind fires when a `keydown` is dispatched in the game frame, and `getSetting`
+returns a string.
+
+The mixin legs are the load-bearing ones, and they cover BOTH halves of the
+contract:
+
+- **Refusal** — the fixture registers an untranslatable type (an `OVERRIDE`) and
+  an untranslatable family (`registerGlobalMixin`); both are refused **by name
+  in the UI while the mod is still loaded**, and the code after them ran.
+- **Carriage** — the fixture also registers a real splice whose token exists
+  exactly once in the vanilla 0.6.2 bundle and executes when the bundle
+  evaluates. The first boot asserts it is **collected and has NOT run yet** (the
+  running frame predates the plan that carries it); after one reload, the
+  marker the splice inserts is found **in the game frame** — which means the
+  spliced code executed, not merely that the plan accepted it — and the report
+  inside the served bundle reads `applied: 1` on `main.bundle.js`.
+
+A failed run along the way also proved the fail-closed gate does what it claims:
+a splice whose `func` broke the bundle's syntax produced `plan-status:
+base-failed` and a **vanilla game**, never a corrupted boot.
 
 [#43]: https://github.com/roowus/TSPML/issues/43

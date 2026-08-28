@@ -2,7 +2,12 @@
 
 import { useState, type ReactElement } from 'react';
 import { Icon } from '@/app/icons';
-import { installBlockedReason, installCaveat, type RegistryEntry } from '@/lib/registry';
+import {
+  installBlockedReason,
+  installCaveat,
+  installCaveatSummary,
+  type RegistryEntry,
+} from '@/lib/registry';
 import type { UseInstall } from './useInstall';
 
 /**
@@ -54,12 +59,23 @@ export function InstallButton({
 
   // Stated before the install and kept after it: what the adapter cannot carry
   // across does not stop being true once the mod is in the pool.
+  //
+  // EXPANDABLE, as a native <details>: the one-line summary is the fact a
+  // player deciding needs, and the paragraph is the reasoning. Collapsed by
+  // default because this caveat appears on every PML card in the grid — a
+  // paragraph repeated nineteen times is wallpaper by the third card, while a
+  // one-liner with a visible expander keeps being read. Native details keeps
+  // the open path zero-JS (the #118 lesson) and keyboard-accessible for free.
   const caveat = installCaveat(entry);
+  const caveatSummary = installCaveatSummary(entry);
   const caveatNote =
-    caveat === null ? null : (
-      <p className="install-caveat">
-        <Icon name="warn" /> {caveat}
-      </p>
+    caveat === null || caveatSummary === null ? null : (
+      <details className="install-caveat install-caveat-expandable">
+        <summary>
+          <Icon name="warn" /> {caveatSummary}
+        </summary>
+        <p>{caveat}</p>
+      </details>
     );
 
   if (state.phase === 'done') {
