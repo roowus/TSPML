@@ -43,6 +43,44 @@ describe('buildUserPatchPlan', () => {
     expect(overCap).toEqual([]);
   });
 
+  it('projects a PML mod from its COLLECTED splice specs, one set per mod', () => {
+    // A PML mod has no pasted mixins.json; its plan content is the specs the
+    // shim collected at runtime and the page persisted. One set per mod holds
+    // for the mixed case too — the caps and the report are per mod, not per
+    // patch kind.
+    const splice = {
+      op: 'pml-splice',
+      type: 'INSERT',
+      token: 'e.car.setCarState(t, !1)',
+      func: '(x)',
+    };
+    const { plan } = buildUserPatchPlan([
+      record({ id: 'pml-only', format: 'pml', pmlMixins: [splice] }),
+      record({ id: 'pml-both', format: 'pml', mixins: [PATCH], pmlMixins: [splice] }),
+    ]);
+    expect(plan.sets).toEqual([
+      { modId: 'pml-only', patches: [splice] },
+      { modId: 'pml-both', patches: [PATCH, splice] },
+    ]);
+  });
+
+  it('caps a PML splice by its func exactly as an inject is capped', () => {
+    // The payload field differs but the exposure is the same: the func is
+    // spliced into the served bundle, so its size is bounded at ADD time.
+    const big = {
+      op: 'pml-splice',
+      type: 'INSERT',
+      token: 'x',
+      func: 'y'.repeat(USER_PATCH_LIMITS.maxInjectChars + 1),
+    };
+    const { plan, overCap } = buildUserPatchPlan([record({ id: 'big', format: 'pml', pmlMixins: [big] })]);
+    expect(plan.sets).toEqual([]);
+    expect(overCap).toEqual(['big']);
+    // And the server-side re-validation refuses it too, by the same field.
+    const parsed = parseUserPatchPlan({ v: 1, sets: [{ modId: 'big', patches: [big] }] });
+    expect(parsed).toBeNull();
+  });
+
   it('excludes over-cap mods from the plan and returns them in overCap', () => {
     const tooMany = Array.from({ length: USER_PATCH_LIMITS.maxPatchesPerMod + 1 }, () => PATCH);
     const hugeInject = {

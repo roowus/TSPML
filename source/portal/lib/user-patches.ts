@@ -170,9 +170,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /** True when a single patch respects the inject-size cap (non-string inject —
- *  e.g. a malformed patch — passes here and fails honestly in the engine). */
+ *  e.g. a malformed patch — passes here and fails honestly in the engine).
+ *  A PML splice's payload field is `func`, so it is capped the same way. */
 function withinInjectCap(patch: Record<string, unknown>): boolean {
-  return typeof patch.inject !== 'string' || patch.inject.length <= USER_PATCH_LIMITS.maxInjectChars;
+  if (typeof patch.inject === 'string' && patch.inject.length > USER_PATCH_LIMITS.maxInjectChars) {
+    return false;
+  }
+  return typeof patch.func !== 'string' || patch.func.length <= USER_PATCH_LIMITS.maxInjectChars;
 }
 
 /**
@@ -192,18 +196,23 @@ export function buildUserPatchPlan(mods: readonly UserModRecord[]): {
   const overCap: string[] = [];
   const envSkipped: string[] = [];
   for (const mod of mods) {
-    if (!mod.enabled || mod.mixins === undefined || mod.mixins.length === 0) continue;
+    // A PML mod's plan content is its COLLECTED splice specs (`pmlMixins`),
+    // not a pasted mixins.json — either can be absent. One set per mod, both
+    // kinds together, because the caps and the report are per mod, not per
+    // patch kind.
+    const patches = [...(mod.mixins ?? []), ...(mod.pmlMixins ?? [])];
+    if (!mod.enabled || patches.length === 0) continue;
     const modId = userModId(mod);
     if (modId === null) continue; // id-less mods pre-fail in the loader anyway
     if (!modMixinsApplyToHost(mod.manifest)) {
       envSkipped.push(modId);
       continue;
     }
-    if (mod.mixins.length > USER_PATCH_LIMITS.maxPatchesPerMod || !mod.mixins.every(withinInjectCap)) {
+    if (patches.length > USER_PATCH_LIMITS.maxPatchesPerMod || !patches.every(withinInjectCap)) {
       overCap.push(modId);
       continue;
     }
-    sets.push({ modId, patches: mod.mixins });
+    sets.push({ modId, patches });
   }
   // maxMods: keep the FIRST N (stored order = add order) and flag the rest.
   while (sets.length > USER_PATCH_LIMITS.maxMods) {

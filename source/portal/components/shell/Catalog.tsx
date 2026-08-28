@@ -9,7 +9,7 @@ import {
   entryTags,
   gameVersionNote,
   listRegistry,
-  registryTags,
+  registryTagGroups,
   searchRegistry,
   type Registry,
   type RegistryEntry,
@@ -97,8 +97,13 @@ export function Catalog({
   const all = registry?.entries ?? [];
   const ofKind = useMemo(() => all.filter((e) => e.kind === kind), [all, kind]);
   // Tags come from the CURRENT tab's entries, so the filter row never offers a
-  // tag that would empty the list.
-  const tags = useMemo(() => registryTags(ofKind), [ofKind]);
+  // tag that would empty the list. Grouped by what KIND of fact a chip states —
+  // one flat row of eighteen chips buried its own structure.
+  const groups = useMemo(() => registryTagGroups(ofKind), [ofKind]);
+  const tags = useMemo(
+    () => [...groups.loaders, ...groups.content, ...groups.persons],
+    [groups],
+  );
   const shown = useMemo(() => searchRegistry(ofKind, query, tag), [ofKind, query, tag]);
 
   // A tag selected under Mods may not exist under Modpacks. Clearing it on the
@@ -165,26 +170,68 @@ export function Catalog({
           />
         </label>
         {tags.length > 0 ? (
-          <div className="tag-row">
-            <button
-              type="button"
-              className="tag-chip"
-              aria-pressed={tag === null}
-              onClick={() => setTag(null)}
-            >
-              All
-            </button>
-            {tags.map((t) => (
+          /*
+            Grouped by type, labelled on screen. The groups are the answer to a
+            question the flat row made unanswerable: which chips are people?
+            Each keeps the `tag-row` class so every existing locator (smokes
+            click `.tag-row button`, shot-check crops `.tag-row`) sees the same
+            control it always did — a group IS a row, not a new thing.
+          */
+          <div className="tag-groups">
+            <div className="tag-row" role="group" aria-label="Filter by loader">
+              <span className="tag-row-label">loader</span>
               <button
-                key={t}
                 type="button"
                 className="tag-chip"
-                aria-pressed={tag === t}
-                onClick={() => setTag(tag === t ? null : t)}
+                aria-pressed={tag === null}
+                onClick={() => setTag(null)}
               >
-                {t}
+                All
               </button>
-            ))}
+              {groups.loaders.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="tag-chip"
+                  aria-pressed={tag === t}
+                  onClick={() => setTag(tag === t ? null : t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            {groups.content.length > 0 ? (
+              <div className="tag-row" role="group" aria-label="Filter by category">
+                <span className="tag-row-label">category</span>
+                {groups.content.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className="tag-chip"
+                    aria-pressed={tag === t}
+                    onClick={() => setTag(tag === t ? null : t)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {groups.persons.length > 0 ? (
+              <div className="tag-row" role="group" aria-label="Filter by person">
+                <span className="tag-row-label">people</span>
+                {groups.persons.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className="tag-chip"
+                    aria-pressed={tag === t}
+                    onClick={() => setTag(tag === t ? null : t)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

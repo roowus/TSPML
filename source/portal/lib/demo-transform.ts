@@ -29,6 +29,14 @@
  *   user patches: PER-MOD ISOLATED. Each mod's failures are reported in
  *     `userReport.mods`; other mods and the base transform are unaffected.
  *
+ * PML splice patches (`op: 'pml-splice'`, see lib/pml/splice.ts) ride the
+ * same plan and the same per-mod report, but apply at a different point:
+ * token surgery on the RAW bundle text BEFORE the engine pass, because PML
+ * tokens are written in Kodub's own minified formatting and would not
+ * survive Babel's regeneration. Each splice is verified against the
+ * exactly-once anchor rule and refused (with a count) otherwise — PML's
+ * semantics, TSPML's fail-closed habit.
+ *
  * The pre-screen exists because the engine's replace single-winner detection
  * only groups replace-vs-replace: a user `replace` on a method a base
  * `before`/`after` already injected into would splice the base inject OUT while
@@ -57,6 +65,7 @@ import { BRIDGE_PATCHES } from "@tspml/shared";
 import { transformSurfaceFor } from "./transform-surface";
 import type { TransformSurface } from "./transform-surface";
 import type { UserMixinModReport, UserMixinReport, UserPatchSet } from "./user-patches";
+import { applyPmlSplice, type PmlSplicePatch } from "./pml/splice";
 
 const MAP: GameMap = validateMap(mapJson);
 
@@ -182,6 +191,10 @@ interface PreparedSet {
   readonly declared: number;
   readonly patches: Patch[];
   readonly preFailed: PreFailed[];
+  /** PML splice outcomes for this mod — applied before the engine pass, so
+   *  they merge into the same per-mod report rows. See the compose header. */
+  readonly spliceApplied: number;
+  readonly spliceFailed: readonly { reason: string; detail: string }[];
   startIndex: number;
 }
 
@@ -193,7 +206,10 @@ function failedEntry(reason: string, detail: string): { reason: string; detail: 
   return { reason, detail: truncate(detail) };
 }
 
-/** Build the per-mod report rows from engine results + pre-failures. */
+/** Build the per-mod report rows from engine results + pre-failures + splice
+ *  outcomes. Splices lead the failure list: they were the FIRST thing tried
+ *  against this surface's text, and an author debugging "why 0/2" wants the
+ *  token reason before the engine's. */
 function buildModReports(
   sets: readonly PreparedSet[],
   applied: readonly PatchResult[],
@@ -202,10 +218,11 @@ function buildModReports(
   const appliedByIndex = new Set(applied.map((r) => r.index));
   const failedByIndex = new Map(failed.map((r) => [r.index, r]));
   return sets.map((set) => {
-    const failures: { reason: string; detail: string }[] = set.preFailed.map((f) =>
-      failedEntry(f.reason, f.detail),
-    );
-    let appliedCount = 0;
+    const failures: { reason: string; detail: string }[] = [
+      ...set.spliceFailed,
+      ...set.preFailed.map((f) => failedEntry(f.reason, f.detail)),
+    ];
+    let appliedCount = set.spliceApplied;
     for (let i = 0; i < set.patches.length; i++) {
       const index = set.startIndex + i;
       if (appliedByIndex.has(index)) {
@@ -276,13 +293,51 @@ export function composeTransform(
     .filter((r): r is { ok: true; patch: Patch } => r.ok)
     .map((r) => r.patch);
 
+  // ── PML splices: applied to the RAW bundle text, before the engine ──────
+  // A PML mixin is a token-anchored edit whose tokens are written in Kodub's
+  // own minified formatting — `e.car.setCarState(t, !1)` with its spaces. The
+  // engine re-emits compact code, so a token that survived to the engine's
+  // OUTPUT would no longer match; the splice has to see the bytes the mod's
+  // author saw. Sequentially, in set order, because a later splice's anchor
+  // may sit in text an earlier splice rewrote — same order PML applies in.
+  //
+  // The `bundleHash` handed to the engine below stays the ORIGINAL source's
+  // hash on purpose: the version pin must gate the bytes actually fetched,
+  // and the spliced text is those bytes plus verified edits. A mod's splice
+  // carries its own byte-safety — the exactly-once anchor rule refuses a
+  // stale token instead of splicing blind.
+  let splicedSource = bundleSource;
+  const spliceByMod = new Map<
+    string,
+    { applied: number; failed: { reason: string; detail: string }[] }
+  >();
+  for (const set of userSets) {
+    let applied = 0;
+    const failed: { reason: string; detail: string }[] = [];
+    for (const raw of set.patches) {
+      if (raw.op !== "pml-splice") continue;
+      const r = applyPmlSplice(splicedSource, raw as unknown as PmlSplicePatch);
+      if (r.ok) {
+        splicedSource = r.source;
+        applied++;
+      } else {
+        failed.push(failedEntry(r.reason, r.detail));
+      }
+    }
+    spliceByMod.set(set.modId, { applied, failed });
+  }
+
   // ── #62: prepare user sets ──────────────────────────────────────────────
   // Base target signatures, for the replace pre-screen (see file header).
   const baseSignatures = new Set(patches.map((p) => targetSignature(p.target)));
   const prepared: PreparedSet[] = userSets.map((set) => {
     const ready: Patch[] = [];
     const preFailed: PreFailed[] = [];
+    const splice = spliceByMod.get(set.modId) ?? { applied: 0, failed: [] };
     for (const raw of set.patches) {
+      // Splices were applied (or refused) on the raw text above; they are not
+      // engine patches and must not be resolved as if they were.
+      if (raw.op === "pml-splice") continue;
       const r = resolveDeclaredPatch(raw, map, liveHash, surface);
       if (!r.ok) {
         preFailed.push({
@@ -305,7 +360,15 @@ export function composeTransform(
       }
       ready.push(resolved);
     }
-    return { modId: set.modId, declared: set.patches.length, patches: ready, preFailed, startIndex: 0 };
+    return {
+      modId: set.modId,
+      declared: set.patches.length,
+      patches: ready,
+      preFailed,
+      spliceApplied: splice.applied,
+      spliceFailed: splice.failed,
+      startIndex: 0,
+    };
   });
   const combined: Patch[] = [...patches];
   for (const set of prepared) {
@@ -313,7 +376,10 @@ export function composeTransform(
     combined.push(...set.patches);
   }
 
-  const r = transform(bundleSource, combined, {
+  // The engine's input is the SPLICED source — splices happen before Babel by
+  // design (see the splice block above) — while `bundleHash` stays the pin
+  // check against the bytes actually fetched from upstream.
+  const r = transform(splicedSource, combined, {
     bundleHash: liveHash,
     expectedBundleHash: surface.expectedHash,
     compact: true,

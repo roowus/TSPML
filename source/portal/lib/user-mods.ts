@@ -56,6 +56,17 @@ export interface UserModRecord {
    */
   readonly mixins?: readonly Record<string, unknown>[];
   /**
+   * PML mixin specs COLLECTED at runtime (the `registerClassMixin` family; see
+   * `lib/pml/splice.ts`), persisted so the mixin plan can carry them to the
+   * transform seam on the next launch. Written by the play page after a load
+   * summary reports them — a mod's first boot collects, its second applies.
+   *
+   * Absent for every TSPML-format mod and for PML mods that register no
+   * mixins. Same storage-schema rule as `format`: additive and optional
+   * forever, because rows that predate the field must keep parsing.
+   */
+  readonly pmlMixins?: readonly Record<string, unknown>[];
+  /**
    * The mod's pasted `physics.json` (optional fourth paste, #43): a `wasmHash` pin
    * plus f32 constant rewrites for `polytrack_physics.wasm`. Absent = the mod does
    * not touch physics, which is almost every mod.
