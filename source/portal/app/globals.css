@@ -2106,6 +2106,17 @@ a.btn {
 }
 
 /*
+  A version chip. Monospace, because it is the one chip whose text is a NUMBER
+  rather than a word — `0.6.2` in the proportional face reads as a tag that
+  happens to contain digits, while in mono it reads as a version at a glance,
+  next to its siblings in the version row.
+*/
+.tag-version,
+.tag-chip-version {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+/*
   The filter rows, grouped by what kind of fact a chip states. One flat row of
   eighteen chips made "which of these are people?" unanswerable without
   recognising names; three labelled rows answer it before anything is read.
@@ -2492,7 +2503,7 @@ img.entry-tile {
   .btn,
   .nav-item,
   .browse-tab,
-  .tag-chip:not(.tag-static):not(.tag-warn):not(.tag-format):not(.tag-person),
+  .tag-chip:not(.tag-static):not(.tag-warn):not(.tag-format):not(.tag-person):not(.tag-version),
   .stage-btn,
   .docs-link {
     min-height: 40px;

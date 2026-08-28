@@ -7,9 +7,11 @@ import { DEFAULT_GAME_VERSION } from '@/lib/game-versions';
 import {
   entryPersons,
   entryTags,
+  entryVersions,
   gameVersionNote,
   listRegistry,
   registryTagGroups,
+  releaseVersionsIn,
   searchRegistry,
   type Registry,
   type RegistryEntry,
@@ -24,6 +26,10 @@ import type { UseInstall } from './useInstall';
  * is what lets `KINDS.indexOf(k)` narrow instead of widening to `string`.
  */
 const KINDS = ['mod', 'modpack'] as const satisfies readonly RegistryKind[];
+
+/** The universe a card falls back to when its caller knows no catalog: just the
+ *  launcher's own version. A card rendered this way shows at most one chip. */
+const DEFAULT_UNIVERSE: readonly string[] = [DEFAULT_GAME_VERSION];
 
 /**
  * The catalog itself: tabs for Mods and Modpacks, a search box, a tag filter,
@@ -100,8 +106,11 @@ export function Catalog({
   // tag that would empty the list. Grouped by what KIND of fact a chip states —
   // one flat row of eighteen chips buried its own structure.
   const groups = useMemo(() => registryTagGroups(ofKind), [ofKind]);
+  // The version chips expand against the same universe the filter row offers —
+  // one derivation, two consumers, agreement by construction.
+  const universe = useMemo(() => releaseVersionsIn(ofKind), [ofKind]);
   const tags = useMemo(
-    () => [...groups.loaders, ...groups.content, ...groups.persons],
+    () => [...groups.loaders, ...groups.content, ...groups.versions, ...groups.persons],
     [groups],
   );
   const shown = useMemo(() => searchRegistry(ofKind, query, tag), [ofKind, query, tag]);
@@ -216,6 +225,22 @@ export function Catalog({
                 ))}
               </div>
             ) : null}
+            {groups.versions.length > 0 ? (
+              <div className="tag-row" role="group" aria-label="Filter by game version">
+                <span className="tag-row-label">version</span>
+                {groups.versions.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className="tag-chip tag-chip-version"
+                    aria-pressed={tag === t}
+                    onClick={() => setTag(tag === t ? null : t)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {groups.persons.length > 0 ? (
               <div className="tag-row" role="group" aria-label="Filter by person">
                 <span className="tag-row-label">people</span>
@@ -287,6 +312,7 @@ export function Catalog({
                 install={install}
                 link={linkEntries}
                 gameVersion={gameVersion}
+                versionUniverse={universe}
               />
             ))}
           </ul>
@@ -301,17 +327,27 @@ export function EntryCard({
   install,
   link = true,
   gameVersion = DEFAULT_GAME_VERSION,
+  versionUniverse = DEFAULT_UNIVERSE,
 }: {
   entry: RegistryEntry;
   install: UseInstall;
   link?: boolean;
   gameVersion?: string;
+  /**
+   * The version chips expand against the CALLER's universe (the current tab's),
+   * because a card alone cannot know which versions exist to be covered — and
+   * its chips must match the filter row's, or a card would show a chip the
+   * filter never offered. Defaults to the launcher's version alone, for callers
+   * with no catalog in hand.
+   */
+  versionUniverse?: readonly string[];
 }): ReactElement {
   const versionNote = gameVersionNote(entry, gameVersion);
-  // Person chips are the third kind: same control, different weight again. A
-  // player scanning the row should sort chips into "what it does", "what
-  // pressing Install runs", and "who made it" without reading any of them.
+  // Chip KINDS, not chip colours: format (what Install runs), person (who made
+  // it) and version (which game it covers) all render as the same control with
+  // a different weight, so a player scanning a card sorts them without reading.
   const persons = new Set(entryPersons(entry));
+  const versions = new Set(entryVersions(entry, versionUniverse));
   return (
     <li className="entry-card">
       <div className="entry-head">
@@ -337,14 +373,14 @@ export function EntryCard({
       </div>
       <p className="entry-summary">{entry.summary}</p>
       <div className="entry-tags">
-        {entryTags(entry).map((t) => (
+        {entryTags(entry, versionUniverse).map((t) => (
           // The format chip gets its own class, not a different element: it is
           // the same kind of thing (a tag you can filter by) with a different
           // weight, and a player scanning a grid should be able to see which
           // cards are PML without reading every chip.
           <span
             key={t}
-            className={`tag-chip ${t === entry.format ? 'tag-format' : persons.has(t) ? 'tag-person' : 'tag-static'}`}
+            className={`tag-chip ${t === entry.format ? 'tag-format' : versions.has(t) ? 'tag-version' : persons.has(t) ? 'tag-person' : 'tag-static'}`}
           >
             {t}
           </span>

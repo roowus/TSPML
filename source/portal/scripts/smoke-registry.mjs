@@ -199,6 +199,24 @@ out.personChipRestores = await waitFor(
   10000,
 );
 
+// ---- 2d. A version chip filters by WHAT THE MOD COVERS, ranges included ------
+// The 0.6.2 chip must keep poly-to-track (whose gameVersions is the RANGE
+// ">=0.6.0 <0.7.0" — covered by syntax, not listed) and drop the thirteen rows
+// whose indexes stop before 0.6.2. This is the inverse of the no-build
+// advisory: one says it on the card, the other narrows the grid by it.
+step("version chip filters by coverage");
+await chip("0.6.2").click();
+await page.waitForTimeout(400);
+const vfiltered = page.locator(".entry-card");
+out.versionChipNarrowsToEight = (await vfiltered.count()) === 8;
+out.versionChipKeepsRangeEntry = (await vfiltered.filter({ hasText: "Poly To Track" }).count()) === 1;
+await page.locator(".tag-row button").filter({ hasText: /^All$/ }).click();
+out.versionChipRestores = await waitFor(
+  (name) => document.body.innerText.includes(name),
+  "Cool Cars",
+  10000,
+);
+
 // ---- 3. Tabs separate mods from modpacks ------------------------------------
 // The catalog currently holds no packs (the sample pack was removed from the
 // listing — it is a smoke fixture, not player content), so the honest
@@ -312,6 +330,9 @@ const PASS =
   out.personChipKeepsCollaborations === true &&
   out.personChipExcludesOthers === true &&
   out.personChipRestores === true &&
+  out.versionChipNarrowsToEight === true &&
+  out.versionChipKeepsRangeEntry === true &&
+  out.versionChipRestores === true &&
   out.packTabHidesMods === true &&
   out.packTabEmptyState === true &&
   out.detailShowsEntry === true &&

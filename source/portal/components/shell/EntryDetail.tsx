@@ -8,9 +8,11 @@ import {
   buildsForGameVersion,
   entryPersons,
   entryTags,
+  entryVersions,
   gameVersionNote,
   getRegistryEntry,
   listRegistry,
+  releaseVersionsIn,
   resolveDependencies,
   resolveSourceUrl,
   type Registry,
@@ -95,6 +97,9 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
   // surfaces — a name that is dashed-and-italic on a card and plain here would
   // look like two different facts.
   const persons = new Set(entryPersons(entry));
+  // The whole registry is already in hand here, so the version chips expand
+  // against the catalog's full universe — the same chips the browse grid shows.
+  const versions = new Set(entryVersions(entry, releaseVersionsIn(registry.entries)));
 
   return (
     <section className="shell-section">
@@ -123,10 +128,10 @@ export function EntryDetail({ id }: { id: string }): ReactElement {
       <p className="entry-summary">{entry.summary}</p>
 
       <div className="entry-tags">
-        {entryTags(entry).map((t) => (
+        {entryTags(entry, releaseVersionsIn(registry.entries)).map((t) => (
           <span
             key={t}
-            className={`tag-chip ${t === entry.format ? 'tag-format' : persons.has(t) ? 'tag-person' : 'tag-static'}`}
+            className={`tag-chip ${t === entry.format ? 'tag-format' : versions.has(t) ? 'tag-version' : persons.has(t) ? 'tag-person' : 'tag-static'}`}
           >
             {t}
           </span>
