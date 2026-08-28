@@ -29,6 +29,7 @@
  * that disclosure belongs at the install click, not only in the paste form.
  */
 import { isValidRange, satisfies } from '@tspml/loader';
+import { DEFAULT_GAME_VERSION } from './game-versions';
 import { checkImportUrl } from './mod-fetch';
 import type { ModFormatId } from './mod-formats/types';
 import { isSupportedFormat } from './mod-formats';
@@ -403,6 +404,55 @@ export function resolveDependencies(
 }
 
 /**
+ * The game versions worth offering as chips: every distinct RELEASE version
+ * named by any row, plus the launcher's default. Prereleases (`0.6.0-beta1`)
+ * are deliberately absent — a player browsing a catalog is on a release build,
+ * and a beta chip answers nobody's filter question (the detail page's GAME
+ * VERSIONS row still shows the full list, betas included).
+ *
+ * Newest first: the first chip on a card is then the answer to "does this run
+ * on the current game?", read left-to-right without comparing versions.
+ */
+export function releaseVersionsIn(entries: readonly RegistryEntry[]): string[] {
+  const seen = new Set<string>([DEFAULT_GAME_VERSION]);
+  for (const e of entries) {
+    for (const v of e.gameVersions) {
+      if (isReleaseVersion(v)) seen.add(v);
+    }
+  }
+  return [...seen].sort(compareVersions).reverse();
+}
+
+/** A plain release version: three numbers, no prerelease tag, no range syntax. */
+function isReleaseVersion(v: string): boolean {
+  return /^\d+\.\d+\.\d+$/.test(v);
+}
+
+/** Numeric version order for the `x.y.z` strings this catalog actually holds. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * The `universe` versions this entry covers — the version chips a card shows.
+ *
+ * Computed with {@link buildsForGameVersion}, not read off `gameVersions`,
+ * because the two shapes answer differently: an exact list covers what it
+ * lists, while a RANGE covers by syntax — and giving the range row its literal
+ * string as a chip would make the "0.6.2" filter falsely drop the one native
+ * mod in the catalog. The chips are the covered versions, full stop.
+ */
+export function entryVersions(entry: RegistryEntry, universe: readonly string[]): string[] {
+  return universe.filter((v) => buildsForGameVersion(entry, v));
+}
+
+/**
  * The people behind an entry, as one name each.
  *
  * `author` is a byline in prose — the committed file carries "Cwcinc + Jakob +
@@ -426,7 +476,7 @@ export function entryPersons(entry: RegistryEntry): string[] {
 
 /**
  * Every tag an entry shows: its loader format first, then its content tags,
- * then the people behind it.
+ * then the game versions it covers, then the people behind it.
  *
  * The format tag is DERIVED rather than written into each row's `tags` array,
  * and that is the whole design. `format` already decides which walk installs the
@@ -440,17 +490,26 @@ export function entryPersons(entry: RegistryEntry): string[] {
  * press Install. Grouping it in alphabetically among the content tags would bury
  * the one tag with consequences.
  *
- * People sort last, after the content tags, because a byline answers "who"
- * only after the row has answered "what": a player scanning chips decides
- * relevance from `car` or `ui` and treats the names as attribution. Both kinds
- * are real filters — see {@link searchRegistry}, which matches on this array.
+ * Versions sit between content and people: "does it run on my game" is the
+ * question the row exists to answer, and a byline answers "who" only after
+ * that. The version chips need a UNIVERSE to expand against (a range row
+ * covers by syntax, not by listing), so they appear only when the caller
+ * supplies one — see {@link releaseVersionsIn}; callers that cannot know one
+ * (there are none today, but the signature stays honest) get every other chip.
+ *
+ * People sort last for the same reason versions sort before them, and both
+ * kinds are real filters — see {@link searchRegistry}, which matches on this
+ * array.
  */
-export function entryTags(entry: RegistryEntry): string[] {
+export function entryTags(entry: RegistryEntry, universe: readonly string[] = []): string[] {
   // Deduped: a row that also hand-wrote its format (or whose author happens to
   // share a name with a content tag) must not render two chips whose keys
   // collide. Dropping the duplicate is right — the derived copy is the
   // authoritative one either way.
   const chips = [entry.format, ...entry.tags.filter((t) => t !== entry.format)];
+  for (const v of entryVersions(entry, universe)) {
+    if (!chips.includes(v)) chips.push(v);
+  }
   for (const person of entryPersons(entry)) {
     if (!chips.includes(person)) chips.push(person);
   }
@@ -460,18 +519,20 @@ export function entryTags(entry: RegistryEntry): string[] {
 /**
  * The filter row's vocabulary, split by what kind of fact a chip states.
  *
- * Three groups, because the row read as one flat list buried its own structure:
+ * Four groups, because the row read as one flat list buried its own structure:
  * eighteen chips in insertion order is a wall, and "which of these are people?"
  * was answerable only by recognising names. The groups are labelled on screen
- * (`loader`, `category`, `people`) and the labels are the honest answer to what
- * the groups ARE — `loader` changes what pressing Install does, `category` says
- * what the mod does, `people` says who made it.
+ * (`loader`, `category`, `version`, `people`) and the labels are the honest
+ * answer to what the groups ARE — `loader` changes what pressing Install does,
+ * `category` says what the mod does, `version` says which game it runs on,
+ * `people` says who made it.
  *
- * Ordering inside the row mirrors a card: loader, content, people.
+ * Ordering inside the row mirrors a card: loader, content, version, people.
  */
 export interface RegistryTagGroups {
   readonly loaders: readonly string[];
   readonly content: readonly string[];
+  readonly versions: readonly string[];
   readonly persons: readonly string[];
 }
 
@@ -487,13 +548,14 @@ export function registryTagGroups(entries: readonly RegistryEntry[]): RegistryTa
   return {
     loaders: [...formats].sort(),
     content: [...content].sort(),
+    versions: releaseVersionsIn(entries),
     persons: [...persons].sort(),
   };
 }
 
 /**
  * Every tag in the catalog, deduped and sorted — the flat view of
- * {@link registryTagGroups}, in the same loader/content/people order.
+ * {@link registryTagGroups}, in the same loader/content/version/people order.
  *
  * Format tags lead, so `pml` and `tspml` sit together at the front of the row
  * rather than being scattered through the content tags. Both are real filters:
@@ -502,7 +564,7 @@ export function registryTagGroups(entries: readonly RegistryEntry[]): RegistryTa
  */
 export function registryTags(entries: readonly RegistryEntry[]): string[] {
   const g = registryTagGroups(entries);
-  return [...g.loaders, ...g.content, ...g.persons];
+  return [...g.loaders, ...g.content, ...g.versions, ...g.persons];
 }
 
 /**
@@ -521,9 +583,13 @@ export function searchRegistry(
   query: string,
   tag: string | null,
 ): RegistryEntry[] {
+  // The universe is derived from the entries in scope so the filter and the
+  // chips agree BY CONSTRUCTION — a version chip the filter cannot select (or
+  // vice versa) would be a control in appearance only.
+  const universe = releaseVersionsIn(entries);
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
   return entries.filter((e) => {
-    const tags = entryTags(e);
+    const tags = entryTags(e, universe);
     if (tag !== null && !tags.includes(tag)) return false;
     if (terms.length === 0) return true;
     const hay = `${e.name} ${e.author} ${e.summary} ${tags.join(' ')} ${e.id}`.toLowerCase();

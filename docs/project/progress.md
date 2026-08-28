@@ -2977,3 +2977,47 @@ run AFTER the last script edit this time. `smoke:pml` PASS end-to-end including
 the splice legs; `smoke:registry` PASS against the grouped tag rows. Screenshot
 review done (three labelled rows render; collapsed caveat reads as one line).
 Repo-wide `pnpm -r test`: **1,335 green**.
+
+## 2026-08-28 (later) — game versions become the fourth tag group ✅
+
+Owner: "also add version numbers to the tag". The fourth derived chip kind, and
+the third application of the rule that started this run: format, persons,
+no-build prose, and now versions — everything a card can state about itself is
+computed from the row's own fields, never hand-written into `tags`.
+
+### What a version chip IS, and the trap it avoids
+
+The chip is not "the row's `gameVersions`, listed". It is **the versions the row
+COVERS**, computed with `buildsForGameVersion` against a universe: every release
+version named anywhere in the catalog plus the launcher's default, newest first.
+The distinction is load-bearing for exactly one row — poly-to-track, whose
+`gameVersions` is the RANGE `">=0.6.0 <0.7.0"`. Chipping the range's literal
+string would have made the `0.6.2` filter falsely drop the one native mod in the
+catalog; expanding to covered versions keeps it, pinned by both a unit test and
+`smoke:registry` leg 2d (the chip narrows to exactly the eight covering rows,
+range entry among them).
+
+Prereleases are excluded from the universe (`0.6.0-beta1` answers nobody's
+filter question); the detail page's GAME VERSIONS facts row still shows the full
+list, betas included. And the eight-covering assertion is the inverse of the
+thirteen-warned one — two views, one predicate, agreeing by construction.
+
+### Where the universe lives
+
+A card cannot know which versions exist to be covered, so the chips expand
+against the CALLER's universe: the browse grid uses the current tab's, the
+detail page the whole registry's, and `searchRegistry` derives its own from the
+entries in scope — which makes the filter and the chips agree BY CONSTRUCTION
+rather than by hope. Monospace rendering (`.tag-version`) is the only visual
+signature: it is the one chip whose text is a number, and `0.6.2` in the
+proportional face reads as a tag that happens to contain digits while in mono
+it reads as a version next to its siblings.
+
+### Proof
+
+Portal **728 tests** (722 → 728; registry.test.ts 80 → 86 with the
+versions block). `tsc --noEmit` clean; smoke typecheck clean and run after the
+last script edit. `smoke:registry` PASS with leg 2d (version chip narrows to
+eight, keeps the range entry, restores on All); screenshot review done (four
+labelled rows: loader / category / version / people, versions newest-first).
+Repo-wide `pnpm -r test`: **1,341 green**.
