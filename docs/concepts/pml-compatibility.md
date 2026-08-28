@@ -291,7 +291,7 @@ mechanics:
   without an icon. The icons are dark line art on transparency, drawn for a
   light UI, so the portal renders them on a light tile.
 
-### People are filter chips too
+### People are filter chips too — and versions are the fourth group
 
 The person chips are **derived from the `author` byline** (`entryPersons()`
 splits "Cwcinc + Jakob + Orangy" into three names), the same
@@ -299,6 +299,13 @@ single-source rule as the format chip: a hand-written copy in `tags` could
 disagree with the byline on the first row someone edits. Selecting *Orangy*
 narrows the grid to exactly that person's ten rows — solo work plus
 collaborations — asserted in a browser (`smoke:registry`, leg 2c).
+
+The filter row is grouped by what kind of fact a chip states — **loader /
+category / version / people** — and the version chips are derived too: each
+card shows the game versions it **covers** (computed, not listed, so the range
+entry `>=0.6.0 <0.7.0` chips as 0.6.0/0.6.1/0.6.2 and the `0.6.2` filter keeps
+it), newest first, monospaced, prereleases excluded. A guard test fails the
+build if a row hand-writes any of its covered versions into `tags`.
 
 [modlist]: https://raw.githubusercontent.com/polytrackmods/PolyLibrary/refs/heads/main/modlist.json
 

@@ -17,6 +17,7 @@ import {
   buildsForGameVersion,
   entryPersons,
   entryTags,
+  entryVersions,
   gameVersionNote,
   getRegistryEntry,
   installBlockedReason,
@@ -28,6 +29,7 @@ import {
   registryHttpUrl,
   registryIcon,
   registryTags,
+  releaseVersionsIn,
   resolveDependencies,
   resolveSourceUrl,
   searchRegistry,
@@ -336,6 +338,36 @@ describe('entryTags', () => {
   });
 });
 
+describe('entryVersions', () => {
+  const at = (gameVersions: string[], universe: string[]): string[] =>
+    entryVersions(parsed(entry({ gameVersions })).entries[0] as RegistryEntry, universe);
+
+  it('chips exactly the universe versions an exact list covers', () => {
+    expect(at(['0.5.0', '0.6.2'], ['0.5.0', '0.5.2', '0.6.0', '0.6.2'])).toEqual(['0.5.0', '0.6.2']);
+  });
+
+  it('expands a RANGE row into the versions it covers, not its literal syntax', () => {
+    // poly-to-track ships '>=0.6.0 <0.7.0'. Chipping the range STRING would
+    // make the 0.6.2 filter falsely drop the one native mod in the catalog —
+    // the regression this shape exists to prevent.
+    expect(at(['>=0.6.0 <0.7.0'], ['0.5.2', '0.6.0', '0.6.1', '0.6.2', '0.7.0'])).toEqual([
+      '0.6.0',
+      '0.6.1',
+      '0.6.2',
+    ]);
+  });
+
+  it('skips prereleases in the universe — betas answer nobody\'s filter question', () => {
+    expect(at(['0.6.0', '0.6.2'], ['0.6.0-beta1', '0.6.0', '0.6.2'])).toEqual(['0.6.0', '0.6.2']);
+  });
+
+  it('offers the universe newest-first, so a card\'s first version chip answers "current?"', () => {
+    expect(
+      releaseVersionsIn(parsed(entry({ gameVersions: ['0.5.0', '0.6.1', '0.6.2'] })).entries),
+    ).toEqual(['0.6.2', '0.6.1', '0.5.0']);
+  });
+});
+
 describe('entryPersons', () => {
   const at = (author: string): string[] =>
     entryPersons(parsed(entry({ author })).entries[0] as RegistryEntry);
@@ -411,11 +443,11 @@ describe('searchRegistry', () => {
   it('collects tags deduped and sorted, formats first, people last', () => {
     // Formats lead so `pml` and `tspml` sit together at the head of the filter
     // row rather than being scattered alphabetically among the content tags.
-    // People trail for the mirrored reason: ten names is the longest group in
-    // the row, and the short meaning-dense chips keep it scannable past them.
-    expect(registryTags(r.entries)).toEqual(['tspml', 'hud', 'physics', 'ada', 'bo']);
+    // Versions sit between content and people (newest first — every fixture
+    // row here offers 0.6.2, so one chip appears); people trail.
+    expect(registryTags(r.entries)).toEqual(['tspml', 'hud', 'physics', '0.6.2', 'ada', 'bo']);
     const mixed = parsed(entry({ tags: ['ui'] }), entry({ id: 'b', format: 'pml', tags: ['car'] }));
-    expect(registryTags(mixed.entries)).toEqual(['pml', 'tspml', 'car', 'ui', 'someone']);
+    expect(registryTags(mixed.entries)).toEqual(['pml', 'tspml', 'car', 'ui', '0.6.2', 'someone']);
   });
 });
 
@@ -501,6 +533,31 @@ describe('the committed public/registry/index.json', () => {
     for (const e of result.registry.entries) {
       expect(e.tags).not.toContain('pml');
       expect(e.tags).not.toContain('tspml');
+    }
+  });
+
+  it('filters by version through the SAME expansion the chips use', () => {
+    // The 0.6.2 chip must narrow to exactly the eight rows that cover it —
+    // including poly-to-track, whose RANGE covers it by syntax. This is the
+    // inverse of the thirteen-warned assertion, and the two agreeing is what
+    // proves the chips and the advisory derive from one predicate.
+    if (!result.ok) throw new Error('did not parse');
+    const by = searchRegistry(result.registry.entries, '', '0.6.2');
+    expect(by).toHaveLength(8);
+    expect(by.map((e) => e.id)).toContain('poly-to-track');
+    for (const e of by) expect(buildsForGameVersion(e, DEFAULT_GAME_VERSION)).toBe(true);
+  });
+
+  it('never hand-writes a version into a row\'s content tags', () => {
+    // The derivation rule, fourth application: format, person, no-build prose,
+    // and now versions. A hand-written '0.6.2' in tags could disagree with
+    // gameVersions the moment either was edited.
+    if (!result.ok) throw new Error('did not parse');
+    const universe = releaseVersionsIn(result.registry.entries);
+    for (const e of result.registry.entries) {
+      for (const v of entryVersions(e, universe)) {
+        expect(e.tags, e.id).not.toContain(v);
+      }
     }
   });
 
