@@ -82,6 +82,8 @@ declare global {
      * difference between "the plan accepted the patch" and "the patch ran".
      */
     __pmlSpliceRan?: number;
+    /** The numeric-enum splice's marker — second dialect, second code path. */
+    __pmlSpliceRan2?: number;
     /** The user-mixin plan report the route prepends to the served bundle. */
     __tspmlUserMixins?: any;
   }

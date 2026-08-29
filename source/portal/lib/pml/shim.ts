@@ -233,13 +233,6 @@ export interface PmlLoaderShim {
   [key: string]: unknown;
 }
 
-/** The reason text for every mixin-FAMILY refusal (the token-anchored
- *  `registerClassMixin` types are collected instead — see the file header).
- *  Written once — the whole point is that an author reads the SAME explanation
- *  whichever family they hit. */
-const MIXIN_REASON =
-  'PML mixins string-splice the live minified bundle at runtime (toString + indexOf + eval). Token-anchored registerClassMixin calls carry across — collected here and applied to the served source at the transform seam; this mixin family anchors to module scope, which no translation of a served bundle can reach. Port this patch to a TSPML mixins.json (anchored to a mapped symbol) to have it apply.';
-
 const PHYSICS_REASON =
   'PML physics mixins write a raw byte offset into polytrack_physics.wasm. TSPML applies physics patches only through a physics.json pinned to a wasmHash, so a stale offset refuses instead of writing into an unverified binary — and this call arrives with no hash to check. Port it to a physics.json to have it apply.';
 
@@ -285,9 +278,29 @@ export function createPmlRuntime(
   };
 
   const mixinRefusal =
-    (method: string, reason = MIXIN_REASON) =>
+    (method: string, reason: string) =>
     (...args: unknown[]): undefined =>
       refuse(method, reason, args);
+
+  // EVERY source-op mixin family collects. Family (class, func, global,
+  // chunk, sim-worker) is PML's own targeting hint — it decides where PML
+  // LOOKS — and our exactly-once token rule subsumes looking: a token that
+  // matches once in a surface needs no help being found, and one that
+  // matches nowhere refuses with the count instead of a wrong-site splice.
+  // The real CDN mods ship all the shapes: 3decspeed (class, two strings +
+  // spec), husplits (func, name + spec), noitalics (global, lone spec) — and
+  // their `type` values are PML's NUMERIC enum, which the parser maps.
+  const collectMixin =
+    (method: string) =>
+    (...args: unknown[]): undefined => {
+      const parsed = parsePmlMixinSpec(args);
+      if (!parsed.ok) {
+        // Through the shared `refuse`: dedupe + logger, never a throw.
+        return refuse(method, parsed.reason, args);
+      }
+      mixins.push(parsed.patch);
+      return undefined;
+    };
 
   const loader: PmlLoaderShim = {
     tspml: api,
@@ -394,27 +407,16 @@ export function createPmlRuntime(
     },
 
     // ── mixins: collected here, applied at the transform seam ─────────────
-    // The ONE family that carries. The spec is validated per call; anything
-    // this adapter cannot faithfully splice is refused below like the other
-    // families, so a mod always gets an answer it can read in the report.
-    registerClassMixin(classRef: unknown, method: unknown, spec: unknown): void {
-      const parsed = parsePmlMixinSpec(classRef, method, spec);
-      if (!parsed.ok) {
-        // Through the shared `refuse` — a malformed spec deserves the same
-        // dedupe and logger treatment as a refused family, and a mod in a loop
-        // must not flood its own report.
-        refuse('registerClassMixin', parsed.reason, [classRef, method]);
-        return;
-      }
-      mixins.push(parsed.patch);
-    },
-    registerFuncMixin: mixinRefusal('registerFuncMixin'),
-    registerClassWideMixin: mixinRefusal('registerClassWideMixin'),
-    registerGlobalMixin: mixinRefusal('registerGlobalMixin'),
-    registerChunkMixin: mixinRefusal('registerChunkMixin'),
-    registerSimWorkerMixin: mixinRefusal('registerSimWorkerMixin'),
-    registerSimWorkerFuncMixin: mixinRefusal('registerSimWorkerFuncMixin'),
-    registerPhysicsLibMixin: mixinRefusal('registerPhysicsLibMixin'),
+    registerClassMixin: collectMixin('registerClassMixin'),
+    registerFuncMixin: collectMixin('registerFuncMixin'),
+    registerClassWideMixin: collectMixin('registerClassWideMixin'),
+    registerGlobalMixin: collectMixin('registerGlobalMixin'),
+    registerChunkMixin: collectMixin('registerChunkMixin'),
+    registerSimWorkerMixin: collectMixin('registerSimWorkerMixin'),
+    registerSimWorkerFuncMixin: collectMixin('registerSimWorkerFuncMixin'),
+    // The two wasm families stay refused: PATCH_F32/I32 arrive as raw offsets
+    // with no hash, and the physics gate is fail-closed on principle.
+    registerPhysicsLibMixin: mixinRefusal('registerPhysicsLibMixin', PHYSICS_REASON),
     registerPhysicsMixin: mixinRefusal('registerPhysicsMixin', PHYSICS_REASON),
     getFromPolyTrack: (path: string): unknown => refuse('getFromPolyTrack', EVAL_REASON, [path]),
     getFromPolyTrackGlobal: (path: string): unknown =>

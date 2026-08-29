@@ -9,13 +9,11 @@
 //    hooks of its own (a class property would shadow them).
 //  - `registerKeybind`'s key is a `KeyboardEvent.code` ("KeyJ"), which is what
 //    `Keybinds.dispatch` compares against.
-//  - the mixin registrations cover BOTH halves of the contract: one real,
-//    collectable splice (object-spec form, as actual PML mods on the CDN
-//    write them — ghosttoggle 1.0.8 is the reference) whose token exists
-//    exactly once in the vanilla 0.6.2 main bundle and executes at eval, and
-//    two refusals — an untranslatable TYPE (method-extent) and an
-//    untranslatable FAMILY (global mixin). Every refusal is per call; the mod
-//    keeps running past all of them.
+//  - the mixin registrations cover BOTH halves of the contract: three real,
+//    collectable splices — one per shape the CDN mods actually ship (class +
+//    string enum, class + PML's numeric enum, global lone-object twin-anchor)
+//    — and two refusals (an untranslatable TYPE and a call with no spec).
+//    Every refusal is per call; the mod keeps running past all of them.
 //  - the file ends in `export let polyMod = new …()`, PML's export convention.
 //
 // Every observable is stamped on `window` in the MAIN frame (mod code is
@@ -49,20 +47,43 @@ class SamplePmlMod extends PolyMod {
     pml.registerSetting({ id: "smokeFlag", value: true });
     window.__smokePmlSetting = pml.getSetting("smokeFlag");
 
-    // A REAL splice, in the object-spec form PML mods actually ship. The token
-    // is the game's own FPS-counter keybind registration — present exactly
-    // once in the vanilla 0.6.2 main bundle and executed when the bundle
-    // evaluates, so the inserted counter is observable proof the splice RAN,
-    // not merely that it was accepted. The func is a PARENTHESIZED EXPRESSION
-    // with no leading semicolon, because the token sits inside the entry's
-    // comma-expression sequence — a `;`-statement there is a syntax error, and
-    // writing the func to fit its insertion context is exactly the discipline
-    // a real PML author's func carries (the fail-closed re-parse gate rejects
-    // the bundle otherwise and the game boots vanilla instead).
+    // Three real splice shapes, one per CDN mod that ships it. Together they
+    // pin the whole collector: the string-enum dialect, PML's NUMERIC enum,
+    // the (name, spec) form, the lone-object global form, and twin anchors.
+    // Each token was measured exactly-once in the vanilla 0.6.2 bundle and
+    // runs (or lands) where the bundle evaluates.
+    //
+    // 1. Class family, two strings + object spec, our string enum — the
+    //    ghosttoggle shape. The func is COMMA-PREFIXED and parenthesized
+    //    because the token sits inside the entry's comma-expression sequence:
+    //    a `;`-statement there is a syntax error (vanilla boot), and a bare
+    //    parenthesized expression is worse — it PARSES as a call of the
+    //    preceding call's result, sets the marker, then throws and truncates
+    //    the game's boot tail. The leading comma is the only spelling that
+    //    both parses and behaves.
     pml.registerClassMixin("entry", "boot", {
       type: MixinType.INSERT,
       token: 'window.addEventListener("keyup",(e=>{r.checkKeyBinding(e,ge.A.ToggleFpsCounter)&&M.toggle()}))',
-      func: '(window.__pmlSpliceRan=(window.__pmlSpliceRan||0)+1)',
+      func: ',(window.__pmlSpliceRan=(window.__pmlSpliceRan||0)+1)',
+    });
+    // 2. Class family with PML's NUMERIC enum (INSERT === 3) — what every mod
+    //    that imports PolyTypes.js from the CDN actually puts in `type`. The
+    //    animation-loop registration runs at bundle eval (unlike, say, the
+    //    verifier error paths, which are lazy), and it sits in the entry's
+    //    comma sequence — same comma-prefix discipline as #1. Second marker,
+    //    second dialect.
+    pml.registerClassMixin("entry", "loop", {
+      type: 3,
+      token: 'd.setAnimationLoop((function(e){const t=Math.max(e-ee,0)/1e3;ee=e,$.update(t),M.update(t)}))',
+      func: ',(window.__pmlSpliceRan2 = 1)',
+    });
+    // 3. Global family, LONE object spec — noitalics' exact shape and token:
+    //    a twin-anchor REPLACEBETWEEN over the game's own italic style string.
+    pml.registerGlobalMixin({
+      type: MixinType.REPLACEBETWEEN,
+      tokenStart: 'font-style: italic;',
+      tokenEnd: 'font-style: italic;',
+      func: 'font-style: normal;',
     });
 
     // Refused by TYPE: OVERRIDE anchors to a method's extent, which needs the
@@ -73,13 +94,8 @@ class SamplePmlMod extends PolyMod {
       func: "void 0;",
     });
 
-    // Refused by FAMILY: global mixins anchor to module scope this adapter
-    // never holds.
-    pml.registerGlobalMixin("SmokeTarget", "prototype", {
-      type: MixinType.INSERT,
-      token: "someToken",
-      func: "void 0;",
-    });
+    // Refused by SHAPE: no spec object at all (an older positional call).
+    pml.registerFuncMixin("uf", "prototype");
 
     window.__smokePmlSurvivedMixin = true;
   };

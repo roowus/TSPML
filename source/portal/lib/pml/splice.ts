@@ -211,42 +211,92 @@ export function applyPmlSplice(source: string, patch: PmlSplicePatch): SpliceRes
 }
 
 /**
- * Parse a live `registerClassMixin(classRef, method, spec)` call into a patch
- * record, or say why it cannot be carried. This is the shim's gate: a spec
- * that fails here is REFUSED per call (the mod keeps running) exactly like
- * the unsupported families, and for the same reason — better a named refusal
- * the report shows than a record that silently does the wrong thing at boot.
+ * PML's real `MixinType`, as it exists in PolyTypes.js on the CDN: a NUMERIC
+ * enum (INSERT is 3, REPLACEBETWEEN is 5). Mods that import PolyTypes.js
+ * directly — every mod on the CDN does, by absolute URL, which the import
+ * rewrite deliberately does not redirect — put a NUMBER in their spec's
+ * `type`. Our own shim's MixinType uses the names. The collector is bilingual:
+ * both dialects mean the same patch.
+ */
+const PML_MIXIN_TYPE_BY_NUMBER: Readonly<Record<number, string>> = {
+  0: 'HEAD',
+  1: 'TAIL',
+  2: 'OVERRIDE',
+  3: 'INSERT',
+  4: 'CLASSREMOVE',
+  5: 'REPLACEBETWEEN',
+  6: 'REMOVEBETWEEN',
+  7: 'CLASSREPLACE',
+  8: 'CLASSINSERT',
+};
+
+/** A spec's `type`, from either dialect, as a name — or null if unreadable. */
+export function normalizePmlMixinType(v: unknown): string | null {
+  if (typeof v === 'string') return v.length > 0 ? v : null;
+  if (typeof v === 'number' && Number.isInteger(v)) {
+    return PML_MIXIN_TYPE_BY_NUMBER[v] ?? null;
+  }
+  return null;
+}
+
+/**
+ * Parse a live mixin-registration call into a patch record, or say why it
+ * cannot be carried. This is the shim's gate: a call that fails here is
+ * REFUSED per call (the mod keeps running) — better a named refusal the
+ * report shows than a record that silently does the wrong thing at boot.
  *
- * Deliberately accepts only STRING fields: a PML spec is data by the time it
- * reaches this API, and the whole point of collecting it is to persist and
+ * Takes the call's WHOLE argument list, because the real CDN mods ship three
+ * shapes and all three are load-bearing:
+ *
+ *   registerClassMixin("We.prototype", "update", {type, tokenStart, …})   3decspeed
+ *   registerFuncMixin("gs", {type, token, func})                          husplits
+ *   registerGlobalMixin({type, tokenStart, tokenEnd, func})               noitalics
+ *
+ * The spec is the first argument that is an object; any strings before it are
+ * the call's target, carried into the report verbatim. Family (class, func,
+ * global…) decides nothing here — PML uses it to pick WHERE to look, and our
+ * exactly-once token rule subsumes that: a token that matches once needs no
+ * help being found.
+ *
+ * Deliberately accepts only STRING payload fields: a spec is data by the time
+ * it reaches this API, and the whole point of collecting it is to persist and
  * re-apply it, which only survives for plain values.
  */
 export function parsePmlMixinSpec(
-  classRef: unknown,
-  method: unknown,
-  spec: unknown,
+  args: readonly unknown[],
 ): { ok: true; patch: PmlSplicePatch } | { ok: false; reason: string } {
-  if (typeof spec !== 'object' || spec === null) {
-    return { ok: false, reason: 'the mixin spec is not an object' };
+  const specIndex = args.findIndex((a) => typeof a === 'object' && a !== null && !Array.isArray(a));
+  if (specIndex === -1) {
+    return { ok: false, reason: 'the call has no spec object' };
   }
-  const s = spec as Record<string, unknown>;
-  if (typeof s.type !== 'string') {
-    return { ok: false, reason: 'the mixin spec has no type' };
-  }
-  const type = PML_SPLICE_TYPES.find((t) => t === s.type);
-  if (type === undefined) {
+  const s = args[specIndex] as Record<string, unknown>;
+  const type = normalizePmlMixinType(s.type);
+  if (type === null) {
     return {
       ok: false,
-      reason: `mixin type '${s.type}' is not token-anchored — this adapter carries INSERT, REPLACE, REPLACEBETWEEN and REMOVEBETWEEN; ${s.type.startsWith('PATCH_') ? 'raw physics offsets are refused by the wasm gate' : 'method-extent mixins (HEAD/TAIL/OVERRIDE/CONSTRUCTOR) have no anchor this adapter can resolve'}`,
+      reason: `the mixin spec has no readable type (got ${typeof s.type === 'number' ? `unknown number ${String(s.type)}` : typeof s.type})`,
     };
   }
+  if (!PML_SPLICE_TYPES.includes(type as (typeof PML_SPLICE_TYPES)[number])) {
+    const why = type.startsWith('PATCH_')
+      ? 'raw physics offsets are refused by the wasm gate'
+      : type.startsWith('CLASS')
+        ? 'class-wide mixins apply at every site at once, which an exactly-once anchor cannot verify'
+        : 'method-extent mixins (HEAD/TAIL/OVERRIDE) have no anchor this adapter can resolve';
+    return {
+      ok: false,
+      reason: `mixin type '${type}' is not token-anchored — this adapter carries INSERT, REPLACE, REPLACEBETWEEN and REMOVEBETWEEN; ${why}`,
+    };
+  }
+  const strings = args.slice(0, specIndex).filter((a): a is string => typeof a === 'string');
+  const [classRef, method] = strings;
   const strField = (key: string): string | undefined =>
     typeof s[key] === 'string' ? (s[key] as string) : undefined;
   const patch: PmlSplicePatch = {
     op: 'pml-splice',
-    type,
-    ...(typeof classRef === 'string' ? { classRef } : {}),
-    ...(typeof method === 'string' ? { method } : {}),
+    type: type as PmlSplicePatch['type'],
+    ...(classRef === undefined ? {} : { classRef }),
+    ...(method === undefined ? {} : { method }),
     ...(strField('token') === undefined ? {} : { token: strField('token')! }),
     ...(strField('tokenStart') === undefined ? {} : { tokenStart: strField('tokenStart')! }),
     ...(strField('tokenEnd') === undefined ? {} : { tokenEnd: strField('tokenEnd')! }),
@@ -263,11 +313,11 @@ export function parsePmlMixinSpec(
   if (needsRange && (patch.tokenStart === undefined || patch.tokenEnd === undefined)) {
     return { ok: false, reason: `${type} needs 'tokenStart' and 'tokenEnd' to bound the range` };
   }
+  if (needsToken && type === 'REPLACE' && patch.func === undefined) {
+    return { ok: false, reason: 'REPLACE needs replacement text (func)' };
+  }
   if (type === 'REPLACEBETWEEN' && patch.func === undefined) {
     return { ok: false, reason: 'REPLACEBETWEEN needs replacement text (func)' };
-  }
-  if (type === 'REPLACE' && patch.func === undefined) {
-    return { ok: false, reason: 'REPLACE needs replacement text (func)' };
   }
   return { ok: true, patch };
 }

@@ -80,21 +80,31 @@ because the plan must be parked before the frame's first fetch.
 
 What still refuses, and why:
 
-- **Method-extent types** (`HEAD`/`TAIL`/`OVERRIDE`/`CONSTRUCTOR`) anchor to a
-  method's extent, which PML resolves by holding the live class — a resolution
-  no served-bundle translation can reproduce.
-- **Other families** (`registerFuncMixin`, `registerClassWideMixin`,
-  `registerGlobalMixin`, `registerChunkMixin`, the sim-worker pair) anchor to
-  module scope, the worker bundle, or a chunk this adapter never holds.
-- **Physics offsets** (`PATCH_F32`/`PATCH_I32`) get their own reason: TSPML
-  *can* patch `polytrack_physics.wasm` (M11 / [#43]) but only through a
-  `physics.json` **pinned to a `wasmHash`**. A raw offset arrives with no hash
-  to check, and honouring it would mean writing into the simulation that
-  produces leaderboard evidence. That gate does not bend for compatibility.
+- **Method-extent types** (`HEAD`/`TAIL`/`OVERRIDE` — PML enum values 0/1/2)
+  anchor to a method's extent, which PML resolves by holding the live class —
+  a resolution no served-bundle translation can reproduce.
+- **Class-wide types** (`CLASSREMOVE`/`CLASSREPLACE`/`CLASSINSERT` — 4/7/8)
+  apply at every matching site at once, which an exactly-once anchor cannot
+  verify.
+- **Physics offsets** (`PATCH_F32`/`PATCH_I32`, both wasm families) get their
+  own reason: TSPML *can* patch `polytrack_physics.wasm` (M11 / [#43]) but only
+  through a `physics.json` **pinned to a `wasmHash`**. A raw offset arrives
+  with no hash to check, and honouring it would mean writing into the
+  simulation that produces leaderboard evidence. That gate does not bend for
+  compatibility.
 - **PML's eval bridge** (`getFromPolyTrack`, `getFromPolyTrackGlobal`) resolves
   paths inside PML's own patched bundle. TSPML serves an unpatched game with no
   eval sink, so there is nothing to resolve against — use `api.events` /
   `api.keybinds` / `api.editor`, or a `mixins.json` anchor.
+
+**The FAMILY is not a barrier.** PML's mixin families (class, func, global,
+chunk, sim-worker) exist to tell PML where to look — and the exactly-once token
+rule subsumes looking. Every source-op family collects a token-anchored spec,
+in any of the shapes the CDN mods ship: two strings + spec (3decspeed), one
+name + spec (husplits), or a lone spec (noitalics). `type` may be a name or
+PML's **numeric enum** (INSERT=3, REPLACEBETWEEN=5, …) — mods import
+PolyTypes.js from the CDN by absolute URL and put the number in their spec, so
+the collector reads both dialects.
 
 ### Refusing, not throwing
 

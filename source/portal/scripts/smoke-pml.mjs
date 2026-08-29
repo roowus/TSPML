@@ -253,8 +253,8 @@ out.keybindFired = gameFrame
 out.settingIsString = await page.evaluate(() => window.__smokePmlSetting === "true");
 
 // 7+8. THE contract. The untranslatable halves are named in the .pml-report
-// block — the method-extent TYPE and the global-mixin FAMILY — and the mod is
-// still loaded while they are on screen, its code past them having run.
+// block — the method-extent TYPE (OVERRIDE) and the spec-less call — and the
+// mod is still loaded while they are on screen, its code past them having run.
 step("check the untranslatable mixins were refused BY NAME and the mod kept running");
 out.mixinRefusalReported = await waitForSidebar(
   () => {
@@ -263,7 +263,7 @@ out.mixinRefusalReported = await waitForSidebar(
     return (
       /registerClassMixin/.test(text) &&
       /SmokeTarget\.prototype/.test(text) &&
-      /registerGlobalMixin/.test(text)
+      /registerFuncMixin/.test(text)
     );
   },
   30000,
@@ -276,8 +276,8 @@ out.refusalNamesReason = await page
       )?.textContent ?? "",
   )
   // 'method-extent' is the TYPE refusal's reason (OVERRIDE has no token to
-  // verify); the family refusal says what it anchors to instead.
-  .then((t) => /method-extent/.test(t) && /module scope/.test(t));
+  // verify); the spec-less call says what it is missing.
+  .then((t) => /method-extent/.test(t) && /no spec object/.test(t));
 // Still loaded, with the refusals showing. Re-read rather than reuse the earlier
 // value: "loaded THEN refused" is the claim, and a stale read would not prove it.
 out.modSurvivedRefusal = /mods:\s*✓ .*tspml-sample-pml/.test(await sidebarText());
@@ -290,8 +290,8 @@ out.codeAfterRefusalRan = await page.evaluate(() => window.__smokePmlSurvivedMix
 // so its marker must NOT exist yet — a splice that "applied" without a
 // re-served bundle would be the silent-failure mode this whole feature
 // exists to avoid.
-step("check the token-anchored mixin was collected, and has NOT run yet");
-out.mixinCollectedReported = (await sidebarText()).includes("1 source mixin collected");
+step("check the token-anchored mixins were collected, and have NOT run yet");
+out.mixinCollectedReported = (await sidebarText()).includes("3 source mixins collected");
 const frameBeforeReload = await waitForGameFrame(15000);
 out.spliceNotRunBeforeReload = frameBeforeReload
   ? await frameBeforeReload.evaluate(() => (window.__pmlSpliceRan ?? 0) === 0)
@@ -331,8 +331,22 @@ out.spliceReportedApplied = frame2
         const report = w.__tspmlUserMixins;
         if (!report || !Array.isArray(report.mods)) return false;
         const row = report.mods.find((m) => m && m.modId === modId);
-        return !!row && row.declared === 1 && row.applied === 1;
+        // Three declared (string-enum INSERT, numeric-enum INSERT, global
+        // twin REPLACEBETWEEN), three applied on the main surface.
+        return !!row && row.declared === 3 && row.applied === 3;
       }, MOD_ID)
+      .catch(() => false)
+  : false;
+// The SECOND marker, from the numeric-enum splice — its code path (enum
+// mapping) is distinct from the first, so both markers together prove the
+// dialect conversion carried, not just one lucky string.
+out.splice2Ran = frame2
+  ? await frame2
+      .waitForFunction(() => (window.__pmlSpliceRan2 ?? 0) === 1, undefined, {
+        timeout: 30000,
+        polling: 400,
+      })
+      .then(() => true)
       .catch(() => false)
   : false;
 // Diagnostic detail (not part of PASS): what the second boot actually had —
@@ -409,6 +423,7 @@ const PASS =
   out.spliceNotRunBeforeReload === true &&
   out.modLoadedAfterReload === true &&
   out.spliceRan === true &&
+  out.splice2Ran === true &&
   out.spliceReportedApplied === true &&
   out.storageCleared === true;
 

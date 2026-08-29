@@ -3021,3 +3021,68 @@ last script edit. `smoke:registry` PASS with leg 2d (version chip narrows to
 eight, keeps the range entry, restores on All); screenshot review done (four
 labelled rows: loader / category / version / people, versions newest-first).
 Repo-wide `pnpm -r test`: **1,341 green**.
+
+## 2026-08-28 (evening) — the three real mods that didn't work, fixed ✅
+
+Owner, with a diagnostic log: "4 mods 1 tspml works 3 pml dont". The log named
+the three mods and their three refusals — and each refusal was a different real
+call shape the collector had never met. All three mods' sources were fetched
+from the CDN and read; all three now carry.
+
+### What the log said, and what it meant
+
+- **3decspeed** — `registerClassMixin (We.prototype.update) not applied — the
+  mixin spec has no type`. The spec HAS a type; it is a NUMBER. PML's real
+  `MixinType` (PolyTypes.js, fetched and read) is a **numeric enum** —
+  INSERT=3, REPLACEBETWEEN=5 — and every mod that imports PolyTypes.js by its
+  absolute CDN URL (all of them; the import rewrite deliberately does not
+  redirect it) puts that number in `type`. The collector demanded a string.
+- **husplits** — `registerFuncMixin (gs) not applied`, refused by FAMILY. Its
+  call is `(name, {type, token, func})`: token-anchored like any class mixin.
+- **noitalics** — `registerGlobalMixin not applied`, refused by FAMILY. Its
+  call is a LONE object spec — `registerGlobalMixin({type, tokenStart, …})`.
+
+### The design correction: family is a targeting hint, not a barrier
+
+PML's mixin families exist to tell PML where to LOOK (a class, a module-scoped
+function, a global, a chunk, the worker). Our exactly-once token rule subsumes
+looking: a token that matches once in a surface needs no help being found, and
+one that matches nowhere refuses with the count. So **every source-op family
+collects** now, and the parser is **bilingual** — string enum (our shim) and
+PML's numeric enum, mapped from the values read out of PolyTypes.js. What still
+refuses, each by name: the numeric-enum method-extent values (0/1/2), the
+class-wide values (4/7/8 — they apply at every site at once, which an
+exactly-once anchor cannot verify), the two wasm families (unchanged gate), and
+calls with no spec object at all.
+
+### The trap the fix's own test run exposed
+
+Re-running the browser smoke after the fixture grew its numeric-enum splice
+came back `transform-threw` — the new token sat in the entry's
+**comma-expression sequence**, and a `;`-statement func there is a syntax
+error. Fixing it exposed something worse about the PREVIOUS run: a bare
+parenthesized func in that context PARSES — as a call of the preceding call's
+result — sets its marker, then THROWS, truncating the game's boot tail after
+the marker. #133's "passing" splice had likely been breaking the entry's final
+statements while looking green. The discipline, now written into the fixture's
+comments: in comma-sequence context a func needs a **leading comma**; in block
+context a `;`-statement; and a parenthesized func without its comma is the
+one spelling that parses AND lies.
+
+Also: the numeric splice's first token (a verifier catch-path error line)
+applied but never RAN — that code is lazy. A marker proves execution only if
+the token's site executes at bundle eval; the fixture's numeric token is now
+the animation-loop registration, which does.
+
+### Proof
+
+`smoke:pml` PASS with **3/3 splices applied** — the string-enum class insert,
+the numeric-enum class insert (marker `__pmlSpliceRan2` fires in the game
+frame), and the lone-object global twin-anchor REPLACEBETWEEN. Portal **734
+tests** (728 → 734; the shim's family tests flipped from refusal to
+collection, the parse tests grew the numeric enum and the three CDN call
+shapes). Three catalog summaries that still said mixins "are refused and
+reported" now say they carry after one restart — the catalog must not tell a
+player a working mod is dead. (A scare along the way: 52 "failures" that were
+the suite invoked from the wrong directory after a `cd` — from the portal,
+734/734.)
