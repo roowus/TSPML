@@ -60,10 +60,10 @@ function runtime(over: Partial<Parameters<typeof createPmlRuntime>[1]> = {}) {
   return { ...f, ...built, pml: built.runtime.ActivePolyModLoader };
 }
 
-/** Every mixin family PML exposes. `registerClassMixin` is the ONE family
- *  that carries (its token-anchored types are collected — see the shim
- *  header), so it has its own describe below and is excluded from the
- *  family-refusal assertions. */
+/** Every mixin family PML exposes. The SOURCE-OP families all collect (see
+ *  the shim header — family is PML's targeting hint, the exactly-once token
+ *  rule subsumes it), so what remains refused are the two WASM families and
+ *  the unanchorable call shapes, each covered in its own describe below. */
 const MIXIN_METHODS = [
   'registerFuncMixin',
   'registerClassWideMixin',
@@ -71,7 +71,6 @@ const MIXIN_METHODS = [
   'registerChunkMixin',
   'registerSimWorkerMixin',
   'registerSimWorkerFuncMixin',
-  'registerPhysicsLibMixin',
 ] as const;
 
 /** The one family that carries, in the object-spec form real PML mods ship
@@ -147,14 +146,28 @@ describe('mixins are refused per call, never thrown', () => {
     expect(registered).toHaveLength(1);
   });
 
-  it.each(MIXIN_METHODS)('%s explains the MECHANISM and the port path', (method) => {
-    // "Not supported" would be useless. The author needs to know why the two
-    // designs cannot meet, and what to write instead.
+  it.each(MIXIN_METHODS)('%s refuses a spec-less call with a named reason', (method) => {
+    // The families all COLLECT good specs; what they refuse is a call with no
+    // spec object at all, and the refusal must say that rather than a generic
+    // "not supported" the author cannot act on.
     const { pml, report } = runtime();
     (pml[method] as (...a: unknown[]) => unknown)('uf', 'prototype');
-    const reason = report.refusals[0]?.reason ?? '';
-    expect(reason).toMatch(/eval|string-splice/);
-    expect(reason).toMatch(/mixins\.json/);
+    expect(report.mixins).toHaveLength(0);
+    expect(report.refusals[0]?.reason).toMatch(/no spec object/);
+  });
+
+  it.each(MIXIN_METHODS)('%s COLLECTS a token-anchored spec from any family', (method) => {
+    // Family is PML's targeting hint; the exactly-once token rule is ours and
+    // subsumes it. husplits (func, name + spec) and noitalics (global, lone
+    // spec) are real CDN mods riding exactly this.
+    const { pml, report } = runtime();
+    (pml[method] as (...a: unknown[]) => unknown)(
+      'uf.prototype',
+      { type: 3, token: 'e.car.setCarState(t, !1)', func: '(x)' },
+    );
+    expect(report.refusals).toHaveLength(0);
+    expect(report.mixins).toHaveLength(1);
+    expect(report.mixins[0]?.type).toBe('INSERT');
   });
 
   it('registerClassMixin refuses an UNSUPPORTED TYPE with the type-gate reason', () => {

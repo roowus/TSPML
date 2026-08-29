@@ -219,14 +219,49 @@ describe('parsePmlMixinSpec', () => {
         type === 'REPLACEBETWEEN' || type === 'REMOVEBETWEEN'
           ? { type, tokenStart: 'a', tokenEnd: 'b', ...(type === 'REPLACEBETWEEN' ? { func: 'c' } : {}) }
           : { type, token: 'a', func: 'b' };
-      const r = parsePmlMixinSpec('ws.prototype', 'update', spec);
+      const r = parsePmlMixinSpec(['ws.prototype', 'update', spec]);
       expect(r.ok, type).toBe(true);
       if (r.ok) expect(r.patch.op).toBe('pml-splice');
     }
   });
 
+  it('maps PML\'s NUMERIC enum — what every mod importing PolyTypes.js ships', () => {
+    // The real enum: INSERT=3, REPLACEBETWEEN=5, REMOVEBETWEEN=6 (PolyTypes.js
+    // on the CDN). 3decspeed arrives with `type: 5` and was refused as
+    // "no type" before the collector was bilingual; this pins the fix.
+    expect(parsePmlMixinSpec(['We.prototype', 'update', { type: 3, token: 'a', func: 'b' }]).ok).toBe(true);
+    expect(parsePmlMixinSpec(['a', { type: 5, tokenStart: 'a', tokenEnd: 'b', func: 'c' }]).ok).toBe(true);
+    expect(parsePmlMixinSpec(['a', { type: 6, tokenStart: 'a', tokenEnd: 'b' }]).ok).toBe(true);
+    // Numeric method-extent and class-wide values refuse by NAME after mapping.
+    const head = parsePmlMixinSpec(['a', { type: 0, func: 'x' }]);
+    expect(head.ok).toBe(false);
+    if (!head.ok) expect(head.reason).toContain('HEAD');
+    const classIns = parsePmlMixinSpec(['a', { type: 8, token: 't', func: 'f' }]);
+    expect(classIns.ok).toBe(false);
+    if (!classIns.ok) expect(classIns.reason).toContain('CLASSINSERT');
+    // An integer outside the enum refuses as unreadable, naming what arrived.
+    const alien = parsePmlMixinSpec(['a', { type: 42, token: 't' }]);
+    expect(alien.ok).toBe(false);
+    if (!alien.ok) expect(alien.reason).toContain('42');
+  });
+
+  it('accepts the three call shapes the CDN mods actually ship', () => {
+    // 3decspeed: class family, two strings + spec.
+    expect(
+      parsePmlMixinSpec(['We.prototype', 'update', { type: 5, tokenStart: 'a', tokenEnd: 'a', func: 'c' }]).ok,
+    ).toBe(true);
+    // husplits: func family, one name + spec.
+    const hu = parsePmlMixinSpec(['gs', { type: 3, token: 'a', func: 'b' }]);
+    expect(hu.ok).toBe(true);
+    if (hu.ok) expect(hu.patch.classRef).toBe('gs');
+    // noitalics: global family, LONE spec object.
+    const noit = parsePmlMixinSpec([{ type: 5, tokenStart: 'a', tokenEnd: 'a', func: 'c' }]);
+    expect(noit.ok).toBe(true);
+    if (noit.ok) expect(noit.patch.classRef).toBeUndefined();
+  });
+
   it('refuses the method-extent types with a reason that names the type', () => {
-    const r = parsePmlMixinSpec('ws.prototype', 'update', { type: 'OVERRIDE', func: 'x' });
+    const r = parsePmlMixinSpec(['ws.prototype', 'update', { type: 'OVERRIDE', func: 'x' }]);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toContain('OVERRIDE');
@@ -235,22 +270,22 @@ describe('parsePmlMixinSpec', () => {
   });
 
   it('refuses the physics patch types with the wasm-gate reason', () => {
-    const r = parsePmlMixinSpec('phys', 'x', { type: 'PATCH_F32', token: 'a', func: 'b' });
+    const r = parsePmlMixinSpec(['phys', 'x', { type: 'PATCH_F32', token: 'a', func: 'b' }]);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('wasm gate');
   });
 
   it('refuses an incomplete spec AT COLLECT TIME, not one boot later', () => {
-    expect(parsePmlMixinSpec('a', 'b', { type: 'INSERT', func: 'x' }).ok).toBe(false);
-    expect(parsePmlMixinSpec('a', 'b', { type: 'REPLACEBETWEEN', tokenStart: 'x', func: 'y' }).ok).toBe(false);
-    expect(parsePmlMixinSpec('a', 'b', 'not an object').ok).toBe(false);
-    expect(parsePmlMixinSpec('a', 'b', { nope: 1 }).ok).toBe(false);
+    expect(parsePmlMixinSpec(['a', 'b', { type: 'INSERT', func: 'x' }]).ok).toBe(false);
+    expect(parsePmlMixinSpec(['a', 'b', { type: 'REPLACEBETWEEN', tokenStart: 'x', func: 'y' }]).ok).toBe(false);
+    expect(parsePmlMixinSpec(['a', 'b']).ok).toBe(false);
+    expect(parsePmlMixinSpec([{ nope: 1 }]).ok).toBe(false);
   });
 
   it('drops non-string fields rather than coercing them', () => {
     // A spec is persisted and re-applied across launches; only plain values
     // survive that trip, so only plain values are accepted at the gate.
-    const r = parsePmlMixinSpec('a', 'b', { type: 'INSERT', token: 'x', func: () => 1 });
+    const r = parsePmlMixinSpec(['a', 'b', { type: 'INSERT', token: 'x', func: () => 1 }]);
     expect(r.ok).toBe(true); // a non-string func is simply absent
     if (r.ok) expect(r.patch.func).toBeUndefined();
   });
