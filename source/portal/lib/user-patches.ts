@@ -200,7 +200,16 @@ export function buildUserPatchPlan(mods: readonly UserModRecord[]): {
     // not a pasted mixins.json — either can be absent. One set per mod, both
     // kinds together, because the caps and the report are per mod, not per
     // patch kind.
-    const patches = [...(mod.mixins ?? []), ...(mod.pmlMixins ?? [])];
+    //
+    // Array.isArray rather than `?? []`: localStorage is hand-editable and
+    // has survived many deploys — a truthy NON-array here (an object, a
+    // string) would throw in the spread below, and a throw in plan parking
+    // used to hang the boot overlay forever. Non-array shapes read as
+    // "nothing to carry", which is the truth of them.
+    const patches = [
+      ...(Array.isArray(mod.mixins) ? mod.mixins : []),
+      ...(Array.isArray(mod.pmlMixins) ? mod.pmlMixins : []),
+    ];
     if (!mod.enabled || patches.length === 0) continue;
     const modId = userModId(mod);
     if (modId === null) continue; // id-less mods pre-fail in the loader anyway
