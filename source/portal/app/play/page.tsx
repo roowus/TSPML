@@ -537,61 +537,76 @@ export default function PlayPage(): ReactElement {
     // `stored` stays the thing shown and persisted.
     const running = runningMods();
     let cancelled = false;
-    planChainRef.current = planChainRef.current.then(async () => {
-      const r = await parkUserPatchPlan(running);
-      if (cancelled) return;
-      parkedFingerprintRef.current = r.fingerprint;
-      servedFingerprintRef.current = r.fingerprint; // the first frame loads THIS plan
-      planSetsRef.current = r.sets;
-      setMixinOverCap(r.overCap);
-      setMixinEnvSkipped(r.envSkipped);
-      if (!r.cacheOk) {
-        setMixinNotice('Storage for mixin plans is unavailable — user-mod mixins will not be applied this session.');
-      }
-      // #43: the physics plan is parked in the SAME step, before `planReady`
-      // releases the iframe. The wasm is fetched well after the bundle, so this
-      // has slack the mixin plan does not — but gating both on one flag keeps
-      // "the plan is parked" a single fact rather than two racing ones.
-      const p = await parkPhysicsPlan(running);
-      if (cancelled) return;
-      parkedPhysicsRef.current = p.fingerprint;
-      servedPhysicsRef.current = p.fingerprint;
-      setPhysicsExcluded(p.excluded);
-      if (!p.cacheOk) {
-        setPhysicsNotice('Storage for physics plans is unavailable — physics patches will not be applied this session.');
-      }
-      setPlanReady(true);
-      log(
-        r.sets > 0
-          ? `mixin plan parked (${r.sets} mod${r.sets === 1 ? '' : 's'} with patches)`
-          : 'mixin plan parked (empty — no user mixins)',
-      );
-      log(
-        p.patches > 0
-          ? `physics plan parked (${p.patches} patch${p.patches === 1 ? '' : 'es'})`
-          : 'physics plan parked (empty — no physics patches)',
-      );
-      // Prewarm the transformed bundle: the serverless babel pass costs
-      // seconds, and without this it only starts AFTER the SW dance + iframe
-      // mount + game HTML parse. Firing the GET now runs it in parallel —
-      // the server memoizes the in-flight promise, so the game's real request
-      // piggybacks on this one instead of recomputing. Only when no mixin
-      // plan is parked: with a plan the SW replays bundle GETs as per-request
-      // POST composes (#62), so this would double the server work for an
-      // output that gets discarded, while the base memo it warms is not the
-      // path the game will take. The body is drained (not cancelled): an
-      // aborted body shows up as a failed request in devtools/smokes, and the
-      // extra parallel download is trivial next to the transform time saved.
-      if (r.sets === 0) {
-        log('prewarming the game bundle…');
-        void fetch(`/api/proxy/main.bundle.js?version=${GAME_VERSION}`, { credentials: 'omit' })
-          .then(async (res) => {
-            await res.arrayBuffer();
-            log(`game bundle prewarmed (server cache: ${res.headers.get('x-tspml-bundle-cache') ?? 'n/a'})`);
-          })
-          .catch(() => log('game bundle prewarm failed (non-fatal)'));
-      }
-    });
+    planChainRef.current = planChainRef.current
+      .then(async () => {
+        const r = await parkUserPatchPlan(running);
+        if (cancelled) return;
+        parkedFingerprintRef.current = r.fingerprint;
+        servedFingerprintRef.current = r.fingerprint; // the first frame loads THIS plan
+        planSetsRef.current = r.sets;
+        setMixinOverCap(r.overCap);
+        setMixinEnvSkipped(r.envSkipped);
+        if (!r.cacheOk) {
+          setMixinNotice('Storage for mixin plans is unavailable — user-mod mixins will not be applied this session.');
+        }
+        // #43: the physics plan is parked in the SAME step, before `planReady`
+        // releases the iframe. The wasm is fetched well after the bundle, so this
+        // has slack the mixin plan does not — but gating both on one flag keeps
+        // "the plan is parked" a single fact rather than two racing ones.
+        const p = await parkPhysicsPlan(running);
+        if (cancelled) return;
+        parkedPhysicsRef.current = p.fingerprint;
+        servedPhysicsRef.current = p.fingerprint;
+        setPhysicsExcluded(p.excluded);
+        if (!p.cacheOk) {
+          setPhysicsNotice('Storage for physics plans is unavailable — physics patches will not be applied this session.');
+        }
+        setPlanReady(true);
+        log(
+          r.sets > 0
+            ? `mixin plan parked (${r.sets} mod${r.sets === 1 ? '' : 's'} with patches)`
+            : 'mixin plan parked (empty — no user mixins)',
+        );
+        log(
+          p.patches > 0
+            ? `physics plan parked (${p.patches} patch${p.patches === 1 ? '' : 's'})`
+            : 'physics plan parked (empty — no physics patches)',
+        );
+        // Prewarm the transformed bundle: the serverless babel pass costs
+        // seconds, and without this it only starts AFTER the SW dance + iframe
+        // mount + game HTML parse. Firing the GET now runs it in parallel —
+        // the server memoizes the in-flight promise, so the game's real request
+        // piggybacks on this one instead of recomputing. Only when no mixin
+        // plan is parked: with a plan the SW replays bundle GETs as per-request
+        // POST composes (#62), so this would double the server work for an
+        // output that gets discarded, while the base memo it warms is not the
+        // path the game will take. The body is drained (not cancelled): an
+        // aborted body shows up as a failed request in devtools/smokes, and the
+        // extra parallel download is trivial next to the transform time saved.
+        if (r.sets === 0) {
+          log('prewarming the game bundle…');
+          void fetch(`/api/proxy/main.bundle.js?version=${GAME_VERSION}`, { credentials: 'omit' })
+            .then(async (res) => {
+              await res.arrayBuffer();
+              log(`game bundle prewarmed (server cache: ${res.headers.get('x-tspml-bundle-cache') ?? 'n/a'})`);
+            })
+            .catch(() => log('game bundle prewarm failed (non-fatal)'));
+        }
+      })
+      // A park failure must NEVER hang the launcher. `planReady` gates the
+      // iframe mount, and before this catch a rejection anywhere above (a
+      // corrupted stored record, a Cache API failure mid-write) left the boot
+      // overlay stuck on "Loading TSPML…" forever with nothing in the log —
+      // the launcher bricked by its own diagnostic silence. The degrade is the
+      // same one the route applies to a bad plan: mount the game VANILLA, say
+      // so loudly, and let the player keep playing.
+      .catch((e) => {
+        log(`✗ parking the mod plans failed — mounting the game WITHOUT mod patches: ${(e as Error).message}`);
+        parkedFingerprintRef.current = '';
+        servedFingerprintRef.current = '';
+        planSetsRef.current = 0;
+        setPlanReady(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -790,7 +805,9 @@ export default function PlayPage(): ReactElement {
         const rid = r.manifest.id;
         const entry = collectedMixins.find((e) => e.id === rid);
         if (entry === undefined || typeof rid !== 'string') return r;
-        const existing = r.pmlMixins ?? [];
+        // Array.isArray for the same reason buildUserPatchPlan guards: a
+        // hand-edited or mid-deploy record must never throw in the merge.
+        const existing = Array.isArray(r.pmlMixins) ? r.pmlMixins : [];
         const known = new Set(existing.map((p) => JSON.stringify(p)));
         const fresh = entry.report.mixins.filter((p) => !known.has(JSON.stringify(p)));
         if (fresh.length === 0) return r;

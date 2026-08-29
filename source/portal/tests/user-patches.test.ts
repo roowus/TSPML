@@ -64,6 +64,16 @@ describe('buildUserPatchPlan', () => {
     ]);
   });
 
+  it('reads a non-array mixins/pmlMixins field as nothing, rather than throwing', () => {
+    // localStorage is hand-editable and has survived many deploys; a truthy
+    // non-array here used to throw in the spread and — before the boot chain
+    // grew its catch — hang the launcher on "Loading TSPML…" forever.
+    const junk = { ...record({ id: 'junk', format: 'pml' }), pmlMixins: { nope: 1 } };
+    const junk2 = { ...record({ id: 'junk2' }), mixins: 'not an array' };
+    const { plan } = buildUserPatchPlan([junk, junk2]);
+    expect(plan.sets).toEqual([]);
+  });
+
   it('caps a PML splice by its func exactly as an inject is capped', () => {
     // The payload field differs but the exposure is the same: the func is
     // spliced into the served bundle, so its size is bounded at ADD time.
