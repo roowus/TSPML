@@ -82,13 +82,14 @@ function countOccurrences(haystack: string, needle: string): number {
  * The uniqueness rule differs by shape, and the difference is load-bearing:
  *
  *  - INSERT/REPLACE: the token must occur EXACTLY ONCE in the whole surface.
- *  - REPLACEBETWEEN/REMOVEBETWEEN with DISTINCT anchors: `tokenStart` exactly
- *    once, `tokenEnd` exactly once after it.
+ *  - REPLACEBETWEEN/REMOVEBETWEEN (INCLUSIVE — the anchors go too; see the
+ *    apply branch) with DISTINCT anchors: `tokenStart` exactly once,
+ *    `tokenEnd` exactly once after it.
  *  - With TWIN anchors (`tokenStart === tokenEnd`, which is what real PML mods
- *    ship): one occurrence is the single anchor serving both ends — an EMPTY
- *    span, the func inserted right after it (this is ghosttoggle's actual
- *    shape against the real 0.6.2 bundle); two occurrences splice between
- *    them; three or more are ambiguous and refuse.
+ *    ship): one occurrence means "replace this occurrence outright" — the
+ *    anchor is both ends of a zero-width span (ghosttoggle and noitalics
+ *    against the real 0.6.2 bundle); two occurrences replace first-through-
+ *    second; three or more are ambiguous and refuse.
  */
 export function applyPmlSplice(source: string, patch: PmlSplicePatch): SpliceResult {
   const where = patch.classRef === undefined ? '' : `${patch.classRef}.${patch.method ?? ''} `;
@@ -134,12 +135,18 @@ export function applyPmlSplice(source: string, patch: PmlSplicePatch): SpliceRes
     };
   }
 
-  // REPLACEBETWEEN / REMOVEBETWEEN. The twin shape is not an edge case — it
-  // is the COMMON one: ghosttoggle, a real mod on PML's CDN, passes the same
-  // string as both anchors, and in the real 0.6.2 bundle that string occurs
-  // exactly ONCE, so the single occurrence serves as both anchors and the
-  // span is EMPTY — the func lands immediately after it. A twin with two
-  // occurrences splices between them; three or more is ambiguous and refuses.
+  // REPLACEBETWEEN / REMOVEBETWEEN — INCLUSIVE, per PolyTypes.js's own doc
+  // comments ("Replace code between 2 given tokens. Inclusive."): the anchors
+  // are replaced along with the span between them. Every real mod's func
+  // confirms it — carswitcher replaces `"models/car.glb"` (the whole quoted
+  // literal, quotes included) with `window.localStorage.MyCar || …`, and
+  // keeping the anchor would splice two adjacent expressions into a syntax
+  // error the re-parse gate rightly rejects.
+  //
+  // The twin shape (tokenStart === tokenEnd) is the common one, and with ONE
+  // occurrence it means "replace this occurrence outright": the anchor is
+  // both ends of a zero-width span. Two occurrences replace first-through-
+  // second; three or more are ambiguous and refuse.
   const { tokenStart, tokenEnd } = patch;
   if (typeof tokenStart !== 'string' || tokenStart.length === 0) {
     return { ok: false, reason: 'malformed-mixin', detail: 'no tokenStart to anchor the range on' };
@@ -178,9 +185,9 @@ export function applyPmlSplice(source: string, patch: PmlSplicePatch): SpliceRes
   let spanEnd: number;
   if (twin) {
     // Search past the start occurrence; no further hit means the one
-    // occurrence IS both anchors — an empty span.
+    // occurrence IS the span (both anchors at once).
     const second = source.indexOf(tokenEnd, startAt + 1);
-    spanEnd = second === -1 ? afterStart : Math.max(second, afterStart);
+    spanEnd = second === -1 ? afterStart : second + tokenEnd.length;
   } else {
     const endFirst = source.indexOf(tokenEnd, afterStart);
     if (endFirst === -1) {
@@ -198,15 +205,15 @@ export function applyPmlSplice(source: string, patch: PmlSplicePatch): SpliceRes
         detail: `range end anchor matches ${endCountAfterStart} times after the start anchor (it must match exactly once)`,
       };
     }
-    spanEnd = endFirst;
+    spanEnd = endFirst + tokenEnd.length;
   }
   const replacement = patch.type === 'REPLACEBETWEEN' ? patch.func! : '';
   const verb = patch.type === 'REPLACEBETWEEN' ? 'replaced' : 'removed';
-  const shape = spanEnd === afterStart ? ' (an empty span, inserted at the single anchor)' : '';
+  const shape = spanEnd - startAt === tokenStart.length ? ' (the single anchor itself)' : '';
   return {
     ok: true,
-    source: `${source.slice(0, afterStart)}${replacement}${source.slice(spanEnd)}`,
-    detail: `${verb} ${spanEnd - afterStart} chars between the anchors${shape} in ${where.trim() || 'this file'}`,
+    source: `${source.slice(0, startAt)}${replacement}${source.slice(spanEnd)}`,
+    detail: `${verb} ${spanEnd - startAt} chars including the anchors${shape} in ${where.trim() || 'this file'}`,
   };
 }
 

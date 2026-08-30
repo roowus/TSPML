@@ -67,9 +67,10 @@ describe('buildUserPatchPlan', () => {
   it('reads a non-array mixins/pmlMixins field as nothing, rather than throwing', () => {
     // localStorage is hand-editable and has survived many deploys; a truthy
     // non-array here used to throw in the spread and — before the boot chain
-    // grew its catch — hang the launcher on "Loading TSPML…" forever.
-    const junk = { ...record({ id: 'junk', format: 'pml' }), pmlMixins: { nope: 1 } };
-    const junk2 = { ...record({ id: 'junk2' }), mixins: 'not an array' };
+    // grew its catch — hang the launcher on "Loading TSPML…" forever. The
+    // casts ARE the malformed shapes under test.
+    const junk = { ...record({ id: 'junk', format: 'pml' }), pmlMixins: { nope: 1 } } as unknown as UserModRecord;
+    const junk2 = { ...record({ id: 'junk2' }), mixins: 'not an array' } as unknown as UserModRecord;
     const { plan } = buildUserPatchPlan([junk, junk2]);
     expect(plan.sets).toEqual([]);
   });
