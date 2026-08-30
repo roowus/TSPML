@@ -83,17 +83,28 @@ export async function fetchText(
 ): Promise<{ ok: true; text: string; contentType: string } | { ok: false; error: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), IMPORT_LIMITS.timeoutMs);
-  let res: Response;
   try {
     // 'no-cache' beats the BROWSER's HTTP cache (a plain re-fetch would be
     // satisfied locally for raw.githubusercontent's max-age=300); the `bust`
     // param beats the host CDN's cache — see ImportOptions.fresh.
-    res = await fetchImpl(withBust(url, bust), {
+    const res = await fetchImpl(withBust(url, bust), {
       signal: ctrl.signal,
       credentials: 'omit',
       redirect: 'follow',
       cache: bust === null ? 'default' : 'no-cache',
     });
+    if (!res.ok) return fail(`${what}: HTTP ${res.status} from ${new URL(url).hostname}`);
+    // The BODY read stays inside the timer on purpose. Clearing it right
+    // after the headers arrived (the old shape) left a stalled body —
+    // headers delivered, stream never finishing — hanging the import
+    // FOREVER, with no error and no row: the Add form silently wedged on
+    // one bad CDN connection. The signal aborts a real stream's body too,
+    // so the timeout covers the whole exchange.
+    const text = await res.text();
+    if (text.length > cap) {
+      return fail(`${what}: file is ${text.length.toLocaleString()} characters — the import limit is ${cap.toLocaleString()}`);
+    }
+    return { ok: true, text, contentType: res.headers.get('content-type') ?? '' };
   } catch (e) {
     const detail = e instanceof Error && e.name === 'AbortError' ? 'timed out' : (e as Error).message;
     return fail(
@@ -102,10 +113,4 @@ export async function fetchText(
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) return fail(`${what}: HTTP ${res.status} from ${new URL(url).hostname}`);
-  const text = await res.text();
-  if (text.length > cap) {
-    return fail(`${what}: file is ${text.length.toLocaleString()} characters — the import limit is ${cap.toLocaleString()}`);
-  }
-  return { ok: true, text, contentType: res.headers.get('content-type') ?? '' };
 }

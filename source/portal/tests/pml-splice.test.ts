@@ -46,8 +46,9 @@ describe('applyPmlSplice', () => {
     }
   });
 
-  it('REPLACEBETWEEN splices between two occurrences of the SAME token', () => {
-    // The twin shape with TWO occurrences: the func replaces the span between.
+  it('REPLACEBETWEEN with twin anchors over TWO occurrences replaces through both', () => {
+    // The twin shape with TWO occurrences: first-through-second, anchors
+    // included, replaced by the func — PML's semantics are inclusive.
     const r = applyPmlSplice(TWIN_SOURCE, {
       op: 'pml-splice',
       type: 'REPLACEBETWEEN',
@@ -59,20 +60,17 @@ describe('applyPmlSplice', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      // Both anchors kept, the span between them (here ";if(") replaced by the
-      // func — the anchors are part of the surrounding expression, not the edit.
       expect(r.source).toBe(
-        'class ws{update(e){const t=e.car.getTime().numberOfFrames0e.car.getTime().numberOfFrames>0){e.car.setCarState(t,!1)}return t}}',
+        'class ws{update(e){const t=0>0){e.car.setCarState(t,!1)}return t}}',
       );
     }
   });
 
-  it('REPLACEBETWEEN with twin anchors over ONE occurrence inserts at it', () => {
+  it('REPLACEBETWEEN with twin anchors over ONE occurrence replaces it outright', () => {
     // ghosttoggle's REAL shape against the real 0.6.2 bundle: the anchor
-    // string occurs exactly once in the whole file, so that single occurrence
-    // serves as both ends and the span is EMPTY — the func lands immediately
-    // after the token, which is how the mod turns a direct frame read into a
-    // conditional one. The fragment below is the bundle's actual hit.
+    // occurs exactly once, so the single occurrence IS the span and the func
+    // replaces it — turning a direct frame read into a conditional one. The
+    // fragment below is the bundle's actual hit.
     const real = 'for(let n=e.car.getTime().numberOfFrames+1;n<=t;n++)';
     const r = applyPmlSplice(real, {
       op: 'pml-splice',
@@ -83,9 +81,24 @@ describe('applyPmlSplice', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.source).toBe(
-        'for(let n=e.car.getTime().numberOfFrames(ghostOn?e.car.getTime().numberOfFrames:-1)+1;n<=t;n++)',
-      );
+      expect(r.source).toBe('for(let n=(ghostOn?e.car.getTime().numberOfFrames:-1)+1;n<=t;n++)');
+    }
+  });
+
+  it('REPLACEBETWEEN is INCLUSIVE over distinct anchors too — carswitcher\'s shape', () => {
+    // The mod that proved the semantics: `"models/car.glb"` (a quoted
+    // literal) replaced by a localStorage-driven expression. Keeping the
+    // anchor would splice two adjacent expressions into a syntax error.
+    const r = applyPmlSplice('const car = "models/car.glb"; load(car);', {
+      op: 'pml-splice',
+      type: 'REPLACEBETWEEN',
+      tokenStart: '"models/car.glb"',
+      tokenEnd: '"models/car.glb"',
+      func: 'window.localStorage.MyCar || "models/car.glb"',
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.source).toBe('const car = window.localStorage.MyCar || "models/car.glb"; load(car);');
     }
   });
 
@@ -101,7 +114,7 @@ describe('applyPmlSplice', () => {
     if (!r.ok) expect(r.reason).toBe('token-ambiguous');
   });
 
-  it('REMOVEBETWEEN deletes the span, keeping both anchors', () => {
+  it('REMOVEBETWEEN deletes the span AND both anchors (inclusive)', () => {
     const r = applyPmlSplice('a TOKEN middle TOKEN b', {
       op: 'pml-splice',
       type: 'REMOVEBETWEEN',
@@ -109,7 +122,7 @@ describe('applyPmlSplice', () => {
       tokenEnd: 'TOKEN',
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.source).toBe('a TOKENTOKEN b');
+    if (r.ok) expect(r.source).toBe('a  b');
   });
 
   it('refuses a token that appears TWICE (INSERT/REPLACE), with the count', () => {
@@ -168,7 +181,8 @@ describe('applyPmlSplice', () => {
   });
 
   it('an end anchor BEFORE the start does not disqualify the range', () => {
-    // Only ambiguity after the start matters: the range is start→next-end.
+    // Only ambiguity after the start matters: the range is start→next-end,
+    // inclusive of both.
     const r = applyPmlSplice('E x S y E', {
       op: 'pml-splice',
       type: 'REMOVEBETWEEN',
@@ -176,7 +190,7 @@ describe('applyPmlSplice', () => {
       tokenEnd: 'E',
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.source).toBe('E x SE');
+    if (r.ok) expect(r.source).toBe('E x ');
   });
 
   it('refuses the method-extent types this adapter cannot anchor', () => {
