@@ -3086,3 +3086,66 @@ reported" now say they carry after one restart — the catalog must not tell a
 player a working mod is dead. (A scare along the way: 52 "failures" that were
 the suite invoked from the wrong directory after a `cd` — from the portal,
 734/734.)
+
+## 2026-08-30 — inclusive splices, a body-read timeout, and the 20-mod sweep ✅
+
+Owner: "test every pml mod". The sweep (all 20 registry mods, install → boot →
+reload → read the served bundle's own per-mod report) found one real semantics
+bug, one real robustness bug, and one open defect — and produced the first
+per-mod table.
+
+### REPLACEBETWEEN is INCLUSIVE — PolyTypes.js said so all along
+
+The first full-library attempt came back `planStatus: base-failed /
+transform-threw` with carswitcher + pmlcore + husplits installed. Cause:
+**PML's range ops replace the anchors along with the span** (PolyTypes.js's own
+doc comments: "Replace code between 2 given tokens. Inclusive."), and ours kept
+them. carswitcher's twin splice on `"models/car.glb"` (func:
+`window.localStorage.MyCar || "models/car.glb"`) spliced two adjacent
+expressions into a syntax error under the exclusive reading. Every real mod's
+func only makes sense inclusive. With the fix, the same set boots
+`planStatus: applied`, carswitcher's car-model swap is 1/3 (the twin APPLIED;
+the other two anchors genuinely match 0 times on main — one lives in
+`604.bundle.js`, which only transforms when the editor opens it).
+
+### A stalled response body could wedge the Add form forever
+
+`fetchText` cleared its 20 s abort timer as soon as the response HEADERS
+arrived — a body that never finished streaming hung the import promise
+forever, with no error and no row (observed live against PML's CDN). The
+timer now covers the whole exchange, headers through body.
+
+### The open defect: sequential installs stall from the fifth
+
+Reproduced across three harness generations (slug waits, row-growth waits,
+share-link batches): installs 1-4 land cleanly; the fifth and every later
+import stalls — sometimes writing storage without updating the library count
+(ghosttoggle: +5 KB in `tspml.userMods.v1`, count stayed 4), sometimes never
+settling at all — with no error shown. Solo installs of the same mods work
+(ghosttoggle's real id is `mrgtmod`, not its catalog slug — two harness
+generations died waiting for slugs that never existed). NOT quota (115 KB of
+5 MB used). The suspect is the page's import → `updateUserMods` →
+`refreshRunningSet` reload-chain interplay under repeated sequential imports.
+Filed with the full evidence; the per-mod table below covers the four mods
+that install in sequence today plus solo-verified installs.
+
+### The per-mod table (main-surface splice report)
+
+| Mod | Outcome |
+|---|---|
+| carswitcher | 1/3 — the car-model twin APPLIED (inclusive); 2 anchors match 0 on main (one targets 604.bundle.js) |
+| pmlcore | 0/1 — anchor `(0, R.GG)(this, Eh, [], "f");` matches 0 on main |
+| husplits | 0/1 — anchor matches 0 on main (mod drift) |
+| xenon | installs; never LOADS (separate finding — no report row, not in the loaded list) |
+| ghosttoggle | installs solo (`mrgtmod`); its mixins collect (numeric enum) |
+| 3decspeed / noitalics | install solo; mixins collect and apply (verified in earlier runs) |
+| the rest | blocked behind the sequential-install defect |
+
+Every miss is an honest `token-not-found` with the match count — the
+exactly-once rule reporting, not failing silently.
+
+### Proof
+
+Portal **740 tests** (735 → 740: inclusive-range expectations, carswitcher's
+distinct-anchor shape, the fetchText body-timeout suite). `tsc` + smoke
+typecheck clean; `smoke:pml` PASS end-to-end.
