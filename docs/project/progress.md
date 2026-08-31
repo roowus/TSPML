@@ -3149,3 +3149,38 @@ exactly-once rule reporting, not failing silently.
 Portal **740 tests** (735 → 740: inclusive-range expectations, carswitcher's
 distinct-anchor shape, the fetchText body-timeout suite). `tsc` + smoke
 typecheck clean; `smoke:pml` PASS end-to-end.
+
+## 2026-08-30 (later) — retraction: the sequential-install defect was the test harness ✅
+
+The "sequential installs stall from the fifth" defect recorded above was
+**retracted** — the product was fine, and three harness generations were
+filling the wrong box. The mod SHELF's "Filter your mods by id" input is also
+an `input.add-input` inside the same `aside[aria-label="Mods"]`, mounts once
+the shelf has mods, and sits EARLIER in DOM order than the Add popover's URL
+field — so `aside input.add-input` typed the URL into the shelf filter while
+the popover's field stayed empty ("paste a URL first"). The tell that cracked
+it: a document census showing the popover's input EMPTY while the probe's
+read showed a URL. Scoped to `#add-mod-popover input.add-input`, **14 of 20
+mods install sequentially** (installs 1–14 unbroken), and the earlier
+"form remounts" theory was an artifact of a diagnostic that counted renders
+as mounts.
+
+What the corrected sweep actually shows (main-surface report, `applied`):
+
+- **3decspeed and noitalics: ALL-APPLIED** end to end.
+- carswitcher 1/3 — the car-model twin splice APPLIED (inclusive fix); the
+  other anchors honestly `token-not-found` on main.
+- pmlcore 0/1, husplits 0/1 — `token-not-found` (the mods' own anchor drift).
+- **polyproxy 0/1 — `token-ambiguous`, the anchor matches 10 times**: the
+  exactly-once rule refusing what PML would have spliced blind at match #1.
+  The moat working, not a failure.
+- ghosttoggle installs and its mixins carry (its record id is `mrgtmod`, so
+  slug-based report matching mislabels it — the row exists).
+
+Remaining real items, for the next session: a second install boundary at
+#15 of 20 (coolcars onward — six FAILED, cause unmeasured); at 14 installed
+records the next boot loads 7 ok / 7 failed (cinema, f1cars, inputoverlay,
+pmlapi, polydebug, polyprocessing, xenon) — a load-scale failure distinct
+from the install path; and xenon installs but never loads even solo. The
+sweep harness itself (popover-scoped selectors, library-count growth waits)
+is the pattern to keep for the next run.
